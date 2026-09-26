@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Tamtoot</title>
+    <meta
+      name="description"
+      content="Tamtoot — IDE на Flutter для планшетов и десктопа: редактор, git по HTTPS, темы и сессии."
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="grain" aria-hidden="true"></div>
+    <header class="top">
+      <a class="brand" href="./">
+        <span class="mark" aria-hidden="true">t</span>
+        <span class="name">TAMTOOT</span>
+      </a>
+      <nav>
+        <a href="https://gitverse.ru/latin/tamtoot">Репозиторий</a>
+        <a href="https://gitverse.ru/latin/tamtoot/actions">Сборки</a>
+      </nav>
+    </header>
+
+    <main>
+      <section class="hero">
+        <p class="eyebrow">Foundation 0.1</p>
+        <h1>IDE в кармане и на столе</h1>
+        <p class="lede">
+          Flutter‑клиент для правок кода на iPad, Android и Windows: свой
+          редактор, панели, команды и клон репозиториев по HTTPS — без
+          системного git.
+        </p>
+        <div class="cta">
+          <a class="btn primary" href="https://gitverse.ru/latin/tamtoot"
+            >Открыть на GitVerse</a
+          >
+          <a
+            class="btn ghost"
+            href="https://gitverse.ru/latin/tamtoot/actions"
+            >Скачать APK / Windows</a
+          >
+        </div>
+      </section>
+
+      <section class="grid">
+        <article>
+          <h2>Что уже есть</h2>
+          <ul>
+            <li>Редактор с подсветкой Dart и C#, поиск и замена</li>
+            <li>Docking‑панели, темы, горячие клавиши, восстановление сессии</li>
+            <li>Clone / open project по Smart HTTP (GitVerse и другие HTTPS)</li>
+            <li>Ручные CI‑сборки: Android APK и Windows zip</li>
+          </ul>
+        </article>
+        <article>
+          <h2>Где работает</h2>
+          <ul>
+            <li>iOS / iPadOS — правки в песочнице приложения</li>
+            <li>Android — документы через системный picker</li>
+            <li>Windows / macOS / Linux — обычные файлы и папки</li>
+            <li>Web — ограниченно (CORS у git‑хостов)</li>
+          </ul>
+        </article>
+        <article>
+          <h2>Пока не в 0.1</h2>
+          <ul>
+            <li>LSP, компиляторы, отладчик, терминал PTY</li>
+            <li>SSH, marketplace, совместная работа</li>
+            <li>Полный push‑flow на всех платформах ещё дорабатывается</li>
+          </ul>
+        </article>
+      </section>
+
+      <section class="note">
+        <h2>Как взять сборку</h2>
+        <p>
+          В репозитории Actions: вручную запускаете
+          <strong>Build Android APK</strong> или
+          <strong>Build Windows exe</strong>, скачиваете артефакт. Windows —
+          это zip с <code>tamtoot.exe</code> и DLL рядом.
+        </p>
+      </section>
+    </main>
+
+    <footer>
+      <span>latin / tamtoot</span>
+      <a href="https://gitverse.ru/latin/tamtoot">gitverse.ru/latin/tamtoot</a>
+    </footer>
+  </body>
+</html>
