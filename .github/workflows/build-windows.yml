@@ -1,0 +1,50 @@
+name: Build Windows exe
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-windows:
+    name: Build release Windows
+    runs-on: windows-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Enable Windows desktop
+        run: flutter config --enable-windows-desktop
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Build release Windows
+        run: flutter build windows --release
+
+      - name: Prepare artifact
+        shell: pwsh
+        run: |
+          $src = "build\windows\x64\runner\Release"
+          if (-not (Test-Path "$src\tamtoot.exe")) {
+            Write-Error "tamtoot.exe not found in $src"
+            Get-ChildItem -Recurse build\windows | Select-Object FullName
+            exit 1
+          }
+          New-Item -ItemType Directory -Force -Path artifacts | Out-Null
+          Compress-Archive -Path "$src\*" -DestinationPath artifacts\tamtoot-windows.zip -Force
+          Get-ChildItem artifacts | Format-Table Name, Length
+
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: tamtoot-windows
+          path: artifacts/tamtoot-windows.zip
+          if-no-files-found: error
+          retention-days: 14
