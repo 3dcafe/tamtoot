@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../core/filesystem/filesystem.dart';
 import 'local_files.dart';
+import 'workspace_roots.dart';
 
 class PreferenceStore implements PersistenceStore {
   PreferenceStore(this.preferences);
@@ -46,12 +47,23 @@ class PlatformFiles implements FileSystemProvider, FileDialogs {
   }
 
   @override
-  Future<String> read(Uri uri) async =>
-      _opened.containsKey(uri) ? _opened[uri]!.readAsString() : readLocal(uri);
+  Future<String> read(Uri uri) async {
+    if (_opened.containsKey(uri)) return _opened[uri]!.readAsString();
+    final virtual = await WorkspaceRoots.readText(uri);
+    if (virtual != null) return virtual;
+    return readLocal(uri);
+  }
+
   @override
   Future<void> write(Uri uri, String text) => writeLocal(uri, text);
   @override
-  Future<List<FileEntry>> list(Uri directory) => listLocal(directory);
+  Future<List<FileEntry>> list(Uri directory) async {
+    if (WorkspaceRoots.storeFor(directory) != null) {
+      return WorkspaceRoots.listEntries(directory);
+    }
+    return listLocal(directory);
+  }
+
   @override
   Future<Uri?> openWorkspace() async {
     if (!supportsDirectories) {

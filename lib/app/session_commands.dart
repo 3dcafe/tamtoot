@@ -11,6 +11,7 @@ abstract interface class PresentationActions {
   Future<void> showCommands();
   Future<void> showSettings();
   Future<void> showExtensions();
+  Future<void> showCloneRepository();
 }
 
 void registerSessionCommands(IdeSession s, PresentationActions ui) {
@@ -19,12 +20,14 @@ void registerSessionCommands(IdeSession s, PresentationActions ui) {
     String title,
     dynamic Function(Object?) action, {
     bool Function()? enabled,
-  }) => s.commands.register(
+    bool Function()? visible,
+  }) => s.commands.registerOrReplace(
     CommandDescriptor(
       id: id,
       title: title,
       category: id.split('.').first,
       enabled: enabled,
+      visible: visible,
       handler: (arg) async {
         final result = await action(arg);
         s.changed();
@@ -73,18 +76,20 @@ void registerSessionCommands(IdeSession s, PresentationActions ui) {
     (_) async {
       final root = await s.documents.dialogs.openWorkspace();
       if (root == null) return;
-      s.entries = await s.documents.files.list(root);
-      s.workspaceRoot = root;
-      s.recentWorkspaces
-        ..remove(root.toString())
-        ..insert(0, root.toString());
-      if (s.recentWorkspaces.length > 10) s.recentWorkspaces.removeLast();
+      await s.openWorkspaceFolder(root);
     },
     enabled: () => s.documents.dialogs.supportsDirectories,
+    visible: () => s.documents.dialogs.supportsDirectories,
+  );
+  add(
+    'git.clone',
+    'Clone repository…',
+    (_) => ui.showCloneRepository(),
+    enabled: () => s.git.available,
+    visible: () => s.git.available,
   );
   add('workspace.browse', 'Browse folder', (arg) async {
-    s.entries = await s.documents.files.list(arg as Uri);
-    s.workspaceRoot = arg;
+    await s.openWorkspaceFolder(arg as Uri);
   });
   add('editor.undo', 'Undo', (_) {
     s.documents.active!.editor.undo();

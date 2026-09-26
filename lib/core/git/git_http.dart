@@ -175,20 +175,16 @@ Uint8List buildUploadPackRequest({
   required Set<String> serverCapabilities,
   List<String> haveHashes = const [],
 }) {
+  // Keep negotiation simple: side-band + ofs-delta only.
+  // `no-done` / multi_ack without a full have/ack loop confuses some hosts.
   final caps = <String>[
-    for (final c in [
-      'multi_ack_detailed',
-      'no-done',
-      'side-band-64k',
-      'ofs-delta',
-    ])
-      if (serverCapabilities.contains(c)) c,
+    if (serverCapabilities.contains('side-band-64k')) 'side-band-64k',
+    if (serverCapabilities.contains('ofs-delta')) 'ofs-delta',
     'agent=tamtoot/0.1',
   ];
 
   final out = BytesBuilder(copy: false);
-  final wantLine = 'want $wantHash ${caps.join(' ')}';
-  out.add(PktLine.encodeText(wantLine));
+  out.add(PktLine.encodeText('want $wantHash ${caps.join(' ')}'));
   out.add(PktLine.encodeFlush());
   for (final have in haveHashes) {
     out.add(PktLine.encodeText('have $have'));
@@ -207,30 +203,24 @@ Uint8List extractPackFromUploadResponse(List<int> body) {
     if (pkt.isEmpty) continue;
     // ACK/NAK lines are text without sideband before pack starts.
     if (pkt.length >= 3 && pkt[0] == 0x4e && pkt[1] == 0x41 && pkt[2] == 0x4b) {
-      // NAK
-      continue;
+      continue; // NAK
     }
     if (pkt.length >= 3 && pkt[0] == 0x41 && pkt[1] == 0x43 && pkt[2] == 0x4b) {
-      // ACK ...
-      continue;
+      continue; // ACK
     }
-    // side-band: first byte is band id
     final band = pkt[0];
-    final data = pkt.sublist(1);
     if (band == 1) {
-      pack.add(data);
+      pack.add(pkt.sublist(1));
     } else if (band == 2) {
-      // progress — ignore
+      // progress
     } else if (band == 3) {
-      throw GitException(utf8.decode(data));
+      throw GitException(utf8.decode(pkt.sublist(1)));
     } else if (pkt.length >= 4 &&
         pkt[0] == 0x50 &&
         pkt[1] == 0x41 &&
         pkt[2] == 0x43 &&
         pkt[3] == 0x4b) {
-      // Pack without side-band
       pack.add(pkt);
-      // rest of body may be continuous pack — rare; append remaining
       while (true) {
         final more = reader.next();
         if (more == null || more.isEmpty) break;
@@ -240,10 +230,23 @@ Uint8List extractPackFromUploadResponse(List<int> body) {
     }
   }
   final bytes = pack.toBytes();
-  if (bytes.length < 32) {
+  final start = _indexOfPackMagic(bytes);
+  if (start < 0 || bytes.length - start < 32) {
     throw GitException('upload-pack returned no pack data');
   }
-  return bytes;
+  return Uint8List.sublistView(bytes, start);
+}
+
+int _indexOfPackMagic(List<int> bytes) {
+  for (var i = 0; i + 3 < bytes.length; i++) {
+    if (bytes[i] == 0x50 &&
+        bytes[i + 1] == 0x41 &&
+        bytes[i + 2] == 0x43 &&
+        bytes[i + 3] == 0x4b) {
+      return i;
+    }
+  }
+  return -1;
 }
 
 Uint8List buildReceivePackRequest({

@@ -22,9 +22,8 @@ class _IdeShellState extends ConsumerState<IdeShell> {
   void initState() {
     super.initState();
     session = ref.read(sessionProvider);
-    if (!session.commands.contains('file.open')) {
-      registerSessionCommands(session, ShellActions(() => context, session));
-    }
+    // Always ensure commands exist — hot reload can leave an older set.
+    registerSessionCommands(session, ShellActions(() => context, session));
   }
 
   @override
@@ -46,6 +45,8 @@ class _IdeShellState extends ConsumerState<IdeShell> {
   @override
   Widget build(BuildContext context) {
     ref.watch(sessionChangesProvider);
+    // Safe with registerIfAbsent: picks up newly added commands after hot reload.
+    registerSessionCommands(session, ShellActions(() => context, session));
     return Focus(
       onKeyEvent: (_, event) {
         if (event is! KeyDownEvent) return KeyEventResult.ignored;
@@ -64,20 +65,21 @@ class _IdeShellState extends ConsumerState<IdeShell> {
         return KeyEventResult.handled;
       },
       child: Scaffold(
+        // Keep top/bottom safe insets only — left/right SafeArea on iPad
+        // landscape wastes ~16–20px each side as an empty gutter.
         body: SafeArea(
+          left: false,
+          right: false,
           child: Column(
             children: [
               _menu(),
               _toolbar(),
               Expanded(
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(8, 0, 8, 0),
-                  child: DockView(
-                    session: session,
-                    node: session.layout.root,
-                    documents: (_) => _documents(),
-                    panel: _panel,
-                  ),
+                child: DockView(
+                  session: session,
+                  node: session.layout.root,
+                  documents: (_) => _documents(),
+                  panel: _panel,
                 ),
               ),
               _status(),
@@ -88,101 +90,127 @@ class _IdeShellState extends ConsumerState<IdeShell> {
     );
   }
 
-  Widget _menu() => SizedBox(
-    height: 42,
-    child: Row(
-      children: [
-        const SizedBox(width: 16),
-        Container(
-          width: 23,
-          height: 23,
-          alignment: Alignment.center,
-          decoration: BoxDecoration(
-            color: color('accent'),
-            borderRadius: BorderRadius.circular(5),
-          ),
-          child: Text(
-            't',
-            style: TextStyle(
-              fontWeight: FontWeight.w900,
-              fontSize: 19,
-              color: color('editor'),
+  Widget _menu() {
+    final landscape =
+        MediaQuery.orientationOf(context) == Orientation.landscape;
+    return SizedBox(
+      height: 42,
+      child: Row(
+        children: [
+          SizedBox(width: landscape ? 8 : 12),
+          Container(
+            width: 23,
+            height: 23,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: color('accent'),
+              borderRadius: BorderRadius.circular(5),
+            ),
+            child: Text(
+              't',
+              style: TextStyle(
+                fontWeight: FontWeight.w900,
+                fontSize: 19,
+                color: color('editor'),
+              ),
             ),
           ),
-        ),
-        const SizedBox(width: 10),
-        const Text(
-          'TAMTOOT',
-          style: TextStyle(
-            fontWeight: FontWeight.w700,
-            fontSize: 12,
-            letterSpacing: 1.8,
-          ),
-        ),
-        const SizedBox(width: 14),
-        Expanded(
-          child: SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: Row(
-              children: [
-                _menuItem('File', [
-                  'file.new',
-                  'file.open',
-                  'workspace.open',
-                  'file.save',
-                  'file.saveAs',
-                  'file.saveAll',
-                  'file.close',
-                ]),
-                _menuItem('Edit', [
-                  'editor.undo',
-                  'editor.redo',
-                  'editor.copy',
-                  'editor.cut',
-                  'editor.paste',
-                  'editor.find',
-                  'editor.replace',
-                ]),
-                _menuItem('View', [
-                  'view.solutionExplorer',
-                  'view.problems',
-                  'view.output',
-                  'view.terminal',
-                  'view.debug',
-                  'view.theme',
-                  'layout.reset',
-                  'view.commands',
-                ]),
-                _menuItem('Tools', ['settings.open', 'extensions.manage']),
-              ],
+          if (!landscape) ...[
+            const SizedBox(width: 10),
+            const Text(
+              'TAMTOOT',
+              style: TextStyle(
+                fontWeight: FontWeight.w700,
+                fontSize: 12,
+                letterSpacing: 1.8,
+              ),
+            ),
+          ],
+          SizedBox(width: landscape ? 8 : 14),
+          Expanded(
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              child: Row(
+                children: [
+                  _menuItem('File', const [
+                    'file.new',
+                    'file.open',
+                    '—',
+                    'workspace.open',
+                    'git.clone',
+                    '—',
+                    'file.save',
+                    'file.saveAs',
+                    'file.saveAll',
+                    'file.close',
+                  ]),
+                  _menuItem('Edit', [
+                    'editor.undo',
+                    'editor.redo',
+                    'editor.copy',
+                    'editor.cut',
+                    'editor.paste',
+                    'editor.find',
+                    'editor.replace',
+                  ]),
+                  _menuItem('View', [
+                    'view.solutionExplorer',
+                    'view.problems',
+                    'view.output',
+                    'view.terminal',
+                    'view.debug',
+                    'view.theme',
+                    'layout.reset',
+                    'view.commands',
+                  ]),
+                  _menuItem('Tools', ['settings.open', 'extensions.manage']),
+                ],
+              ),
             ),
           ),
-        ),
-        action(Icons.search, 'Commands (Ctrl/⌘ Shift P)', 'view.commands'),
-        action(
-          session.theme.dark
-              ? Icons.light_mode_outlined
-              : Icons.dark_mode_outlined,
-          'Switch theme',
-          'view.theme',
-        ),
-        const SizedBox(width: 8),
-      ],
-    ),
-  );
+          action(Icons.search, 'Commands (Ctrl/⌘ Shift P)', 'view.commands'),
+          action(
+            session.theme.dark
+                ? Icons.light_mode_outlined
+                : Icons.dark_mode_outlined,
+            'Switch theme',
+            'view.theme',
+          ),
+          const SizedBox(width: 8),
+        ],
+      ),
+    );
+  }
+
   Widget _menuItem(String title, List<String> ids) => PopupMenuButton<String>(
     tooltip: title,
-    onSelected: (id) => session.run(id),
-    itemBuilder: (_) => [
-      for (final id in ids)
-        PopupMenuItem(
-          value: id,
-          enabled: session.commands.isEnabled(id),
-          child: Text(
-            session.commands.commands.firstWhere((c) => c.id == id).title,
+    onSelected: (id) {
+      if (id == '—') return;
+      session.run(id);
+    },
+    itemBuilder: (_) {
+      final items = <PopupMenuEntry<String>>[];
+      for (final id in ids) {
+        if (id == '—') {
+          if (items.isNotEmpty && items.last is! PopupMenuDivider) {
+            items.add(const PopupMenuDivider());
+          }
+          continue;
+        }
+        if (!session.commands.isVisible(id)) continue;
+        final command = session.commands.commands
+            .where((c) => c.id == id)
+            .firstOrNull;
+        items.add(
+          PopupMenuItem(
+            value: id,
+            enabled: session.commands.isEnabled(id),
+            child: Text(command?.title ?? id),
           ),
-        ),
-    ],
+        );
+      }
+      return items;
+    },
     child: Padding(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
       child: Text(title, style: const TextStyle(fontSize: 12)),
@@ -197,7 +225,7 @@ class _IdeShellState extends ConsumerState<IdeShell> {
     ),
     child: Row(
       children: [
-        const SizedBox(width: 8),
+        const SizedBox(width: 4),
         action(Icons.note_add_outlined, 'New document', 'file.new'),
         action(Icons.folder_open, 'Open file', 'file.open'),
         action(Icons.save_outlined, 'Save (Ctrl/⌘ S)', 'file.save'),
@@ -454,11 +482,6 @@ class _IdeShellState extends ConsumerState<IdeShell> {
                   style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
                 ),
               ),
-              action(
-                Icons.create_new_folder_outlined,
-                'Open workspace folder',
-                'workspace.open',
-              ),
             ],
           ),
         ),
@@ -506,7 +529,9 @@ class _IdeShellState extends ConsumerState<IdeShell> {
                 Padding(
                   padding: const EdgeInsets.all(12),
                   child: Text(
-                    'Open a folder to explore a project.\n\nOn tablets, use Open file to choose a document.',
+                    session.git.available
+                        ? 'No folder open.\n\nFile → Clone repository… to download a project, or File → Open folder… on desktop.'
+                        : 'No folder open.\n\nUse File → Open file… to edit a document.',
                     style: TextStyle(
                       color: color('muted'),
                       fontSize: 12,
@@ -515,6 +540,21 @@ class _IdeShellState extends ConsumerState<IdeShell> {
                   ),
                 ),
               if (session.workspaceRoot != null) ...[
+                if (session.projectMeta != null)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+                    child: Text(
+                      '${session.projectMeta!.remoteUrl}\n'
+                      '${session.projectMeta!.branch}'
+                      '${session.workspaceHasGit ? ' · .git' : ''}'
+                      ' · .tamtoot',
+                      style: TextStyle(
+                        color: color('muted'),
+                        fontSize: 11,
+                        height: 1.45,
+                      ),
+                    ),
+                  ),
                 _entry(
                   '..',
                   Icons.drive_folder_upload_outlined,

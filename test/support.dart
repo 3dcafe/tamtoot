@@ -2,6 +2,7 @@ import 'dart:io';
 import 'package:tamtoot/app/ide_session.dart';
 import 'package:tamtoot/core/filesystem/filesystem.dart';
 import 'package:tamtoot/core/themes/ide_theme.dart';
+import 'package:tamtoot/platform/git_service.dart';
 import 'package:tamtoot/workspace/documents/document_service.dart';
 
 class MemoryStore implements PersistenceStore {
@@ -30,6 +31,7 @@ Future<IdeSession> testSession({MemoryStore? store}) async {
   final session = IdeSession(
     store: store ?? MemoryStore(),
     documents: DocumentService(MemoryFileSystem(), FakeDialogs()),
+    git: createGitService(),
   );
   for (final id in ['night', 'day']) {
     session.themes[id] = IdeTheme.parse(

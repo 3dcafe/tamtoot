@@ -2,18 +2,23 @@ import 'dart:async';
 import 'dart:convert';
 import '../core/commands/commands.dart';
 import '../core/filesystem/filesystem.dart';
+import '../core/git/git_service.dart';
 import '../core/persistence/schema.dart';
 import '../core/settings/settings.dart';
 import '../core/themes/ide_theme.dart';
+import '../core/workspace/tamtoot_meta.dart';
 import '../languages/language_registry.dart';
+import '../platform/tamtoot_meta_store.dart';
+import '../platform/workspace_roots.dart';
 import '../workspace/documents/document_service.dart';
 import '../workspace/layout/dock_layout.dart';
 
 /// Application orchestration. UI observes events through a Riverpod adapter.
 class IdeSession {
-  IdeSession({required this.store, required this.documents});
+  IdeSession({required this.store, required this.documents, required this.git});
   final PersistenceStore store;
   final DocumentService documents;
+  final GitService git;
   final commands = CommandRegistry();
   KeybindingRegistry keys = KeybindingRegistry();
   final settings = SettingsService();
@@ -28,6 +33,8 @@ class IdeSession {
   final List<String> recentWorkspaces = [];
   Uri? workspaceRoot;
   List<FileEntry> entries = [];
+  TamtootProjectMeta? projectMeta;
+  bool workspaceHasGit = false;
   String message = 'Ready';
   bool findVisible = false;
   bool replaceVisible = false;
@@ -54,6 +61,68 @@ class IdeSession {
     if (output.length > 500) output.removeAt(0);
     if (error) errors.add(value);
     changed(persist: false);
+  }
+
+  /// Open [root] in Solution Explorer and remember it in recent workspaces.
+  Future<void> openWorkspaceFolder(Uri root) async {
+    final virtual = WorkspaceRoots.storeFor(root);
+    if (virtual != null) {
+      entries = await WorkspaceRoots.listEntries(root);
+    } else {
+      entries = await documents.files.list(root);
+    }
+    workspaceRoot = root;
+    recentWorkspaces
+      ..remove(root.toString())
+      ..insert(0, root.toString());
+    if (recentWorkspaces.length > 10) recentWorkspaces.removeLast();
+
+    workspaceHasGit = await hasGitDirectory(root);
+    var meta = await readTamtootProjectMeta(root);
+    if (meta != null) {
+      meta = meta.copyWith(lastOpenedAt: DateTime.now().toUtc());
+      final headRef = await readGitHeadRef(root);
+      if (headRef != null && headRef.startsWith('refs/heads/')) {
+        meta = meta.copyWith(branch: headRef.replaceFirst('refs/heads/', ''));
+      }
+      try {
+        await writeTamtootProjectMeta(root, meta);
+      } catch (_) {
+        // Read-only locations still expose meta in-memory for this session.
+      }
+      projectMeta = meta;
+      log(
+        'Opened ${meta.remoteUrl} · ${meta.branch}'
+        '${workspaceHasGit ? ' · git' : ''}',
+      );
+    } else {
+      projectMeta = null;
+      if (workspaceHasGit) {
+        // Legacy / external clone — create .tamtoot so Tamtoot can track it.
+        final headRef = await readGitHeadRef(root);
+        final branch = headRef != null && headRef.startsWith('refs/heads/')
+            ? headRef.replaceFirst('refs/heads/', '')
+            : 'unknown';
+        final remote = await git.remoteUrl(root);
+        final created = TamtootProjectMeta(
+          remoteUrl: remote.ok ? remote.stdout.trim() : root.toString(),
+          branch: branch,
+          head: headRef ?? '',
+          clonedAt: DateTime.now().toUtc(),
+          lastOpenedAt: DateTime.now().toUtc(),
+        );
+        try {
+          await writeTamtootProjectMeta(root, created);
+          projectMeta = created;
+          log('Linked .tamtoot for ${created.remoteUrl} · ${created.branch}');
+        } catch (_) {
+          log('Opened ${root.path}${workspaceHasGit ? ' · git' : ''}');
+        }
+      } else {
+        log('Opened ${root.path}');
+      }
+    }
+    changed();
   }
 
   void observe(OpenDocument doc) {

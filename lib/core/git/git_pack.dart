@@ -82,6 +82,12 @@ List<UnpackedObject> unpackPackfile(List<int> pack, GitInflaterAt inflateAt) {
       final data = applyGitDelta(base.data, inflated.data);
       obj = UnpackedObject(base.type, data, hashObject(base.type, data));
     } else {
+      if (typeCode < 1 || typeCode > 4) {
+        throw FormatException(
+          'Unknown git object type $typeCode at pack offset $start '
+          '(object ${n + 1}/$count)',
+        );
+      }
       final type = GitObjectType.fromCode(typeCode);
       final inflated = inflateAt(pack, offset);
       offset = inflated.next;

@@ -1,8 +1,13 @@
+import 'dart:async';
 import 'dart:convert';
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../app/ide_session.dart';
 import '../app/session_commands.dart';
+import '../core/git/git_service.dart';
+import '../platform/clone_paths.dart';
 
 class ShellActions implements PresentationActions {
   ShellActions(this.context, this.session);
@@ -52,6 +57,13 @@ class ShellActions implements PresentationActions {
   Future<void> showExtensions() => showDialog<void>(
     context: context(),
     builder: (ctx) => LanguageDialog(session: session),
+  );
+
+  @override
+  Future<void> showCloneRepository() => showDialog<void>(
+    context: context(),
+    barrierDismissible: false,
+    builder: (ctx) => CloneRepositoryDialog(session: session),
   );
 }
 
@@ -353,4 +365,354 @@ class _LanguageDialogState extends State<LanguageDialog> {
       ),
     ],
   );
+}
+
+class CloneRepositoryDialog extends StatefulWidget {
+  const CloneRepositoryDialog({super.key, required this.session});
+  final IdeSession session;
+  @override
+  State<CloneRepositoryDialog> createState() => _CloneRepositoryDialogState();
+}
+
+class _CloneRepositoryDialogState extends State<CloneRepositoryDialog> {
+  final url = TextEditingController();
+  final folder = TextEditingController();
+  final username = TextEditingController();
+  final password = TextEditingController();
+  final token = TextEditingController();
+  final branch = TextEditingController();
+  bool busy = false;
+  String? error;
+  String? destinationPath;
+  Uri? selectedWebRoot;
+  bool get canBrowse =>
+      widget.session.documents.dialogs.supportsDirectories ||
+      webDirectoryPickerSupported;
+
+  @override
+  void initState() {
+    super.initState();
+    if (kDebugMode) {
+      url.text = 'https://gitverse.ru/latin/tamtoot.git';
+      folder.text = 'tamtoot';
+    }
+    url.addListener(_suggestFolder);
+    unawaited(_prepareDefaultDestination());
+  }
+
+  Future<void> _prepareDefaultDestination() async {
+    final path = await defaultCloneParentPath();
+    if (!mounted) return;
+    setState(() => destinationPath = path);
+  }
+
+  void _suggestFolder() {
+    if (folder.text.trim().isNotEmpty) return;
+    final name = _repoNameFromUrl(url.text);
+    if (name != null) setState(() => folder.text = name);
+  }
+
+  String? _repoNameFromUrl(String raw) {
+    final trimmed = raw.trim();
+    if (trimmed.isEmpty) return null;
+    try {
+      final uri = Uri.parse(trimmed);
+      final segments = uri.pathSegments.where((s) => s.isNotEmpty).toList();
+      if (segments.isEmpty) return null;
+      var name = segments.last;
+      if (name.endsWith('.git')) name = name.substring(0, name.length - 4);
+      return name.isEmpty ? null : name;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  @override
+  void dispose() {
+    url.dispose();
+    folder.dispose();
+    username.dispose();
+    password.dispose();
+    token.dispose();
+    branch.dispose();
+    super.dispose();
+  }
+
+  Future<void> _browse() async {
+    if (widget.session.documents.dialogs.supportsDirectories) {
+      final picked = await widget.session.documents.dialogs.openWorkspace();
+      if (picked == null || !mounted) return;
+      setState(() {
+        destinationPath = picked.toFilePath();
+        selectedWebRoot = null;
+      });
+      return;
+    }
+    final name = folder.text.trim().isEmpty
+        ? _repoNameFromUrl(url.text)
+        : folder.text.trim();
+    final picked = await pickCloneDestination(folderName: name);
+    if (picked == null || !mounted) return;
+    setState(() {
+      selectedWebRoot = picked;
+      destinationPath = picked.toString();
+      if (name != null && name.isNotEmpty) folder.text = name;
+    });
+  }
+
+  Future<void> _clone() async {
+    final remoteText = url.text.trim();
+    if (remoteText.isEmpty) {
+      setState(() => error = 'Enter a repository URL');
+      return;
+    }
+    Uri remote;
+    try {
+      remote = Uri.parse(remoteText);
+      if (remote.scheme != 'https' && remote.scheme != 'http') {
+        setState(() => error = 'Only http(s) URLs are supported');
+        return;
+      }
+    } catch (_) {
+      setState(() => error = 'Invalid URL');
+      return;
+    }
+
+    final name = folder.text.trim().isEmpty
+        ? _repoNameFromUrl(remoteText)
+        : folder.text.trim();
+    if (name == null || name.isEmpty) {
+      setState(() => error = 'Enter a folder name');
+      return;
+    }
+
+    GitCredentials? credentials;
+    final tokenValue = token.text.trim();
+    final userValue = username.text.trim();
+    final passValue = password.text;
+    if (tokenValue.isNotEmpty) {
+      credentials = GitCredentials(
+        username: userValue.isEmpty ? 'git' : userValue,
+        token: tokenValue,
+      );
+    } else if (userValue.isNotEmpty || passValue.isNotEmpty) {
+      credentials = GitCredentials(username: userValue, password: passValue);
+    }
+
+    setState(() {
+      busy = true;
+      error = null;
+    });
+    widget.session.log('Cloning $remoteText…');
+    try {
+      Uri targetUri;
+      if (webDirectoryPickerSupported) {
+        var webRoot = selectedWebRoot;
+        webRoot ??= await pickCloneDestination(folderName: name);
+        if (webRoot == null) {
+          setState(() {
+            busy = false;
+            error = 'Choose a local folder on your computer to save the clone';
+          });
+          return;
+        }
+        selectedWebRoot = webRoot;
+        targetUri = webRoot;
+      } else {
+        final parent = destinationPath;
+        if (parent == null || parent.isEmpty) {
+          setState(() {
+            busy = false;
+            error = 'Choose a destination folder';
+          });
+          return;
+        }
+        final targetPath = joinClonePath(parent, name);
+        if (await cloneTargetBusy(targetPath)) {
+          setState(() {
+            busy = false;
+            error = 'Folder already exists and is not empty';
+          });
+          return;
+        }
+        await ensureCloneDirectory(targetPath);
+        targetUri = cloneDirectoryUri(targetPath);
+      }
+
+      final result = await widget.session.git.clone(
+        remote,
+        targetUri,
+        credentials: credentials,
+        branch: branch.text.trim().isEmpty ? null : branch.text.trim(),
+      );
+      if (!result.ok) {
+        setState(() {
+          busy = false;
+          error = result.message;
+        });
+        widget.session.log('Clone failed: ${result.message}', error: true);
+        return;
+      }
+      await widget.session.openWorkspaceFolder(targetUri);
+      widget.session.log('Cloned and opened $targetUri');
+      if (mounted) Navigator.pop(context);
+    } catch (e) {
+      setState(() {
+        busy = false;
+        error = '$e';
+      });
+      widget.session.log('Clone failed: $e', error: true);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Clone repository'),
+      content: SizedBox(
+        width: 520,
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              TextField(
+                controller: url,
+                enabled: !busy,
+                autofocus: true,
+                decoration: const InputDecoration(
+                  labelText: 'Repository URL',
+                  hintText: 'https://gitverse.ru/user/repo.git',
+                ),
+                keyboardType: TextInputType.url,
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: folder,
+                enabled: !busy,
+                decoration: const InputDecoration(
+                  labelText: 'Folder name',
+                  hintText: 'Derived from URL if empty',
+                ),
+              ),
+              const SizedBox(height: 12),
+              InputDecorator(
+                decoration: const InputDecoration(
+                  labelText: 'Parent folder',
+                  border: OutlineInputBorder(),
+                ),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        selectedWebRoot?.pathSegments
+                                .where((s) => s.isNotEmpty)
+                                .lastOrNull ??
+                            destinationPath ??
+                            (webDirectoryPickerSupported
+                                ? 'Press Browse to choose a folder on disk…'
+                                : 'Resolving app documents…'),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
+                    ),
+                    if (canBrowse)
+                      TextButton(
+                        onPressed: busy ? null : _browse,
+                        child: const Text('Browse'),
+                      ),
+                  ],
+                ),
+              ),
+              if (!canBrowse)
+                Padding(
+                  padding: const EdgeInsets.only(top: 6),
+                  child: Text(
+                    webDirectoryPickerSupported
+                        ? 'Press Browse and pick a real folder on your computer. Files are saved there (not in memory).'
+                        : 'On this device clones go into the app documents folder.',
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                ),
+              if (webDirectoryPickerSupported)
+                Padding(
+                  padding: const EdgeInsets.only(top: 6),
+                  child: Text(
+                    'Note: some git hosts block browser requests (CORS). If clone fails, try the desktop/Android app.',
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                ),
+              const SizedBox(height: 16),
+              Text(
+                'Authentication (optional)',
+                style: Theme.of(context).textTheme.titleSmall,
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: token,
+                enabled: !busy,
+                obscureText: true,
+                decoration: const InputDecoration(
+                  labelText: 'Access token',
+                  hintText: 'Preferred for HTTPS remotes',
+                ),
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: username,
+                enabled: !busy,
+                decoration: const InputDecoration(labelText: 'Username'),
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: password,
+                enabled: !busy,
+                obscureText: true,
+                decoration: const InputDecoration(
+                  labelText: 'Password',
+                  hintText: 'Used if token is empty',
+                ),
+              ),
+              const SizedBox(height: 8),
+              TextField(
+                controller: branch,
+                enabled: !busy,
+                decoration: const InputDecoration(
+                  labelText: 'Branch (optional)',
+                  hintText: 'Default remote branch if empty',
+                ),
+              ),
+              if (error != null) ...[
+                const SizedBox(height: 12),
+                Text(
+                  error!,
+                  style: TextStyle(color: Theme.of(context).colorScheme.error),
+                ),
+              ],
+              if (busy) ...[
+                const SizedBox(height: 16),
+                const LinearProgressIndicator(),
+                const SizedBox(height: 8),
+                Text(
+                  'Downloading over HTTPS…',
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: busy ? null : () => Navigator.pop(context),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: busy ? null : _clone,
+          child: const Text('Clone'),
+        ),
+      ],
+    );
+  }
 }

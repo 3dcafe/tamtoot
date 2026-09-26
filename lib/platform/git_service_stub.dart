@@ -1,18 +1,37 @@
 import '../core/git/git_service.dart';
+import '../core/git/http_git_service.dart';
+import 'git_shared.dart';
+import 'web_directory_web.dart';
+import 'workspace_roots.dart';
 
-/// Web stub — local clone checkout needs dart:io filesystem.
-class PlatformGitService implements GitService {
+/// Browser git client: Smart HTTP + real local folder (File System Access API).
+class PlatformGitService extends HttpGitService {
+  PlatformGitService()
+    : super(
+        transport: PackageHttpTransport(),
+        openStore: (uri) {
+          final existing = WorkspaceRoots.storeFor(uri);
+          if (existing != null) return existing;
+          throw StateError(
+            'Choose a local folder first (browser File System Access).',
+          );
+        },
+        inflateAt: sharedInflateAt,
+        deflate: sharedDeflate,
+      );
+
   @override
-  bool get available => false;
+  bool get available => webDirectoryPickerSupported;
 
-  Never _no() => throw UnsupportedError(
-    'HTTP git client needs a local filesystem (not available on web).',
+  @override
+  Future<GitResult> version() async => const GitResult(
+    exitCode: 0,
+    stdout:
+        'tamtoot-http-git 0.1 (web · local folder via File System Access API)',
+    stderr: '',
+    arguments: ['version'],
   );
 
-  @override
-  Future<GitResult> version() async => _no();
-  @override
-  Future<bool> isRepository(Uri directory) async => false;
   @override
   Future<GitResult> clone(
     Uri remote,
@@ -20,54 +39,24 @@ class PlatformGitService implements GitService {
     GitCredentials? credentials,
     String? branch,
     bool shallow = false,
-  }) async => _no();
-  @override
-  Future<GitResult> fetch(
-    Uri directory, {
-    GitCredentials? credentials,
-    String remote = 'origin',
-  }) async => _no();
-  @override
-  Future<GitResult> pull(
-    Uri directory, {
-    GitCredentials? credentials,
-    String remote = 'origin',
-    String? branch,
-  }) async => _no();
-  @override
-  Future<GitResult> push(
-    Uri directory, {
-    GitCredentials? credentials,
-    String remote = 'origin',
-    String? branch,
-    bool setUpstream = false,
-  }) async => _no();
-  @override
-  Future<GitResult> status(Uri directory, {bool porcelain = true}) async =>
-      _no();
-  @override
-  Future<List<GitStatusEntry>> statusEntries(Uri directory) async => _no();
-  @override
-  Future<GitResult> add(
-    Uri directory, {
-    List<String> paths = const ['.'],
-  }) async => _no();
-  @override
-  Future<GitResult> commit(
-    Uri directory,
-    String message, {
-    bool allowEmpty = false,
-  }) async => _no();
-  @override
-  Future<GitResult> remoteUrl(Uri directory, {String name = 'origin'}) async =>
-      _no();
-  @override
-  Future<GitResult> setRemoteUrl(
-    Uri directory,
-    Uri url, {
-    String name = 'origin',
-    GitCredentials? credentials,
-  }) async => _no();
+  }) async {
+    if (WorkspaceRoots.storeFor(directory) == null) {
+      return const GitResult(
+        exitCode: 1,
+        stdout: '',
+        stderr:
+            'No local folder selected. Use Browse to choose where to save the clone.',
+        arguments: ['clone'],
+      );
+    }
+    return super.clone(
+      remote,
+      directory,
+      credentials: credentials,
+      branch: branch,
+      shallow: shallow,
+    );
+  }
 }
 
 GitService createGitService({String? gitExecutable}) => PlatformGitService();

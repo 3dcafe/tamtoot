@@ -6,6 +6,7 @@ import 'git_objects.dart';
 import 'git_pack.dart';
 import 'git_service.dart';
 import 'git_store.dart';
+import '../workspace/tamtoot_meta.dart';
 
 /// Pure Dart Smart-HTTP git client. Works on Android / iOS / desktop via
 /// [GitHttpTransport] + [GitRepositoryStore] (no system `git` binary).
@@ -91,6 +92,16 @@ class HttpGitService implements GitService {
     await db.writeHead(refName);
     await db.writeConfig(remote: remote, branch: short);
     await _checkout(db, store, want);
+    await store.writeText(
+      TamtootProjectMeta.relativePath,
+      TamtootProjectMeta(
+        remoteUrl: remote.toString(),
+        branch: short,
+        head: want,
+        clonedAt: DateTime.now().toUtc(),
+        lastOpenedAt: DateTime.now().toUtc(),
+      ).encode(),
+    );
 
     return _ok('Cloned $remote → $refName ($want)', [
       'clone',

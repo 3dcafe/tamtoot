@@ -3,6 +3,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../core/themes/ide_theme.dart';
 import '../languages/language_registry.dart';
 import '../languages/package_service.dart';
+import '../platform/git_service.dart';
 import '../platform/platform_services.dart';
 import '../workspace/documents/document_service.dart';
 import 'ide_session.dart';
@@ -12,6 +13,7 @@ Future<IdeSession> bootstrap() async {
   final session = IdeSession(
     store: PreferenceStore(await SharedPreferences.getInstance()),
     documents: DocumentService(files, files),
+    git: createGitService(),
   );
   for (final id in ['night', 'day']) {
     final theme = IdeTheme.parse(

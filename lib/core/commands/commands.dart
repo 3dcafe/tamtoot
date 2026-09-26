@@ -27,10 +27,26 @@ class CommandRegistry {
     _commands[command.id] = command;
   }
 
+  /// Inserts or replaces a command (safe across hot reload / UI rebuilds).
+  void registerOrReplace(CommandDescriptor command) {
+    _commands[command.id] = command;
+  }
+
   void unregister(String id) => _commands.remove(id);
   bool contains(String id) => _commands.containsKey(id);
-  bool isEnabled(String id) =>
-      _commands[id]?.enabled?.call() ?? _commands.containsKey(id);
+  bool isVisible(String id) {
+    final command = _commands[id];
+    if (command == null) return false;
+    return command.visible?.call() ?? true;
+  }
+
+  bool isEnabled(String id) {
+    final command = _commands[id];
+    if (command == null) return false;
+    if (!(command.visible?.call() ?? true)) return false;
+    return command.enabled?.call() ?? true;
+  }
+
   Future<Object?> execute(String id, [Object? argument]) async {
     final command = _commands[id];
     if (command == null) throw StateError('Unknown command: $id');

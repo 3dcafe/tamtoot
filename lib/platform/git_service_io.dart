@@ -1,11 +1,12 @@
 import 'dart:io';
-import 'dart:math';
 import 'dart:typed_data';
 
-import '../core/git/git_http.dart';
+import 'package:http/http.dart' as http;
+
 import '../core/git/git_service.dart';
 import '../core/git/git_store.dart';
 import '../core/git/http_git_service.dart';
+import 'git_shared.dart';
 
 /// File-backed repository store for mobile / desktop.
 final class FileGitRepositoryStore extends GitRepositoryStore {
@@ -68,108 +69,19 @@ final class FileGitRepositoryStore extends GitRepositoryStore {
   }
 }
 
-final class IoGitHttpTransport implements GitHttpTransport {
-  IoGitHttpTransport({HttpClient? client}) : _client = client ?? HttpClient();
-  final HttpClient _client;
-
-  @override
-  Future<GitHttpResponse> send({
-    required String method,
-    required Uri url,
-    Map<String, String>? headers,
-    List<int>? body,
-  }) async {
-    final request = await _client.openUrl(method, url);
-    headers?.forEach(request.headers.set);
-    if (body != null) {
-      request.add(body);
-    }
-    final response = await request.close();
-    final bytes = await response.fold<List<int>>(
-      <int>[],
-      (prev, chunk) => prev..addAll(chunk),
-    );
-    return GitHttpResponse(
-      statusCode: response.statusCode,
-      body: Uint8List.fromList(bytes),
-      contentType: response.headers.contentType?.mimeType,
-    );
-  }
-}
-
-/// Find end of a zlib stream via smallest successful inflate window.
-({Uint8List data, int next}) ioInflateAt(List<int> pack, int offset) {
-  FormatException? last;
-  // Exponential grow then binary-search the end for speed on large objects.
-  var size = 32;
-  final remaining = pack.length - offset;
-  while (size < remaining) {
-    try {
-      final slice = pack.sublist(offset, offset + size);
-      final data = ZLibCodec().decode(slice);
-      // Success may include trailing junk that Dart rejects — try shrink.
-      return _shrinkInflate(pack, offset, size, Uint8List.fromList(data));
-    } catch (e) {
-      last = FormatException('$e');
-      size = min(remaining, size * 2);
-    }
-  }
-  try {
-    final data = ZLibCodec().decode(pack.sublist(offset));
-    return (data: Uint8List.fromList(data), next: pack.length);
-  } catch (e) {
-    throw last ?? FormatException('$e');
-  }
-}
-
-({Uint8List data, int next}) _shrinkInflate(
-  List<int> pack,
-  int offset,
-  int maxSize,
-  Uint8List data,
-) {
-  var low = 2;
-  var high = maxSize;
-  var best = maxSize;
-  while (low <= high) {
-    final mid = (low + high) >> 1;
-    try {
-      final decoded = ZLibCodec().decode(pack.sublist(offset, offset + mid));
-      // Prefer smallest window that yields same length (complete stream).
-      if (decoded.length == data.length) {
-        best = mid;
-        high = mid - 1;
-      } else {
-        low = mid + 1;
-      }
-    } catch (_) {
-      low = mid + 1;
-    }
-  }
-  return (
-    data: Uint8List.fromList(
-      ZLibCodec().decode(pack.sublist(offset, offset + best)),
-    ),
-    next: offset + best,
-  );
-}
-
-Uint8List ioDeflate(List<int> data) =>
-    Uint8List.fromList(ZLibCodec().encode(data));
-
 /// Mobile/desktop git client over HTTPS Smart HTTP — no system git required.
 class PlatformGitService extends HttpGitService {
-  PlatformGitService({HttpClient? client})
+  PlatformGitService({http.Client? client})
     : super(
-        transport: IoGitHttpTransport(client: client),
+        transport: PackageHttpTransport(client: client),
         openStore: (uri) {
           if (uri.scheme != 'file') {
             throw ArgumentError('Expected file:// directory, got $uri');
           }
           return FileGitRepositoryStore(Directory.fromUri(uri));
         },
-        inflateAt: ioInflateAt,
-        deflate: ioDeflate,
+        inflateAt: sharedInflateAt,
+        deflate: sharedDeflate,
       );
 }
 
