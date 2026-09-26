@@ -1,12 +1,49 @@
 name: Build Windows exe
 
+# GitVerse cloud runners are Ubuntu-only
+# (https://gitverse.ru/docs/cicd/docs/runners/cloud-hosted).
+# Flutter cannot cross-compile Windows from Linux, so a hosted
+# `windows-latest` job queues forever with no runner.
+#
+# Options:
+# 1) Build locally: flutter build windows --release
+# 2) Register a Windows self-hosted runner, then re-run with
+#    "self-hosted" below (Settings → Actions → Runners).
+
 on:
   workflow_dispatch:
+    inputs:
+      mode:
+        description: "ubuntu = fail fast with help; self-hosted = build on your Windows runner"
+        type: choice
+        default: ubuntu
+        options:
+          - ubuntu
+          - self-hosted
 
 jobs:
+  unavailable-on-cloud:
+    name: Windows not on GitVerse cloud
+    if: ${{ inputs.mode == 'ubuntu' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Explain
+        run: |
+          echo "::error::GitVerse cloud runners are Ubuntu-only. windows-latest jobs queue forever. Build Windows locally (flutter build windows --release) or attach a self-hosted Windows runner and re-run with mode=self-hosted."
+          echo ""
+          echo "Local:"
+          echo "  flutter config --enable-windows-desktop"
+          echo "  flutter pub get"
+          echo "  flutter build windows --release"
+          echo "Artifact: build/windows/x64/runner/Release/"
+          exit 1
+
   build-windows:
-    name: Build release Windows
-    runs-on: windows-latest
+    name: Build release Windows (self-hosted)
+    if: ${{ inputs.mode == 'self-hosted' }}
+    # Label must match your registered Windows act_runner (host mode).
+    # Common choices: windows  |  self-hosted  |  windows-latest:host → windows-latest
+    runs-on: windows
     timeout-minutes: 60
 
     steps:

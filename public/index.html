@@ -82,10 +82,12 @@
       <section class="note">
         <h2>Как взять сборку</h2>
         <p>
-          В репозитории Actions: вручную запускаете
-          <strong>Build Android APK</strong> или
-          <strong>Build Windows exe</strong>, скачиваете артефакт. Windows —
-          это zip с <code>tamtoot.exe</code> и DLL рядом.
+          <strong>Build Android APK</strong> в Actions — на облачном Ubuntu.
+          Windows в облаке GitVerse нет (раннеры только Linux), поэтому
+          <strong>Build Windows exe</strong> либо объясняет это, либо собирает
+          на вашем self-hosted Windows runner. Локально:
+          <code>flutter build windows --release</code> → папка
+          <code>Release</code> с <code>tamtoot.exe</code> и DLL.
         </p>
       </section>
     </main>
