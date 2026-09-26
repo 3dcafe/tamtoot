@@ -132,18 +132,19 @@ class _IdeShellState extends ConsumerState<IdeShell> {
               scrollDirection: Axis.horizontal,
               child: Row(
                 children: [
-                  _menuItem('File', const [
-                    'file.new',
-                    'file.open',
-                    '—',
-                    'workspace.open',
-                    'git.clone',
-                    '—',
-                    'file.save',
-                    'file.saveAs',
-                    'file.saveAll',
-                    'file.close',
-                  ]),
+                _menuItem('File', const [
+                  'file.new',
+                  'file.open',
+                  '—',
+                  'workspace.open',
+                  'workspace.openProject',
+                  'git.clone',
+                  '—',
+                  'file.save',
+                  'file.saveAs',
+                  'file.saveAll',
+                  'file.close',
+                ]),
                   _menuItem('Edit', [
                     'editor.undo',
                     'editor.redo',
@@ -530,7 +531,7 @@ class _IdeShellState extends ConsumerState<IdeShell> {
                   padding: const EdgeInsets.all(12),
                   child: Text(
                     session.git.available
-                        ? 'No folder open.\n\nFile → Clone repository… to download a project, or File → Open folder… on desktop.'
+                        ? 'No folder open.\n\nFile → Clone repository… or File → Open project…'
                         : 'No folder open.\n\nUse File → Open file… to edit a document.',
                     style: TextStyle(
                       color: color('muted'),

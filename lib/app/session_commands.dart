@@ -12,6 +12,7 @@ abstract interface class PresentationActions {
   Future<void> showSettings();
   Future<void> showExtensions();
   Future<void> showCloneRepository();
+  Future<void> showOpenProject();
 }
 
 void registerSessionCommands(IdeSession s, PresentationActions ui) {
@@ -80,6 +81,11 @@ void registerSessionCommands(IdeSession s, PresentationActions ui) {
     },
     enabled: () => s.documents.dialogs.supportsDirectories,
     visible: () => s.documents.dialogs.supportsDirectories,
+  );
+  add(
+    'workspace.openProject',
+    'Open project…',
+    (_) => ui.showOpenProject(),
   );
   add(
     'git.clone',

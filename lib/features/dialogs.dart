@@ -65,6 +65,12 @@ class ShellActions implements PresentationActions {
     barrierDismissible: false,
     builder: (ctx) => CloneRepositoryDialog(session: session),
   );
+
+  @override
+  Future<void> showOpenProject() => showDialog<void>(
+    context: context(),
+    builder: (ctx) => OpenProjectDialog(session: session),
+  );
 }
 
 class CommandPalette extends StatefulWidget {
@@ -382,12 +388,16 @@ class _CloneRepositoryDialogState extends State<CloneRepositoryDialog> {
   final token = TextEditingController();
   final branch = TextEditingController();
   bool busy = false;
+  bool folderEdited = false;
   String? error;
   String? destinationPath;
   Uri? selectedWebRoot;
+  Uri? existingWorkspace;
   bool get canBrowse =>
       widget.session.documents.dialogs.supportsDirectories ||
       webDirectoryPickerSupported;
+  /// iPhone/Android: clones go into app documents — no raw path UI.
+  bool get managedDestination => !canBrowse;
 
   @override
   void initState() {
@@ -404,12 +414,32 @@ class _CloneRepositoryDialogState extends State<CloneRepositoryDialog> {
     final path = await defaultCloneParentPath();
     if (!mounted) return;
     setState(() => destinationPath = path);
+    await _ensureUniqueFolderName();
+  }
+
+  Future<void> _ensureUniqueFolderName() async {
+    final parent = destinationPath;
+    if (parent == null || parent.isEmpty || webDirectoryPickerSupported) return;
+    final preferred = folder.text.trim().isEmpty
+        ? (_repoNameFromUrl(url.text) ?? 'repo')
+        : folder.text.trim();
+    final unique = await uniqueCloneFolderName(parent, preferred);
+    if (!mounted) return;
+    if (unique != preferred) {
+      setState(() {
+        folder.text = unique;
+        folderEdited = true;
+      });
+    }
   }
 
   void _suggestFolder() {
-    if (folder.text.trim().isNotEmpty) return;
+    if (folderEdited) return;
     final name = _repoNameFromUrl(url.text);
-    if (name != null) setState(() => folder.text = name);
+    if (name != null && folder.text != name) {
+      setState(() => folder.text = name);
+      unawaited(_ensureUniqueFolderName());
+    }
   }
 
   String? _repoNameFromUrl(String raw) {
@@ -460,6 +490,14 @@ class _CloneRepositoryDialogState extends State<CloneRepositoryDialog> {
     });
   }
 
+  Future<void> _openExisting() async {
+    final uri = existingWorkspace;
+    if (uri == null) return;
+    await widget.session.openWorkspaceFolder(uri);
+    widget.session.log('Opened existing project $uri');
+    if (mounted) Navigator.pop(context);
+  }
+
   Future<void> _clone() async {
     final remoteText = url.text.trim();
     if (remoteText.isEmpty) {
@@ -482,7 +520,7 @@ class _CloneRepositoryDialogState extends State<CloneRepositoryDialog> {
         ? _repoNameFromUrl(remoteText)
         : folder.text.trim();
     if (name == null || name.isEmpty) {
-      setState(() => error = 'Enter a folder name');
+      setState(() => error = 'Enter a project name');
       return;
     }
 
@@ -502,6 +540,7 @@ class _CloneRepositoryDialogState extends State<CloneRepositoryDialog> {
     setState(() {
       busy = true;
       error = null;
+      existingWorkspace = null;
     });
     widget.session.log('Cloning $remoteText…');
     try {
@@ -523,15 +562,28 @@ class _CloneRepositoryDialogState extends State<CloneRepositoryDialog> {
         if (parent == null || parent.isEmpty) {
           setState(() {
             busy = false;
-            error = 'Choose a destination folder';
+            error = 'App documents folder is unavailable';
           });
           return;
         }
         final targetPath = joinClonePath(parent, name);
         if (await cloneTargetBusy(targetPath)) {
+          if (await looksLikeManagedWorkspace(targetPath)) {
+            setState(() {
+              busy = false;
+              existingWorkspace = cloneDirectoryUri(targetPath);
+              error =
+                  '“$name” is already cloned on this device. Open it, or change the project name.';
+            });
+            return;
+          }
+          final unique = await uniqueCloneFolderName(parent, name);
           setState(() {
             busy = false;
-            error = 'Folder already exists and is not empty';
+            folder.text = unique;
+            folderEdited = true;
+            error =
+                '“$name” already exists. Suggested name: $unique — press Clone again.';
           });
           return;
         }
@@ -554,7 +606,7 @@ class _CloneRepositoryDialogState extends State<CloneRepositoryDialog> {
         return;
       }
       await widget.session.openWorkspaceFolder(targetUri);
-      widget.session.log('Cloned and opened $targetUri');
+      widget.session.log('Cloned and opened ${folder.text.trim()}');
       if (mounted) Navigator.pop(context);
     } catch (e) {
       setState(() {
@@ -590,56 +642,61 @@ class _CloneRepositoryDialogState extends State<CloneRepositoryDialog> {
               TextField(
                 controller: folder,
                 enabled: !busy,
-                decoration: const InputDecoration(
-                  labelText: 'Folder name',
+                onChanged: (_) {
+                  folderEdited = true;
+                  if (existingWorkspace != null) {
+                    setState(() {
+                      existingWorkspace = null;
+                      error = null;
+                    });
+                  }
+                },
+                decoration: InputDecoration(
+                  labelText: managedDestination ? 'Project name' : 'Folder name',
                   hintText: 'Derived from URL if empty',
+                  helperText: managedDestination
+                      ? 'Saved in TamtootRepos on this device'
+                      : null,
                 ),
               ),
-              const SizedBox(height: 12),
-              InputDecorator(
-                decoration: const InputDecoration(
-                  labelText: 'Parent folder',
-                  border: OutlineInputBorder(),
-                ),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        selectedWebRoot?.pathSegments
-                                .where((s) => s.isNotEmpty)
-                                .lastOrNull ??
-                            destinationPath ??
-                            (webDirectoryPickerSupported
-                                ? 'Press Browse to choose a folder on disk…'
-                                : 'Resolving app documents…'),
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: Theme.of(context).textTheme.bodySmall,
+              if (!managedDestination) ...[
+                const SizedBox(height: 12),
+                InputDecorator(
+                  decoration: const InputDecoration(
+                    labelText: 'Parent folder',
+                    border: OutlineInputBorder(),
+                  ),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          selectedWebRoot?.pathSegments
+                                  .where((s) => s.isNotEmpty)
+                                  .lastOrNull ??
+                              destinationPath ??
+                              (webDirectoryPickerSupported
+                                  ? 'Press Browse to choose a folder on disk…'
+                                  : 'Resolving app documents…'),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
                       ),
-                    ),
-                    if (canBrowse)
-                      TextButton(
-                        onPressed: busy ? null : _browse,
-                        child: const Text('Browse'),
-                      ),
-                  ],
-                ),
-              ),
-              if (!canBrowse)
-                Padding(
-                  padding: const EdgeInsets.only(top: 6),
-                  child: Text(
-                    webDirectoryPickerSupported
-                        ? 'Press Browse and pick a real folder on your computer. Files are saved there (not in memory).'
-                        : 'On this device clones go into the app documents folder.',
-                    style: Theme.of(context).textTheme.bodySmall,
+                      if (canBrowse)
+                        TextButton(
+                          onPressed: busy ? null : _browse,
+                          child: const Text('Browse'),
+                        ),
+                    ],
                   ),
                 ),
+              ],
               if (webDirectoryPickerSupported)
                 Padding(
                   padding: const EdgeInsets.only(top: 6),
                   child: Text(
-                    'Note: some git hosts block browser requests (CORS). If clone fails, try the desktop/Android app.',
+                    'Press Browse and pick a real folder on your computer. '
+                    'Some git hosts block browser requests (CORS).',
                     style: Theme.of(context).textTheme.bodySmall,
                   ),
                 ),
@@ -708,6 +765,11 @@ class _CloneRepositoryDialogState extends State<CloneRepositoryDialog> {
           onPressed: busy ? null : () => Navigator.pop(context),
           child: const Text('Cancel'),
         ),
+        if (existingWorkspace != null)
+          TextButton(
+            onPressed: busy ? null : _openExisting,
+            child: const Text('Open existing'),
+          ),
         FilledButton(
           onPressed: busy ? null : _clone,
           child: const Text('Clone'),
@@ -716,3 +778,108 @@ class _CloneRepositoryDialogState extends State<CloneRepositoryDialog> {
     );
   }
 }
+
+class OpenProjectDialog extends StatefulWidget {
+  const OpenProjectDialog({super.key, required this.session});
+  final IdeSession session;
+  @override
+  State<OpenProjectDialog> createState() => _OpenProjectDialogState();
+}
+
+class _OpenProjectDialogState extends State<OpenProjectDialog> {
+  late Future<List<ClonedProjectRef>> _projects;
+
+  @override
+  void initState() {
+    super.initState();
+    _projects = _load();
+  }
+
+  Future<List<ClonedProjectRef>> _load() async {
+    final byKey = <String, ClonedProjectRef>{};
+
+    String keyFor(Uri uri) {
+      final path = uri.hasScheme && uri.scheme == 'file'
+          ? uri.toFilePath()
+          : uri.toString();
+      return path.endsWith('/') || path.endsWith('\\')
+          ? path.substring(0, path.length - 1)
+          : path;
+    }
+
+    for (final raw in widget.session.recentWorkspaces) {
+      try {
+        final uri = Uri.parse(raw);
+        final name =
+            uri.pathSegments.where((s) => s.isNotEmpty).lastOrNull ??
+            uri.toString();
+        byKey[keyFor(uri)] = ClonedProjectRef(name: name, uri: uri);
+      } catch (_) {}
+    }
+
+    for (final project in await listClonedProjects()) {
+      byKey[keyFor(project.uri)] = project;
+    }
+
+    final list = byKey.values.toList()
+      ..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+    return list;
+  }
+
+  Future<void> _open(ClonedProjectRef project) async {
+    await widget.session.openWorkspaceFolder(project.uri);
+    if (mounted) Navigator.pop(context);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('Open project'),
+      content: SizedBox(
+        width: 420,
+        height: 360,
+        child: FutureBuilder<List<ClonedProjectRef>>(
+          future: _projects,
+          builder: (context, snapshot) {
+            if (snapshot.connectionState != ConnectionState.done) {
+              return const Center(child: CircularProgressIndicator());
+            }
+            final items = snapshot.data ?? const [];
+            if (items.isEmpty) {
+              return const Center(
+                child: Text(
+                  'No projects yet.\n\nFile → Clone repository… to download one.',
+                  textAlign: TextAlign.center,
+                ),
+              );
+            }
+            return ListView.separated(
+              itemCount: items.length,
+              separatorBuilder: (_, _) => const Divider(height: 1),
+              itemBuilder: (context, index) {
+                final project = items[index];
+                return ListTile(
+                  leading: const Icon(Icons.folder_outlined),
+                  title: Text(project.name),
+                  subtitle: Text(
+                    project.subtitle,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  onTap: () => _open(project),
+                );
+              },
+            );
+          },
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancel'),
+        ),
+      ],
+    );
+  }
+}
+
