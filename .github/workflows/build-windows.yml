@@ -28,7 +28,7 @@ jobs:
       - name: Build release Windows
         run: flutter build windows --release
 
-      - name: Prepare artifact
+      - name: Verify build output
         shell: pwsh
         run: |
           $src = "build\windows\x64\runner\Release"
@@ -37,14 +37,13 @@ jobs:
             Get-ChildItem -Recurse build\windows | Select-Object FullName
             exit 1
           }
-          New-Item -ItemType Directory -Force -Path artifacts | Out-Null
-          Compress-Archive -Path "$src\*" -DestinationPath artifacts\tamtoot-windows.zip -Force
-          Get-ChildItem artifacts | Format-Table Name, Length
+          Get-ChildItem $src | Format-Table Name, Length
 
+      # Do not pre-zip: upload-artifact already wraps files in one zip for download.
       - name: Upload Windows artifact
         uses: actions/upload-artifact@v4
         with:
           name: tamtoot-windows
-          path: artifacts/tamtoot-windows.zip
+          path: build/windows/x64/runner/Release/
           if-no-files-found: error
           retention-days: 14
