@@ -24,6 +24,9 @@
     "comment": "#6B778B",
     "semantic.type": "#276D9C",
     "terminal.background": "#FFFFFF",
-    "terminal.foreground": "#273449"
+    "terminal.foreground": "#273449",
+    "scm.modified": "#896529",
+    "scm.untracked": "#42774F",
+    "scm.unpublished": "#426F9B"
   }
 }

@@ -58,7 +58,7 @@ class PlatformFiles implements FileSystemProvider, FileDialogs {
   Future<void> write(Uri uri, String text) => writeLocal(uri, text);
   @override
   Future<List<FileEntry>> list(Uri directory) async {
-    if (WorkspaceRoots.storeFor(directory) != null) {
+    if (WorkspaceRoots.contains(directory)) {
       return WorkspaceRoots.listEntries(directory);
     }
     return listLocal(directory);

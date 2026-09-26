@@ -98,6 +98,7 @@ class _CommandPaletteState extends State<CommandPalette> {
                 'keybindings.set',
                 'extensions.install',
                 'workspace.browse',
+                'workspace.toggleFolder',
                 'editor.findNext',
                 'editor.replaceAll',
               }.contains(c.id) &&
@@ -186,6 +187,25 @@ class _SettingsDialogState extends State<SettingsDialog> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
+              Row(
+                children: [
+                  const Text('IDE theme'),
+                  const SizedBox(width: 16),
+                  DropdownButton<String>(
+                    value: widget.session.theme.id,
+                    items: [
+                      for (final theme in widget.session.themes.values)
+                        DropdownMenuItem(
+                          value: theme.id,
+                          child: Text(theme.name),
+                        ),
+                    ],
+                    onChanged: (value) {
+                      if (value != null) set('theme', value);
+                    },
+                  ),
+                ],
+              ),
               Row(
                 children: [
                   const Text('Font size'),
@@ -396,6 +416,7 @@ class _CloneRepositoryDialogState extends State<CloneRepositoryDialog> {
   bool get canBrowse =>
       widget.session.documents.dialogs.supportsDirectories ||
       webDirectoryPickerSupported;
+
   /// iPhone/Android: clones go into app documents — no raw path UI.
   bool get managedDestination => !canBrowse;
 
@@ -652,7 +673,9 @@ class _CloneRepositoryDialogState extends State<CloneRepositoryDialog> {
                   }
                 },
                 decoration: InputDecoration(
-                  labelText: managedDestination ? 'Project name' : 'Folder name',
+                  labelText: managedDestination
+                      ? 'Project name'
+                      : 'Folder name',
                   hintText: 'Derived from URL if empty',
                   helperText: managedDestination
                       ? 'Saved in TamtootRepos on this device'
@@ -882,4 +905,3 @@ class _OpenProjectDialogState extends State<OpenProjectDialog> {
     );
   }
 }
-

@@ -1,59 +1,95 @@
 # Tamtoot
 
-Flutter IDE для планшетов и настольных окон: собственный редактор, docking-панели, команды, пакеты языков Dart/C#, светлая и тёмная темы, настройки и восстановление сессии.
+Tamtoot is a **free code and plain-text editor** and an extensible Flutter IDE for tablets and desktop windows. It includes an original editor engine, resizable tool panels, language packages, Git integration, and light and dark themes. Markdown (`.md`) files can be edited as plain text; a rendered Markdown preview is not implemented yet.
 
-## Запуск
+## Features
 
-Использованный SDK: `/Users/latin/Documents/Flutter/3_44_1` — фактически **Flutter 3.44.0 / Dart 3.12.0**.
+- A custom Canvas-based editor with syntax highlighting, selection, undo/redo, search and replace, keyboard shortcuts, mouse selection, and touch input.
+- Multiple document tabs and recovery of unsaved documents between sessions.
+- A project tree that expands directories **in place**. Opening a child folder keeps the project root and sibling folders visible. Directory contents load on demand.
+- Subtle Explorer indicators, also aggregated onto parent folders:
+  - `●` — unsaved editor changes;
+  - `M` — changes relative to Git HEAD;
+  - `?` — a new, untracked file;
+  - `↑` — changes in commits not reachable from the locally known upstream.
+- Git clone/fetch/pull/push and local repository operations through the existing pure-Dart Smart HTTP client.
+- Versioned Dart and C# language packages and an interface for installing declarative language definitions.
+- Midnight Ink and Porcelain themes. The active theme is saved immediately as an **IDE-wide preference**, including when selected in **Tools → Settings**.
+- A command registry, editable keybindings, font settings, tab preferences, and read-only mode.
+
+Git indicators refresh on project open, after saving, when the app resumes, every 30 seconds while a project is open, and through the Explorer refresh button. They never fetch or push automatically. The upstream information reflects the last clone/fetch/push: if there is no upstream or the current Git provider cannot read its history, Explorer shows a status note instead of guessing.
+
+## Run locally
+
+The project is tested with **Flutter 3.44.0 / Dart 3.12.0**. Add your Flutter SDK's `bin` directory to `PATH`, then run:
 
 ```sh
-export PATH="/Users/latin/Documents/Flutter/3_44_1/bin:$PATH"
 flutter pub get
 flutter run -d macos
-# или
+# Or use Chrome / a connected Android device:
 flutter run -d chrome
-# Android: подключить устройство/эмулятор, затем flutter run -d <device-id>
+flutter devices
+flutter run -d <device-id>
 ```
+
+The original development SDK is located at `/Users/latin/Documents/Flutter/3_44_1`; despite the directory name, that installation reports Flutter 3.44.0.
 
 ```sh
 dart format --output=none --set-exit-if-changed lib test
 flutter analyze
 flutter test
-flutter build apk --debug
+flutter build apk --release
 flutter build macos --debug
 flutter build web
 ```
 
-## Работа с IDE
+## Android CI artifacts on GitVerse
 
-- **File**: новый документ, открытие, сохранение, Save as, Save all, открытие папки на desktop. Изменённые вкладки отмечены точкой; закрытие требует подтверждения потери изменений.
-- **Edit**: undo/redo, буфер обмена, поиск, замена всех совпадений одной транзакцией.
-- **View**: видимость панелей, светлая/тёмная тема, восстановление раскладки, палитра команд.
-- **Tools → Settings**: шрифт, размер, табуляция, read-only, редактирование JSON горячих клавиш.
-- **Tools → Language packages**: установка пакета через содержимое `language.json`, `syntax.json` и необязательного `snippets.json`. Установленные пакеты сохраняются; пересборка не нужна.
-- Границы панелей перетаскиваются мышью или касанием. Двойное нажатие границы возвращает стандартную раскладку.
-- Касание ставит курсор, долгое нажатие выделяет слово, перемещение после долгого нажатия расширяет выделение. Обычный touch-drag прокручивает документ. Мышь поддерживает drag-выделение и контекстное меню.
-- `Ctrl/⌘+S` сохранить, `Ctrl/⌘+Z` отменить, `Ctrl/⌘+Shift+Z` повторить, `Ctrl/⌘+F` поиск, `Ctrl/⌘+Shift+P` команды. Реестр содержит сочетания обеих платформ.
+[Build Android APK](.gitverse/workflows/build-apk.yml) runs automatically on pushes to `master`, on `v*` tags, and manually through **CI/CD → Build Android APK → Run workflow**.
 
-Несохранённые документы, активная вкладка, настройки, горячие клавиши и раскладка сохраняются локально после 450 мс покоя и при уходе приложения в фон. Это восстановление сессии, а не запись открытого файла на диск. При принудительном завершении до записи последние изменения могут не сохраниться.
+The workflow installs Java, Android SDK and the pinned Flutter SDK, runs formatting checks, static analysis and tests, builds a release-mode APK, and uploads it as a downloadable artifact. Open a completed run and download **tamtoot-apk** from its artifacts section. Artifacts are retained for **14 days**. CI/CD must be enabled in the repository settings.
 
-## Поддержка платформ
+The workflow **does not publish to app stores or create store releases**. The current Android release configuration uses a debug signing key, so these are test/preview artifacts. Before distributing through stores, configure a persistent release signing key and the store-specific versioning/package requirements; ephemeral CI debug keys are not suitable for maintaining installed release updates. No signing credentials are committed to this repository.
 
-| Платформа | Файлы | Папки | Сохранение |
-|---|---|---|---|
-| Android | Системный выбор документа | SAF tree adapter — следующий этап | Системный SAF Create Document; повторное сохранение вызывает выбор места |
-| macOS / Windows / Linux | Системный выбор файла | Локальный provider | Прямая запись открытого файла / Save as |
-| Web | Выбор файла браузером | Не предоставляется | Скачивание UTF-8 файла |
-| iOS | Системный выбор файла | Не предоставляется | Сессия сохраняется; export provider пока не подключён, команда выдаёт явное сообщение |
+The existing Windows workflows remain available separately.
 
-На macOS sandbox-доступ к ранее выбранной папке может потребовать повторного выбора после перезапуска: security-scoped bookmarks ещё не реализованы. Текст нормализуется в LF, сохраняется как UTF-8.
+## Everyday use
 
-## Ограничения v0.1
+- **File**: new/open/save/save as/save all, open project, clone repository.
+- **Edit**: undo/redo, clipboard, find and replace.
+- **View**: show/hide panels, switch theme, reset layout, command palette.
+- **Tools → Settings**: theme, font, size, tabs, read-only mode, and keybindings.
+- **Tools → Language packages**: install versioned `language.json`, `syntax.json`, and optional `snippets.json` without rebuilding the IDE.
 
-Пока нет компиляторов, LSP, PTY, отладчика, Git, SSH, marketplace и совместной работы. Панели показывают реальное состояние отсутствующих провайдеров.
+Drag panel dividers to resize. Click folders to expand or collapse them, and files to open them. Tap in the editor to position the cursor; long-press and drag to select text. Ordinary touch dragging scrolls the document.
 
-В docking работают модель дерева, tab groups инструментальных панелей, resize, visibility, reset и persistence. Перемещение/DnD панелей и несколько одновременно видимых групп редактора — следующий этап.
+Common shortcuts: `Ctrl/⌘+S` saves, `Ctrl/⌘+Z` undoes, `Ctrl/⌘+Shift+Z` redoes, `Ctrl/⌘+F` finds, and `Ctrl/⌘+Shift+P` opens commands.
 
-Редактор рисует только видимые строки с overscan. Подсветка v1 построчная и лексическая, без семантики LSP. Сниппеты, folding и diagnostics представлены контрактами; UI completion появится с провайдерами. UTF-16 surrogate-пары защищены при удалении; сложные grapheme-clusters требуют дальнейшей доработки.
+The application saves session data after a 450 ms idle period and when it moves into the background. Theme changes are persisted immediately. Session recovery is separate from saving the actual file. Force-quitting during a pending write may lose the latest unsaved changes.
 
-Шрифт JetBrains Mono включён с [SIL Open Font License](assets/fonts/OFL.txt). Иконки интерфейса — Material Icons из Flutter.
+## Current limitations
+
+This is an actively developed foundation, not a production compiler/debugger environment. Full LSP integration, PTY terminals, debugging, executable third-party extension hosting, advanced docking/drag-and-drop, and independent split editor groups are still future work. Placeholder panels identify unavailable providers explicitly.
+
+The editor virtualizes visible lines with overscan. Storage currently uses an indexed string with O(n) edits. IME and session persistence still transfer the full document. Syntax highlighting is lexical and line-based. Folding, diagnostics, snippets and multiple cursors have extension/model boundaries, while their complete UI is not implemented.
+
+Platform file access differs: desktop supports local files/folders; Android uses system document selection and SAF export; Web file/folder capabilities depend on browser support and permission; the iOS export provider remains incomplete. macOS may require reopening a sandbox-protected folder after restart because security-scoped bookmarks are not implemented.
+
+The existing Git client has limitations around staging, ignore rules, packed/shallow histories and repository layouts. Unsupported Git reads are reported in Explorer; ordinary file browsing remains available.
+
+## Architecture and documentation
+
+The editor, command system, layout model, schemas and language definitions are independent of Flutter widgets and Riverpod. Riverpod connects application state to the UI. Platform access is behind providers; plugins do not receive internal state providers.
+
+- [Original specification](docs/specification.md)
+- [Requirements matrix](docs/requirements.md)
+- [Architecture](docs/architecture.md)
+- [Versioned formats](docs/schemas.md)
+- [Public extension API](docs/extension-api.md)
+- [Foundation verification](docs/verification.md)
+
+Some development documentation is currently in Russian.
+
+## Third-party notices
+
+JetBrains Mono is bundled under the [SIL Open Font License](assets/fonts/OFL.txt), from the official JetBrains/JetBrainsMono repository. UI icons are Material Icons supplied with Flutter. Microsoft branding and assets are not used. A separate license for this repository's original source has not yet been selected.

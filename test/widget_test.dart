@@ -6,8 +6,58 @@ import 'package:tamtoot/app/app.dart';
 import 'package:tamtoot/app/providers.dart';
 import 'package:tamtoot/editor/widgets/code_editor.dart';
 import 'support.dart';
+import 'package:tamtoot/core/filesystem/filesystem.dart';
 
 void main() {
+  testWidgets(
+    'Explorer expands folders in place and opens files without changing root',
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(1280, 900));
+      final root = Uri.parse('memory:///project/'),
+          folder = Uri.parse('memory:///project/lib/');
+      final files = TreeFiles(root, folder);
+      final session = await testSession(files: files);
+      session.workspaceRoot = root;
+      await session.explorer.open(root);
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [sessionProvider.overrideWithValue(session)],
+          child: const TamtootApp(),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final folderFinder = find.byKey(ValueKey('explorer-$folder'));
+      await tester.tap(folderFinder);
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(ValueKey('explorer-${folder.resolve('main.dart')}')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(ValueKey('explorer-${root.resolve('README.md')}')),
+        findsOneWidget,
+      );
+      expect(session.workspaceRoot, root);
+      await tester.tap(
+        find.byKey(ValueKey('explorer-${folder.resolve('main.dart')}')),
+      );
+      await tester.pumpAndSettle();
+      expect(session.documents.active!.name, 'main.dart');
+      expect(session.workspaceRoot, root);
+      await tester.tap(folderFinder);
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(ValueKey('explorer-${folder.resolve('main.dart')}')),
+        findsNothing,
+      );
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox());
+      await tester.pumpAndSettle();
+      await tester.runAsync(session.dispose);
+      await tester.binding.setSurfaceSize(null);
+    },
+  );
+
   testWidgets('shell renders; theme, editor IME, undo and resize work', (
     tester,
   ) async {
@@ -110,4 +160,18 @@ void main() {
       await tester.runAsync(session.dispose);
     },
   );
+}
+
+class TreeFiles extends MemoryFileSystem {
+  TreeFiles(this.root, this.folder) {
+    files[folder.resolve('main.dart')] = 'void main() {}';
+  }
+  final Uri root, folder;
+  @override
+  Future<List<FileEntry>> list(Uri directory) async => directory == root
+      ? [
+          FileEntry(folder, 'lib', directory: true),
+          FileEntry(root.resolve('README.md'), 'README.md'),
+        ]
+      : [FileEntry(folder.resolve('main.dart'), 'main.dart')];
 }

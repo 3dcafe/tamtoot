@@ -26,3 +26,9 @@ Web-интерфейс открыт в браузере и визуально п
 `flutter doctor` сообщает об отсутствующем Android cmdline-tools и неизвестном статусе лицензий; установленного Gradle/SDK оказалось достаточно для debug APK. Лицензии автоматически не принимались. При последующем обновлении toolchain их следует проверить средствами Android Studio.
 
 Предупреждение Xcode о Run Script без outputs относится к стандартной Flutter Assemble build phase. Web build может сообщать о необязательном CupertinoIcons font из Material defaults; приложение использует Material Icons и JetBrains Mono.
+
+## Explorer / theme update
+
+The project tree now loads and expands child folders in place, including nested browser workspace paths. Explorer displays independent unsaved/modified/untracked/unpublished indicators and aggregates them onto folders. Publication status compares commit reachability against the locally known upstream; missing or unsupported history is reported explicitly. Theme selection is saved immediately as a user-level IDE preference.
+
+The expanded test suite passes **57 tests**, including folder collapse/reopen, stale asynchronous directory loads, access failures, nested Web paths, immediate theme restoration, combined Git indicators, reverted unpublished commits, branches behind upstream, and actual Explorer widget interactions.

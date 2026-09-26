@@ -13,36 +13,46 @@ final class WorkspaceRoots {
 
   static GitRepositoryStore? storeFor(Uri root) => _stores[root.toString()];
 
-  static Future<List<FileEntry>> listEntries(Uri root) async {
-    final store = storeFor(root);
-    if (store == null) return const [];
-    final paths = await store.listFiles('');
-    final entries = <FileEntry>[];
-    final seenDirs = <String>{};
+  static bool contains(Uri uri) =>
+      _stores.keys.any((key) => _isUnder(Uri.parse(key), uri));
+
+  static Future<List<FileEntry>> listEntries(Uri directory) async {
+    final roots =
+        _stores.keys
+            .where((key) => _isUnder(Uri.parse(key), directory))
+            .toList()
+          ..sort((a, b) => b.length.compareTo(a.length));
+    if (roots.isEmpty) return const [];
+    final root = Uri.parse(roots.first), store = _stores[roots.first]!;
+    final relative = Uri.decodeComponent(
+      _relative(root, directory)!,
+    ).replaceAll(RegExp(r'/+$'), '');
+    final prefix = relative.isEmpty ? '' : '$relative/';
+    final paths = await store.listFiles(relative);
+    final entries = <String, FileEntry>{};
+    final base = Uri.parse(
+      '${directory.toString().replaceAll(RegExp(r'/+$'), '')}/',
+    );
     for (final path in paths) {
-      final parts = path.split('/');
-      if (parts.length > 1) {
-        final top = parts.first;
-        if (seenDirs.add(top)) {
-          entries.add(FileEntry(root.resolve('$top/'), top, directory: true));
-        }
-      } else {
-        entries.add(FileEntry(root.resolve(path), path));
-      }
+      if (!path.startsWith(prefix)) continue;
+      final remainder = path.substring(prefix.length);
+      if (remainder.isEmpty) continue;
+      final parts = remainder.split('/'), name = remainder.split('/').first;
+      if (name == '.git') continue;
+      final isDirectory = parts.length > 1;
+      entries[name] = FileEntry(
+        base.resolve('${Uri.encodeComponent(name)}${isDirectory ? '/' : ''}'),
+        name,
+        directory: isDirectory,
+      );
     }
-    // Also include nested files when browsing a subdirectory — caller passes root.
-    if (root.pathSegments.where((s) => s.isNotEmpty).isNotEmpty) {
-      // listing is always from store root relative paths; IdeSession uses flat list
-      // at workspace root only for MVP.
-    }
-    entries.sort(
+    return entries.values.toList()..sort(
       (a, b) => a.directory == b.directory
           ? a.name.compareTo(b.name)
           : a.directory
           ? -1
           : 1,
     );
-    return entries;
   }
 
   static Future<String?> readText(Uri fileUri) async {
@@ -53,7 +63,7 @@ final class WorkspaceRoots {
       final relative = _relative(root, fileUri);
       if (relative == null) continue;
       try {
-        return await entry.value.readText(relative);
+        return await entry.value.readText(Uri.decodeComponent(relative));
       } catch (_) {
         return null;
       }

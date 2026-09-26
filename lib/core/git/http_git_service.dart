@@ -6,11 +6,12 @@ import 'git_objects.dart';
 import 'git_pack.dart';
 import 'git_service.dart';
 import 'git_store.dart';
+import 'git_publication.dart';
 import '../workspace/tamtoot_meta.dart';
 
 /// Pure Dart Smart-HTTP git client. Works on Android / iOS / desktop via
 /// [GitHttpTransport] + [GitRepositoryStore] (no system `git` binary).
-class HttpGitService implements GitService {
+class HttpGitService implements GitService, GitPublicationProvider {
   HttpGitService({
     required this.transport,
     required this.openStore,
@@ -279,6 +280,12 @@ class HttpGitService implements GitService {
     await db.writeRef('refs/remotes/$remote/$short', newHash);
     return _ok('Pushed $branchRef → $newHash', const ['push']);
   }
+
+  @override
+  Future<GitPublicationState> publicationState(Uri directory) =>
+      readPublicationState(
+        GitObjectDatabase(openStore(directory), inflateAt, deflate),
+      );
 
   @override
   Future<GitResult> status(Uri directory, {bool porcelain = true}) async {

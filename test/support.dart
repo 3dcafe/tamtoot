@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'package:tamtoot/app/ide_session.dart';
 import 'package:tamtoot/core/filesystem/filesystem.dart';
+import 'package:tamtoot/core/git/git_service.dart';
 import 'package:tamtoot/core/themes/ide_theme.dart';
 import 'package:tamtoot/platform/git_service.dart';
 import 'package:tamtoot/workspace/documents/document_service.dart';
@@ -27,11 +28,15 @@ class FakeDialogs implements FileDialogs {
       Uri.parse('memory:///$name');
 }
 
-Future<IdeSession> testSession({MemoryStore? store}) async {
+Future<IdeSession> testSession({
+  MemoryStore? store,
+  GitService? git,
+  FileSystemProvider? files,
+}) async {
   final session = IdeSession(
     store: store ?? MemoryStore(),
-    documents: DocumentService(MemoryFileSystem(), FakeDialogs()),
-    git: createGitService(),
+    documents: DocumentService(files ?? MemoryFileSystem(), FakeDialogs()),
+    git: git ?? createGitService(),
   );
   for (final id in ['night', 'day']) {
     session.themes[id] = IdeTheme.parse(

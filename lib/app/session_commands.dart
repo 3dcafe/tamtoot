@@ -50,16 +50,29 @@ void registerSessionCommands(IdeSession s, PresentationActions ui) {
   add('file.save', 'Save', (_) async {
     if (await s.documents.save(s.documents.active!)) {
       s.log('Saved ${s.documents.active!.name}');
+      await s.refreshGitIndicators();
     }
   }, enabled: editor);
   add('file.saveAs', 'Save as…', (_) async {
     await s.documents.save(s.documents.active!, saveAs: true);
+    await s.refreshExplorer();
   }, enabled: editor);
   add('file.saveAll', 'Save all', (_) async {
     for (final d in s.documents.documents.where((d) => d.dirty).toList()) {
       if (!await s.documents.save(d)) break;
     }
+    await s.refreshExplorer();
   });
+  add(
+    'workspace.refresh',
+    'Refresh project tree and Git status',
+    (_) => s.refreshExplorer(),
+  );
+  add(
+    'workspace.toggleFolder',
+    'Expand or collapse folder',
+    (arg) => s.explorer.toggle(arg as Uri),
+  );
   add('file.close', 'Close document', (arg) async {
     final doc = arg is String
         ? s.documents.documents.where((d) => d.id == arg).firstOrNull
@@ -82,11 +95,7 @@ void registerSessionCommands(IdeSession s, PresentationActions ui) {
     enabled: () => s.documents.dialogs.supportsDirectories,
     visible: () => s.documents.dialogs.supportsDirectories,
   );
-  add(
-    'workspace.openProject',
-    'Open project…',
-    (_) => ui.showOpenProject(),
-  );
+  add('workspace.openProject', 'Open project…', (_) => ui.showOpenProject());
   add(
     'git.clone',
     'Clone repository…',
@@ -186,9 +195,11 @@ void registerSessionCommands(IdeSession s, PresentationActions ui) {
     final values = arg as List<String>;
     s.documents.active!.editor.replaceAll(values[0], values[1]);
   }, enabled: editor);
-  add('view.theme', 'Switch light / dark theme', (_) {
-    s.settings.set('theme', s.theme.dark ? 'day' : 'night');
-  });
+  add(
+    'view.theme',
+    'Switch light / dark theme',
+    (_) => s.selectTheme(s.theme.dark ? 'day' : 'night'),
+  );
   add('view.commands', 'Command palette', (_) => ui.showCommands());
   add('settings.open', 'Settings & keybindings', (_) => ui.showSettings());
   add('extensions.manage', 'Language packages', (_) => ui.showExtensions());
@@ -200,8 +211,12 @@ void registerSessionCommands(IdeSession s, PresentationActions ui) {
     ).install(values[0], values[1], values[2].isEmpty ? null : values[2]);
     s.log('Installed ${language.name}');
   });
-  add('settings.set', 'Change setting', (arg) {
+  add('settings.set', 'Change setting', (arg) async {
     final values = arg as MapEntry<String, Object>;
+    if (values.key == 'theme') {
+      await s.selectTheme(values.value as String);
+      return;
+    }
     s.settings.set(values.key, values.value);
     for (final d in s.documents.documents) {
       s.configure(d);

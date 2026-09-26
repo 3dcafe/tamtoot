@@ -42,6 +42,8 @@ v1 — первая опубликованная схема. Схемы v0 не 
 
 Порядок модификаторов: `ctrl+meta+alt+shift+key`. Регистр игнорируется. Примеры: ctrl+s, meta+shift+z, shift+arrow left. Реестр разрешает строку в command ID; обработчик клавиатуры не вызывает save напрямую. Ненайденная команда сообщается через command error boundary.
 
+Theme is an IDE-wide user preference: its effective value comes from the user layer (or the default), not a workspace override. Other editor settings retain defaults → user → workspace precedence.
+
 ## Persistence
 
 Ключи SharedPreferences имеют префикс `tamtoot.`: settings, layout, keybindings, session, language.index, language.<id>. Данные локальны. Сессия содержит текст открытых документов; это восстанавливаемые черновики, а не замена файловой системы проекта. Можно очистить данные приложения стандартными средствами ОС/браузера.

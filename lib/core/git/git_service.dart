@@ -168,3 +168,17 @@ abstract interface class GitService {
     GitCredentials? credentials,
   });
 }
+
+/// Files touched by commits reachable from HEAD but not the locally known
+/// upstream. A null [GitPublicationState.upstream] means status is unknown.
+class GitPublicationState {
+  const GitPublicationState({this.upstream, this.paths = const {}, this.note});
+  final String? upstream;
+  final Set<String> paths;
+  final String? note;
+}
+
+/// Optional read-only capability; never fetches or pushes to determine colors.
+abstract interface class GitPublicationProvider {
+  Future<GitPublicationState> publicationState(Uri directory);
+}

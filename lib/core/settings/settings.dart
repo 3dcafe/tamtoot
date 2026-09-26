@@ -11,7 +11,9 @@ class SettingsService {
     'readOnly': false,
   };
   final Map<String, Object> user = {}, workspace = {};
-  Object get(String key) => workspace[key] ?? user[key] ?? defaults[key]!;
+  Object get(String key) => key == 'theme'
+      ? user[key] ?? defaults[key]!
+      : workspace[key] ?? user[key] ?? defaults[key]!;
   double get fontSize => (get('fontSize') as num).toDouble();
   String get theme => get('theme') as String;
   void set(String key, Object value, {bool forWorkspace = false}) {

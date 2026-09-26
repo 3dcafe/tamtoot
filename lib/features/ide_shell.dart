@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../app/ide_session.dart';
+import '../workspace/explorer/file_indicators.dart';
 import '../app/providers.dart';
 import '../app/session_commands.dart';
 import '../editor/widgets/code_editor.dart';
@@ -132,19 +133,19 @@ class _IdeShellState extends ConsumerState<IdeShell> {
               scrollDirection: Axis.horizontal,
               child: Row(
                 children: [
-                _menuItem('File', const [
-                  'file.new',
-                  'file.open',
-                  '—',
-                  'workspace.open',
-                  'workspace.openProject',
-                  'git.clone',
-                  '—',
-                  'file.save',
-                  'file.saveAs',
-                  'file.saveAll',
-                  'file.close',
-                ]),
+                  _menuItem('File', const [
+                    'file.new',
+                    'file.open',
+                    '—',
+                    'workspace.open',
+                    'workspace.openProject',
+                    'git.clone',
+                    '—',
+                    'file.save',
+                    'file.saveAs',
+                    'file.saveAll',
+                    'file.close',
+                  ]),
                   _menuItem('Edit', [
                     'editor.undo',
                     'editor.redo',
@@ -483,6 +484,11 @@ class _IdeShellState extends ConsumerState<IdeShell> {
                   style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
                 ),
               ),
+              action(
+                Icons.refresh,
+                'Refresh project tree and Git status',
+                'workspace.refresh',
+              ),
             ],
           ),
         ),
@@ -510,6 +516,7 @@ class _IdeShellState extends ConsumerState<IdeShell> {
                   Icons.description_outlined,
                   () => session.run('document.activate', d.id),
                   selected: session.documents.active == d,
+                  indicators: session.indicators(d.uri, unsaved: d.dirty),
                 ),
               const SizedBox(height: 12),
               Padding(
@@ -556,25 +563,66 @@ class _IdeShellState extends ConsumerState<IdeShell> {
                       ),
                     ),
                   ),
-                _entry(
-                  '..',
-                  Icons.drive_folder_upload_outlined,
-                  () => session.run(
-                    'workspace.browse',
-                    session.workspaceRoot!.resolve('../'),
-                  ),
-                ),
-                for (final e in session.entries)
-                  _entry(
-                    e.name,
-                    e.directory
-                        ? Icons.folder_outlined
-                        : Icons.description_outlined,
-                    () => session.run(
-                      e.directory ? 'workspace.browse' : 'file.openEntry',
-                      e.directory ? e.uri : e,
+                if (session.gitStatusNote != null)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 4,
+                    ),
+                    child: Text(
+                      session.gitStatusNote!,
+                      style: TextStyle(fontSize: 10, color: color('muted')),
                     ),
                   ),
+                if (session.explorer.loading.contains(session.workspaceRoot))
+                  const LinearProgressIndicator(),
+                if (session.explorer.errors[session.workspaceRoot] != null)
+                  Padding(
+                    padding: const EdgeInsets.all(12),
+                    child: Text(
+                      session.explorer.errors[session.workspaceRoot]!,
+                      style: TextStyle(color: color('error')),
+                    ),
+                  ),
+                for (final row in session.explorer.rows) ...[
+                  _entry(
+                    row.entry.name,
+                    row.entry.directory
+                        ? (session.explorer.expanded.contains(row.entry.uri)
+                              ? Icons.folder_open_outlined
+                              : Icons.folder_outlined)
+                        : Icons.description_outlined,
+                    () => session.run(
+                      row.entry.directory
+                          ? 'workspace.toggleFolder'
+                          : 'file.openEntry',
+                      row.entry.directory ? row.entry.uri : row.entry,
+                    ),
+                    entryKey: ValueKey('explorer-${row.entry.uri}'),
+                    depth: row.depth,
+                    directory: row.entry.directory,
+                    expanded: session.explorer.expanded.contains(row.entry.uri),
+                    loading: session.explorer.loading.contains(row.entry.uri),
+                    selected:
+                        !row.entry.directory &&
+                        session.documents.active?.uri == row.entry.uri,
+                    indicators: session.indicators(
+                      row.entry.uri,
+                      directory: row.entry.directory,
+                    ),
+                  ),
+                  if (session.explorer.errors[row.entry.uri] != null)
+                    Padding(
+                      padding: EdgeInsets.only(
+                        left: 28 + row.depth * 14.0,
+                        right: 8,
+                      ),
+                      child: Text(
+                        session.explorer.errors[row.entry.uri]!,
+                        style: TextStyle(fontSize: 11, color: color('error')),
+                      ),
+                    ),
+                ],
               ],
               if (session.recentWorkspaces.isNotEmpty) ...[
                 Padding(
@@ -620,24 +668,73 @@ class _IdeShellState extends ConsumerState<IdeShell> {
     IconData icon,
     VoidCallback onTap, {
     bool selected = false,
-  }) => Material(
-    color: selected ? color('selection') : Colors.transparent,
-    child: InkWell(
-      onTap: onTap,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
-        child: Row(
-          children: [
-            Icon(icon, size: 16, color: color('muted')),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Text(
-                name,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(fontSize: 12),
-              ),
+    Key? entryKey,
+    int depth = 0,
+    bool directory = false,
+    bool expanded = false,
+    bool loading = false,
+    FileIndicators indicators = const FileIndicators(),
+  }) => Tooltip(
+    message: indicators.any ? '$name · ${indicators.description}' : name,
+    child: Semantics(
+      expanded: directory ? expanded : null,
+      child: Material(
+        key: entryKey,
+        color: selected ? color('selection') : Colors.transparent,
+        child: InkWell(
+          onTap: onTap,
+          child: Padding(
+            padding: EdgeInsets.fromLTRB(8 + depth * 14.0, 9, 8, 9),
+            child: Row(
+              children: [
+                if (directory)
+                  Icon(
+                    expanded ? Icons.expand_more : Icons.chevron_right,
+                    size: 14,
+                    color: color('muted'),
+                  )
+                else
+                  const SizedBox(width: 14),
+                Icon(
+                  icon,
+                  size: 16,
+                  color: color(
+                    indicators.any ? indicators.colorToken : 'muted',
+                  ),
+                ),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    name,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: indicators.any
+                          ? color(indicators.colorToken)
+                          : null,
+                    ),
+                  ),
+                ),
+                if (loading)
+                  const SizedBox(
+                    width: 10,
+                    height: 10,
+                    child: CircularProgressIndicator(strokeWidth: 1),
+                  ),
+                if (indicators.any)
+                  Padding(
+                    padding: const EdgeInsets.only(left: 4),
+                    child: Text(
+                      indicators.badge,
+                      style: TextStyle(
+                        fontSize: 10,
+                        color: color(indicators.colorToken),
+                      ),
+                    ),
+                  ),
+              ],
             ),
-          ],
+          ),
         ),
       ),
     ),

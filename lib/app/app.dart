@@ -22,6 +22,8 @@ class _TamtootAppState extends ConsumerState<TamtootApp>
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state != AppLifecycleState.resumed) {
       unawaited(ref.read(sessionProvider).persistNow());
+    } else {
+      unawaited(ref.read(sessionProvider).refreshGitIndicators());
     }
   }
 

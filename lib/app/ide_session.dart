@@ -9,9 +9,10 @@ import '../core/themes/ide_theme.dart';
 import '../core/workspace/tamtoot_meta.dart';
 import '../languages/language_registry.dart';
 import '../platform/tamtoot_meta_store.dart';
-import '../platform/workspace_roots.dart';
 import '../workspace/documents/document_service.dart';
 import '../workspace/layout/dock_layout.dart';
+import '../workspace/explorer/explorer_tree.dart';
+import '../workspace/explorer/file_indicators.dart';
 
 /// Application orchestration. UI observes events through a Riverpod adapter.
 class IdeSession {
@@ -32,7 +33,115 @@ class IdeSession {
   final List<String> errors = [];
   final List<String> recentWorkspaces = [];
   Uri? workspaceRoot;
-  List<FileEntry> entries = [];
+  late final explorer = ExplorerTree(
+    documents.files.list,
+    () => changed(persist: false),
+  );
+  List<FileEntry> get entries => explorer.children[workspaceRoot] ?? [];
+  Map<String, GitStatusEntry> _gitEntries = {};
+  Set<String> _unpublished = {};
+  String? gitStatusNote;
+  bool _refreshingGit = false;
+  Timer? _gitTimer;
+
+  FileIndicators indicators(
+    Uri? uri, {
+    bool directory = false,
+    bool unsaved = false,
+  }) {
+    if (uri == null) return FileIndicators(unsaved: unsaved);
+    bool matches(Uri candidate) =>
+        candidate == uri ||
+        (directory &&
+            candidate.toString().startsWith(
+              '${uri.toString().replaceAll(RegExp(r'/+$'), '')}/',
+            ));
+    final root = workspaceRoot;
+    Uri pathUri(String path) =>
+        root!.resolve(path.split('/').map(Uri.encodeComponent).join('/'));
+    final states = root == null
+        ? <GitStatusEntry>[]
+        : _gitEntries.entries
+              .where((e) => matches(pathUri(e.key)))
+              .map((e) => e.value);
+    return FileIndicators(
+      unsaved:
+          unsaved ||
+          documents.documents.any(
+            (d) => d.uri != null && matches(d.uri!) && d.dirty,
+          ),
+      modified: states.any((e) => !e.isUntracked && e.isChanged),
+      untracked: states.any((e) => e.isUntracked),
+      unpublished:
+          root != null && _unpublished.any((path) => matches(pathUri(path))),
+    );
+  }
+
+  Future<void> refreshGitIndicators() async {
+    final root = workspaceRoot;
+    if (root == null || !git.available || _refreshingGit) return;
+    _refreshingGit = true;
+    final status = <String, GitStatusEntry>{};
+    var unpublished = <String>{};
+    String? note;
+    try {
+      if (await git.isRepository(root)) {
+        try {
+          for (final entry in await git.statusEntries(root)) {
+            if (entry.isChanged &&
+                entry.path != '.tamtoot' &&
+                !entry.path.startsWith('.tamtoot/')) {
+              status[entry.path] = entry;
+            }
+          }
+        } catch (error) {
+          note = 'Git working-tree status unavailable: $error';
+        }
+        final provider = git;
+        if (provider is GitPublicationProvider) {
+          try {
+            final state = await (provider as GitPublicationProvider)
+                .publicationState(root);
+            unpublished = state.paths;
+            note ??= state.note;
+          } catch (error) {
+            note ??= 'Unpublished status unavailable: $error';
+          }
+        }
+      }
+      if (workspaceRoot != root || _disposed) return;
+      _gitEntries = status;
+      _unpublished = unpublished;
+      gitStatusNote = note;
+      changed(persist: false);
+    } catch (error) {
+      if (workspaceRoot == root && !_disposed) {
+        gitStatusNote = 'Git status unavailable: $error';
+        _gitEntries = {};
+        _unpublished = {};
+        changed(persist: false);
+      }
+    } finally {
+      _refreshingGit = false;
+      if (workspaceRoot != root && !_disposed) {
+        unawaited(refreshGitIndicators());
+      }
+    }
+  }
+
+  Future<void> refreshExplorer() async {
+    await explorer.refresh();
+    await refreshGitIndicators();
+  }
+
+  Future<void> selectTheme(String id) async {
+    if (!themes.containsKey(id)) throw ArgumentError('Unknown theme: $id');
+    settings.set('theme', id);
+    changed(persist: false);
+    // Store immediately; do not wait for the general session debounce.
+    await persistNow();
+  }
+
   TamtootProjectMeta? projectMeta;
   bool workspaceHasGit = false;
   String message = 'Ready';
@@ -65,19 +174,19 @@ class IdeSession {
 
   /// Open [root] in Solution Explorer and remember it in recent workspaces.
   Future<void> openWorkspaceFolder(Uri root) async {
-    final virtual = WorkspaceRoots.storeFor(root);
-    if (virtual != null) {
-      entries = await WorkspaceRoots.listEntries(root);
-    } else {
-      entries = await documents.files.list(root);
-    }
+    root = Uri.parse('${root.toString().replaceAll(RegExp(r'/+$'), '')}/');
     workspaceRoot = root;
+    _gitEntries = {};
+    _unpublished = {};
+    gitStatusNote = null;
+    await explorer.open(root);
+    if (workspaceRoot != root) return;
     recentWorkspaces
       ..remove(root.toString())
       ..insert(0, root.toString());
     if (recentWorkspaces.length > 10) recentWorkspaces.removeLast();
 
-    workspaceHasGit = await hasGitDirectory(root);
+    workspaceHasGit = git.available && await git.isRepository(root);
     var meta = await readTamtootProjectMeta(root);
     if (meta != null) {
       meta = meta.copyWith(lastOpenedAt: DateTime.now().toUtc());
@@ -122,6 +231,12 @@ class IdeSession {
         log('Opened ${root.path}');
       }
     }
+    await refreshGitIndicators();
+    _gitTimer?.cancel();
+    _gitTimer = Timer.periodic(
+      const Duration(seconds: 30),
+      (_) => unawaited(refreshGitIndicators()),
+    );
     changed();
   }
 
@@ -253,6 +368,7 @@ class IdeSession {
   }
 
   Future<void> dispose() async {
+    _gitTimer?.cancel();
     _saveTimer?.cancel();
     await persistNow();
     _disposed = true;

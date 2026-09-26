@@ -21,7 +21,9 @@ class ClonedProjectRef {
   String get subtitle {
     final remote = remoteUrl;
     if (remote != null && remote.isNotEmpty) {
-      final branchPart = (branch == null || branch!.isEmpty) ? '' : ' · $branch';
+      final branchPart = (branch == null || branch!.isEmpty)
+          ? ''
+          : ' · $branch';
       return '$remote$branchPart';
     }
     return uri.path;
