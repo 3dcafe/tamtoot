@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "packageVersion": "0.1.0",
+  "id": "night",
+  "name": "Midnight Ink",
+  "dark": true,
+  "fontFamily": "JetBrainsMono",
+  "iconTheme": "material",
+  "colors": {
+    "shell": "#151B26",
+    "panel": "#1B2331",
+    "editor": "#101722",
+    "foreground": "#D6DFED",
+    "muted": "#8291A8",
+    "border": "#2A3649",
+    "accent": "#66C9B8",
+    "selection": "#294C60",
+    "currentLine": "#1B2A3B",
+    "keyword": "#C6A0F6",
+    "string": "#9BCD9A",
+    "number": "#EBC48D",
+    "type": "#77BDD9",
+    "error": "#C88C96",
+    "comment": "#8291A8",
+    "semantic.type": "#77BDD9",
+    "terminal.background": "#101722",
+    "terminal.foreground": "#D6DFED"
+  }
+}

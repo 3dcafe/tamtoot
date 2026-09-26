@@ -1,0 +1,55 @@
+{
+  "schemaVersion": 1,
+  "packageVersion": "0.1.0",
+  "id": "csharp",
+  "name": "C#",
+  "extensions": [
+    ".cs"
+  ],
+  "comments": {
+    "line": "//",
+    "block": {
+      "open": "/*",
+      "close": "*/"
+    }
+  },
+  "brackets": [
+    {
+      "open": "(",
+      "close": ")"
+    },
+    {
+      "open": "[",
+      "close": "]"
+    },
+    {
+      "open": "{",
+      "close": "}"
+    }
+  ],
+  "autoClosingPairs": [
+    {
+      "open": "(",
+      "close": ")"
+    },
+    {
+      "open": "[",
+      "close": "]"
+    },
+    {
+      "open": "{",
+      "close": "}"
+    },
+    {
+      "open": "\"",
+      "close": "\""
+    }
+  ],
+  "indentation": {
+    "increaseAfter": "{"
+  },
+  "icons": {
+    "symbol": "code"
+  },
+  "adapters": []
+}

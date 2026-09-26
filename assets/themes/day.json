@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "packageVersion": "0.1.0",
+  "id": "day",
+  "name": "Porcelain",
+  "dark": false,
+  "fontFamily": "JetBrainsMono",
+  "iconTheme": "material",
+  "colors": {
+    "shell": "#E9EDF3",
+    "panel": "#F5F7FA",
+    "editor": "#FFFFFF",
+    "foreground": "#273449",
+    "muted": "#6B778B",
+    "border": "#D2DAE5",
+    "accent": "#137A70",
+    "selection": "#CEEAE6",
+    "currentLine": "#F0F5FA",
+    "keyword": "#794CB3",
+    "string": "#427745",
+    "number": "#96691D",
+    "type": "#276D9C",
+    "error": "#B83F55",
+    "comment": "#6B778B",
+    "semantic.type": "#276D9C",
+    "terminal.background": "#FFFFFF",
+    "terminal.foreground": "#273449"
+  }
+}

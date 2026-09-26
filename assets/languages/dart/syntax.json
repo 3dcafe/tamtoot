@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "packageVersion": "0.1.0",
+  "rules": [
+    {
+      "pattern": "//.*$|/\\*.*?\\*/",
+      "scope": "comment"
+    },
+    {
+      "pattern": "\"(?:\\\\.|[^\"\\\\])*\"|\\x27(?:\\\\.|[^\\x27\\\\])*\\x27",
+      "scope": "string"
+    },
+    {
+      "pattern": "\\b(?:abstract|as|assert|async|await|break|case|catch|class|const|continue|default|deferred|do|dynamic|else|enum|export|extends|extension|external|factory|false|final|finally|for|Function|get|hide|if|implements|import|in|interface|is|late|library|mixin|new|null|on|operator|part|required|rethrow|return|sealed|set|show|static|super|switch|sync|this|throw|true|try|typedef|var|void|when|while|with|yield)\\b",
+      "scope": "keyword"
+    },
+    {
+      "pattern": "\\b\\d+(?:\\.\\d+)?\\b",
+      "scope": "number"
+    },
+    {
+      "pattern": "\\b[A-Z][A-Za-z0-9_]*\\b",
+      "scope": "type"
+    }
+  ]
+}

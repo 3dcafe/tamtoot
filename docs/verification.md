@@ -1,0 +1,28 @@
+# Проверка v0.1 · 26 сентября 2026
+
+Окружение: macOS 26.6.2; SDK `/Users/latin/Documents/Flutter/3_44_1`, фактически Flutter 3.44.0 stable / Dart 3.12.0; Xcode 26.5; Android SDK 36.
+
+## Автоматические проверки
+
+- `dart format lib test` — выполнено.
+- `flutter analyze` — **No issues found**.
+- `flutter test --timeout 30s` — **34 tests passed**.
+- `flutter build apk --debug` — успешно, `build/app/outputs/flutter-apk/app-debug.apk`.
+- `flutter build macos --debug` — успешно, `build/macos/Build/Products/Debug/tamtoot.app`.
+- `flutter build web` — успешно, `build/web`.
+
+Покрытие: document edits, UTF-16 offset↔line/column, CRLF normalization, batch undo/redo, read-only, overlap rejection, surrogate deletion, find/replace, command duplicate/enablement/unknown errors, configurable keybindings, package parsing/tokenization/installation/restore, schema rejection/default normalization, theme parsing, settings layers, layout round-trip and obsolete panel recovery, 100k-line viewport calculation, draft/session restoration, cancel save, concurrent edit while saving, dirty baseline after undo.
+
+Widget tests: shell rendering; dark/light switch; TextInputClient input; undo; panel drag resize; размеры 600×700, 768×1024 и 1920×1080; keyboard shortcut dispatch; touch long-press selection.
+
+## Проверка платформ
+
+Web-интерфейс открыт в браузере и визуально проверен. Проверка нативного macOS-окна через UI automation недоступна из-за отсутствия разрешений Computer Use; успешная сборка не выдается за проверку всех нативных жестов и IME. Android APK собран, но не запускался на реальном планшете/эмуляторе. Android SAF export требует проверки на устройстве. Windows/Linux/iOS scaffolds созданы, нативные сборки на этих ОС/устройствах не проверены.
+
+## Особенности локального окружения
+
+Первый macOS build выявил повреждённый кэш SDK: symlink FlutterMacOS указывал на отсутствующий бинарник. Штатный `flutter precache --macos --force` восстановил артефакты; повторная сборка прошла. Версия SDK не менялась.
+
+`flutter doctor` сообщает об отсутствующем Android cmdline-tools и неизвестном статусе лицензий; установленного Gradle/SDK оказалось достаточно для debug APK. Лицензии автоматически не принимались. При последующем обновлении toolchain их следует проверить средствами Android Studio.
+
+Предупреждение Xcode о Run Script без outputs относится к стандартной Flutter Assemble build phase. Web build может сообщать о необязательном CupertinoIcons font из Material defaults; приложение использует Material Icons и JetBrains Mono.
