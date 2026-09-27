@@ -104,6 +104,34 @@ Discard requires confirmation. It restores a tracked file to its last committed 
 
 Text comparison supports UTF-8 files up to a combined 2 MiB preview limit. Binary files show an explanatory message; large changed text spans use a bounded replacement view. Line endings are normalized only for display; restoration uses the original committed bytes.
 
+## Model profiles and prompts
+
+Open a project, then go to **Tools → Settings → Model profiles and prompts**.
+Create a profile with a stable ID, display name, provider ID and model ID. Each
+profile has an editable system prompt, user prompt template and JSON object of
+API parameters. **Reset prompts** restores the built-in templates; **Save profile**
+persists edits. Profiles can be selected, edited and deleted independently.
+
+- Profiles: `.tamtoot/agents/models/<profile-id>.json` (schema version 1).
+- Shared instructions: `.tamtoot/agents/instructions.md`, saved separately and
+  appended to every profile's system prompt.
+- Template variables: `{{task}}`, `{{file_path}}`, `{{file}}`, `{{selection}}`.
+  Preview uses the task entered in the dialog and the active editor, including
+  unsaved content. Substitution happens once; file contents are not reinterpreted
+  as templates.
+
+**Preview prompts** displays the resolved, provider-neutral configuration locally.
+This release does **not** send model API requests or run agents. Provider adapters,
+model-specific parameter validation and secure credential storage are not yet
+implemented. Do not put credentials in prompts or parameters; common credential
+and request-structure parameter names are rejected. No API-key field is exposed.
+
+The profiles belong to the open workspace and are reloaded from disk when the
+editor opens. External changes are detected before saving or deleting. The current
+Git UI still excludes `.tamtoot` entirely, so these settings remain local when
+committing through Tamtoot. Existing browser folder stores support profile files;
+actual browser permission behavior requires a writable folder grant.
+
 ## Current limitations
 
 This is an actively developed foundation, not a production compiler/debugger environment. Full LSP integration, PTY terminals, debugging, executable third-party extension hosting, advanced docking/drag-and-drop, and independent split editor groups are still future work. Placeholder panels identify unavailable providers explicitly.

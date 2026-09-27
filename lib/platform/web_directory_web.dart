@@ -155,11 +155,16 @@ final class WebDirectoryStore extends GitRepositoryStore {
   Future<List<String>> listFiles(String dir) async {
     final handle = await _dir(dir);
     final out = <String>[];
-    await _walk(handle, dir, out);
+    await _walk(handle, dir, out, includeMetadata: dir.startsWith('.tamtoot/'));
     return out;
   }
 
-  Future<void> _walk(JSObject dir, String prefix, List<String> out) async {
+  Future<void> _walk(
+    JSObject dir,
+    String prefix,
+    List<String> out, {
+    bool includeMetadata = false,
+  }) async {
     final valuesFn = dir.getProperty('values'.toJS);
     if (valuesFn == null) return;
     final iterator = (valuesFn as JSFunction).callAsFunction(dir);
@@ -182,11 +187,12 @@ final class WebDirectoryStore extends GitRepositoryStore {
           : (entryObj.has('getFile') ? 'file' : 'directory');
       final rel = prefix.isEmpty ? name : '$prefix/$name';
       if (kind == 'file') {
-        if (!rel.startsWith('.git') && !rel.startsWith('.tamtoot')) {
+        if (includeMetadata ||
+            (!rel.startsWith('.git') && !rel.startsWith('.tamtoot'))) {
           out.add(rel);
         }
       } else if (name != '.git' && name != '.tamtoot') {
-        await _walk(entryObj, rel, out);
+        await _walk(entryObj, rel, out, includeMetadata: includeMetadata);
       }
     }
   }

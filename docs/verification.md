@@ -65,3 +65,11 @@ The expanded test suite passes **57 tests**, including folder collapse/reopen, s
 - Restoration uses committed bytes, handles deleted and untracked files, reloads open editors and rejects stale reviews, changed HEAD, external staging and filesystem symlink paths.
 - Added tests for modified/deleted/untracked/binary files, stale disk and editor snapshots, protected paths, bounded text diffs, cancel/confirm interactions and committing from the sidebar.
 - `dart format lib test`: clean. `flutter analyze`: no issues. Full `flutter test` suite: **89 tests passed**. No dependencies added.
+
+## Per-model prompt profiles — 2026-09-27
+
+- Added Settings → Model profiles and prompts, with create/select/edit/delete, explicit saves, reset-to-default templates and local resolved-prompt preview.
+- Versioned profiles live in `.tamtoot/agents/models/<id>.json`; shared instructions are saved separately in `.tamtoot/agents/instructions.md`.
+- Tested template substitution without recursively interpreting source code, schema/path/parameter validation, native disk persistence, project isolation, stale-write rejection and symlink rejection.
+- Widget test creates, previews and reopens a profile at 600px window width. Full suite: **93 tests passed**. Analyzer: no issues.
+- No new dependencies. This is configuration and preview only: model API execution, provider-specific parameter validation and secure credentials are not implemented. Browser metadata listing now supports explicit reads under `.tamtoot` while keeping metadata excluded from ordinary work-tree listings.

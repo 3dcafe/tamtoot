@@ -1,0 +1,142 @@
+import 'dart:convert';
+
+const defaultSystemPrompt =
+    'You are a coding assistant. Follow the project instructions and explain your changes clearly.';
+const defaultUserTemplate =
+    'Task:\n{{task}}\n\nFile: {{file_path}}\n{{file}}\n\nSelected code:\n{{selection}}';
+
+class ModelProfile {
+  ModelProfile({
+    required this.id,
+    required this.name,
+    required this.provider,
+    required this.model,
+    this.systemPrompt = defaultSystemPrompt,
+    this.userTemplate = defaultUserTemplate,
+    this.parameters = const {},
+  });
+  final String id, name, provider, model, systemPrompt, userTemplate;
+  final Map<String, dynamic> parameters;
+  static final idPattern = RegExp(r'^[a-z0-9][a-z0-9_-]{0,63}$');
+  static final variables = RegExp(r'\{\{\s*([a-zA-Z_]+)\s*\}\}');
+  static const allowedVariables = {'task', 'file_path', 'file', 'selection'};
+
+  void validate() {
+    if (!idPattern.hasMatch(id)) {
+      throw const FormatException(
+        'Profile ID: use lowercase letters, numbers, - or _ (1–64 characters).',
+      );
+    }
+    if ([name, provider, model].any((v) => v.trim().isEmpty)) {
+      throw const FormatException('Name, provider and model are required.');
+    }
+    for (final prompt in [systemPrompt, userTemplate]) {
+      for (final match in variables.allMatches(prompt)) {
+        if (!allowedVariables.contains(match[1])) {
+          throw FormatException('Unknown template variable: ${match[1]}');
+        }
+      }
+    }
+    const reserved = {
+      'model',
+      'messages',
+      'input',
+      'system',
+      'prompt',
+      'api_key',
+      'apikey',
+      'authorization',
+      'token',
+      'access_token',
+      'password',
+      'headers',
+    };
+    void check(dynamic value) {
+      if (value is Map) {
+        for (final entry in value.entries) {
+          if (reserved.contains(entry.key.toString().toLowerCase())) {
+            throw FormatException(
+              'Reserved or credential parameter: ${entry.key}',
+            );
+          }
+          check(entry.value);
+        }
+      } else if (value is List) {
+        value.forEach(check);
+      }
+    }
+
+    check(parameters);
+    jsonEncode(parameters);
+  }
+
+  String encode() {
+    validate();
+    return const JsonEncoder.withIndent('  ').convert({
+      'schemaVersion': 1,
+      'id': id,
+      'name': name,
+      'provider': provider,
+      'model': model,
+      'systemPrompt': systemPrompt,
+      'userTemplate': userTemplate,
+      'parameters': parameters,
+    });
+  }
+
+  factory ModelProfile.parse(String source) {
+    final data = jsonDecode(source);
+    if (data is! Map<String, dynamic> || data['schemaVersion'] != 1) {
+      throw const FormatException('Unsupported model profile schema.');
+    }
+    String string(String key) {
+      final value = data[key];
+      if (value is! String) throw FormatException('Invalid $key');
+      return value;
+    }
+
+    if (data['parameters'] is! Map<String, dynamic>) {
+      throw const FormatException('Parameters must be a JSON object.');
+    }
+    final profile = ModelProfile(
+      id: string('id'),
+      name: string('name'),
+      provider: string('provider'),
+      model: string('model'),
+      systemPrompt: string('systemPrompt'),
+      userTemplate: string('userTemplate'),
+      parameters: data['parameters'] as Map<String, dynamic>,
+    );
+    profile.validate();
+    return profile;
+  }
+
+  /// Provider-neutral preview; no request is sent and no credential is included.
+  Map<String, dynamic> preview({
+    required String task,
+    String instructions = '',
+    String filePath = '',
+    String file = '',
+    String selection = '',
+  }) {
+    validate();
+    final values = {
+      'task': task,
+      'file_path': filePath,
+      'file': file,
+      'selection': selection,
+    };
+    String expand(String source) =>
+        source.replaceAllMapped(variables, (m) => values[m[1]]!);
+    return {
+      'provider': provider,
+      'model': model,
+      'parameters': parameters,
+      'systemPrompt': [
+        expand(systemPrompt),
+        instructions,
+      ].where((s) => s.trim().isNotEmpty).join('\n\n'),
+      'userPrompt': expand(userTemplate),
+    };
+  }
+}
