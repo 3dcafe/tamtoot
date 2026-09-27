@@ -1,0 +1,61 @@
+{
+  "schemaVersion": 1,
+  "packageVersion": "0.2.0",
+  "rules": [
+    {
+      "pattern": "^#!.*",
+      "scope": "comment"
+    },
+    {
+      "pattern": "//.*$",
+      "scope": "comment"
+    },
+    {
+      "begin": "/\\*",
+      "end": "\\*/",
+      "scope": "comment"
+    },
+    {
+      "begin": "`",
+      "end": "`",
+      "scope": "string",
+      "escape": "\\\\."
+    },
+    {
+      "pattern": "\"(?:\\\\.|[^\"\\\\])*\"|\\x27(?:\\\\.|[^\\x27\\\\])*\\x27",
+      "scope": "string"
+    },
+    {
+      "pattern": "(?:^|(?<=[=(,:;!&|?{\\[]))\\s*/(?:\\\\.|\\[(?:\\\\.|[^\\]\\\\])+\\]|[^/\\\\\\n\\[])+/[dgimsuvy]*",
+      "scope": "string"
+    },
+    {
+      "pattern": "\\b(?:async|await|break|case|catch|class|const|continue|debugger|default|delete|do|else|export|extends|finally|for|from|function|get|if|import|in|instanceof|let|new|of|return|set|static|super|switch|this|throw|try|typeof|var|void|while|with|yield)\\b",
+      "scope": "keyword"
+    },
+    {
+      "pattern": "\\b(?:true|false|null|undefined|NaN|Infinity)\\b",
+      "scope": "constant"
+    },
+    {
+      "pattern": "\\b(?:Array|ArrayBuffer|BigInt|Boolean|Date|Error|EvalError|Function|JSON|Map|Math|Number|Object|Promise|Proxy|RangeError|Reflect|RegExp|Set|String|Symbol|SyntaxError|TypeError|URIError|WeakMap|WeakSet|console|document|window|globalThis)\\b",
+      "scope": "type"
+    },
+    {
+      "pattern": "\\b(?:0[xX][0-9a-fA-F_]+n?|0[bB][01_]+n?|0[oO][0-7_]+n?|\\d[\\d_]*n|\\d[\\d_]*(?:\\.\\d[\\d_]*)?(?:[eE][+-]?\\d[\\d_]*)?)\\b|(?<!\\w)\\.\\d+(?:[eE][+-]?\\d+)?",
+      "scope": "number"
+    },
+    {
+      "pattern": "\\b[A-Za-z_$][\\w$]*(?=\\s*\\()",
+      "scope": "function"
+    },
+    {
+      "pattern": "\\?\\?=?|\\?\\.|=>|===?|!==?|\\*\\*=?|&&=?|\\|\\|=?|\\+\\+|--|<<=?|>>>=?|>>=?|[+*/%~^!<>=&|?:-]=?",
+      "scope": "operator"
+    },
+    {
+      "pattern": "[A-Za-z_$][\\w$]*",
+      "scope": "foreground"
+    }
+  ]
+}

@@ -1,0 +1,50 @@
+{
+  "schemaVersion": 1,
+  "packageVersion": "0.2.0",
+  "rules": [
+    {
+      "begin": "<!--",
+      "end": "-->",
+      "scope": "comment"
+    },
+    {
+      "begin": "<!\\[CDATA\\[",
+      "end": "\\]\\]>",
+      "scope": "string"
+    },
+    {
+      "begin": "<![Dd][Oo][Cc][Tt][Yy][Pp][Ee]\\b",
+      "end": ">",
+      "scope": "directive"
+    },
+    {
+      "begin": "</?[A-Za-z][A-Za-z0-9:-]*",
+      "end": "/?>",
+      "scope": "tag",
+      "contentRules": [
+        {
+          "begin": "\"",
+          "end": "\"",
+          "scope": "string"
+        },
+        {
+          "begin": "'",
+          "end": "'",
+          "scope": "string"
+        },
+        {
+          "pattern": "[A-Za-z_:][A-Za-z0-9_.:-]*",
+          "scope": "attribute"
+        },
+        {
+          "pattern": "=",
+          "scope": "operator"
+        }
+      ]
+    },
+    {
+      "pattern": "&(?:#[0-9]+|#[xX][0-9a-fA-F]+|[A-Za-z][A-Za-z0-9]+);",
+      "scope": "constant"
+    }
+  ]
+}

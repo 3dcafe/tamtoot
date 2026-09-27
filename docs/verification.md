@@ -49,3 +49,11 @@ The expanded test suite passes **57 tests**, including folder collapse/reopen, s
 - Startup reopens the first recent project and restores user tabs. An unavailable folder leaves no active project; it does not fall back to an older one.
 - Demo creation was removed from the application. Exact unchanged legacy examples are migrated away without deleting edited drafts or real files. Example contents now exist only in test fixtures.
 - Added tests for first launch, recent-project restore, missing-folder fallback, legacy migration and closed-tab persistence. Full suite: 70 tests passed; analyzer clean.
+
+## HTML / JavaScript and expanded syntax — 2026-09-27
+
+- Bundled Dart, C#, HTML and JavaScript packages at 0.2.0; verified manifests, syntax and snippet assets load from the application bundle.
+- Added lexical regions with continuation state, nested Dart comments, captured C# raw-string delimiters and nested HTML attribute-string rules. Existing pattern-only packages still load.
+- Added per-editor syntax cache; tests cover viewport entry inside a multiline region, delimiter edits and language changes.
+- Tested HTML quoted `>` / multiline attributes / plain text, JavaScript modules / BigInt / regex versus division / templates, Dart annotations / types / raw strings, and C# contextual keywords / attributes / directives / literal forms.
+- Full suite: 81 tests passed. `flutter analyze`: no issues. New packages require no additional dependencies. Lexical limits are documented in README.

@@ -1,0 +1,43 @@
+{
+  "schemaVersion": 1,
+  "packageVersion": "0.2.0",
+  "id": "html",
+  "name": "HTML",
+  "extensions": [
+    ".html",
+    ".htm"
+  ],
+  "comments": {
+    "block": {
+      "open": "<!--",
+      "close": "-->"
+    }
+  },
+  "brackets": [
+    {
+      "open": "<",
+      "close": ">"
+    }
+  ],
+  "autoClosingPairs": [
+    {
+      "open": "<",
+      "close": ">"
+    },
+    {
+      "open": "\"",
+      "close": "\""
+    },
+    {
+      "open": "'",
+      "close": "'"
+    }
+  ],
+  "indentation": {
+    "increaseAfter": ">"
+  },
+  "icons": {
+    "symbol": "code"
+  },
+  "adapters": []
+}

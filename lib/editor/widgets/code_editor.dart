@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../app/ide_session.dart';
 import '../../languages/language_registry.dart';
+import '../../languages/document_syntax.dart';
 import '../buffer/text_buffer.dart';
 import '../document/editor_controller.dart';
 import '../viewport/editor_viewport.dart';
@@ -28,6 +29,7 @@ class CodeEditor extends StatefulWidget {
 }
 
 class _CodeEditorState extends State<CodeEditor> implements TextInputClient {
+  final _syntax = DocumentSyntax();
   final _focus = FocusNode(debugLabel: 'Code editor');
   final _scroll = ScrollController();
   final _horizontal = ScrollController();
@@ -337,6 +339,7 @@ class _CodeEditorState extends State<CodeEditor> implements TextInputClient {
                             child: CustomPaint(
                               painter: CodePainter(
                                 editor: _editor,
+                                syntax: _syntax,
                                 language: widget.language,
                                 theme: widget.session.theme,
                                 style: _style,

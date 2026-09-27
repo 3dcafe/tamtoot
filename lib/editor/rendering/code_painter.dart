@@ -2,6 +2,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import '../../core/themes/ide_theme.dart';
 import '../../languages/language_registry.dart';
+import '../../languages/document_syntax.dart';
 import '../buffer/text_buffer.dart';
 import '../document/editor_controller.dart';
 import '../viewport/editor_viewport.dart';
@@ -10,6 +11,7 @@ import 'expanded_line.dart';
 class CodePainter extends CustomPainter {
   CodePainter({
     required this.editor,
+    required this.syntax,
     required this.language,
     required this.theme,
     required this.style,
@@ -20,6 +22,7 @@ class CodePainter extends CustomPainter {
     required this.composing,
   });
   final EditorController editor;
+  final DocumentSyntax syntax;
   final LanguageDefinition? language;
   final IdeTheme theme;
   final TextStyle style;
@@ -53,7 +56,14 @@ class CodePainter extends CustomPainter {
       final expanded = ExpandedLine(raw, editor.tabSize);
       final spans = <TextSpan>[];
       var position = 0;
-      for (final token in language?.tokenize(raw) ?? <SyntaxToken>[]) {
+      for (final token in syntax.tokensFor(
+        source: editor.buffer,
+        revision: editor.revision,
+        language: language,
+        lineCount: editor.buffer.lineCount,
+        readLine: editor.buffer.getLine,
+        line: line,
+      )) {
         if (token.start > position) {
           spans.add(
             TextSpan(

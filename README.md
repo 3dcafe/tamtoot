@@ -13,7 +13,7 @@ Tamtoot is a **free code and plain-text editor** and an extensible Flutter IDE f
   - `?` — a new, untracked file;
   - `↑` — changes in commits not reachable from the locally known upstream.
 - Git clone/fetch/pull/push and local repository operations through the existing pure-Dart Smart HTTP client.
-- Versioned Dart and C# language packages and an interface for installing declarative language definitions.
+- Versioned Dart, C#, HTML and JavaScript language packages and an interface for installing declarative language definitions.
 - Midnight Ink and Porcelain themes. The active theme is saved immediately as an **IDE-wide preference**, including when selected in **Tools → Settings**.
 - A command registry, editable keybindings, font settings, tab preferences, and read-only mode.
 
@@ -69,6 +69,21 @@ On startup, Tamtoot reopens the most recent project in history. If there is no p
 
 The application saves session data after a 450 ms idle period and when it moves into the background. Theme changes are persisted immediately. Session recovery is separate from saving the actual file. Force-quitting during a pending write may lose the latest unsaved changes.
 
+## Language highlighting
+
+Bundled language packages are versioned independently (currently 0.2.0). File extensions are matched without case sensitivity:
+
+| Language | Extensions | Highlighting |
+| --- | --- | --- |
+| HTML | `.html`, `.htm` | Tags, attributes, quoted values, entities, doctype, multiline comments and CDATA |
+| JavaScript | `.js`, `.mjs`, `.cjs` | Module/async keywords, built-ins, calls, operators, numeric literals including BigInt, strings, multiline templates and comments |
+| Dart | `.dart` | Expanded keywords and built-in types, annotations, calls, hexadecimal/exponent numbers, raw/triple-quoted strings and nested block comments |
+| C# | `.cs` | Contextual keywords, attributes, directives, escaped identifiers, numeric suffixes, verbatim/interpolated/raw strings and block comments |
+
+Multiline states remain correct when scrolling into the middle of a document. Editing a preceding delimiter invalidates the cached suffix. Existing single-line regex language packages remain supported.
+
+This is syntax coloring, not semantic analysis. Interpolated expressions inside strings/templates use the string color; JavaScript regular-expression detection is heuristic. Embedded JavaScript/CSS in HTML, JSX/TypeScript, completion, live preview and code execution are not implemented by these packages. Snippet definitions are supplied as package data; an interactive snippet insertion UI remains future work.
+
 ## Commit and push from the IDE
 
 Open a cloned project, then choose **Git → Commit and push…** (also available in the command palette).
@@ -85,7 +100,7 @@ File selection is whole-file staging for one commit, not a persistent staging UI
 
 This is an actively developed foundation, not a production compiler/debugger environment. Full LSP integration, PTY terminals, debugging, executable third-party extension hosting, advanced docking/drag-and-drop, and independent split editor groups are still future work. Placeholder panels identify unavailable providers explicitly.
 
-The editor virtualizes visible lines with overscan. Storage currently uses an indexed string with O(n) edits. IME and session persistence still transfer the full document. Syntax highlighting is lexical and line-based. Folding, diagnostics, snippets and multiple cursors have extension/model boundaries, while their complete UI is not implemented.
+The editor virtualizes visible lines with overscan. Storage currently uses an indexed string with O(n) edits. IME and session persistence still transfer the full document. Syntax highlighting is lexical, with cached continuation states for multiline comments and strings. Folding, diagnostics, snippets and multiple cursors have extension/model boundaries, while their complete UI is not implemented.
 
 Platform file access differs: desktop supports local files/folders; Android uses system document selection and SAF export; Web file/folder capabilities depend on browser support and permission; the iOS export provider remains incomplete. macOS may require reopening a sandbox-protected folder after restart because security-scoped bookmarks are not implemented.
 

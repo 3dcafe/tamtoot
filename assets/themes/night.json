@@ -27,6 +27,13 @@
     "terminal.foreground": "#D6DFED",
     "scm.modified": "#D2B27B",
     "scm.untracked": "#91B99A",
-    "scm.unpublished": "#88B5CE"
+    "scm.unpublished": "#88B5CE",
+    "function": "#DACA91",
+    "annotation": "#C6A0F6",
+    "directive": "#C6A0F6",
+    "operator": "#D6DFED",
+    "tag": "#77BDD9",
+    "attribute": "#B6CDEA",
+    "constant": "#EBC48D"
   }
 }

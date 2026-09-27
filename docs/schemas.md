@@ -7,7 +7,7 @@ v1 — первая опубликованная схема. Схемы v0 не 
 | Контракт | Обязательные поля кроме schemaVersion | Optional / defaults |
 |---|---|---|
 | Language manifest | id, name, packageVersion, extensions: string[] | filenames/adapters/brackets/autoClosingPairs=[]; comments/indentation/icons={} |
-| Syntax | rules: [{pattern, scope}] | Пустой список разрешён; приоритет правил по порядку при одинаковом начале совпадения |
+| Syntax | rules: [{pattern, scope}] или region rules | Пустой список разрешён; приоритет правил по порядку при одинаковом начале совпадения |
 | Snippets | — | snippets={} |
 | Theme | id, name, packageVersion, dark, colors | fontFamily=monospace, iconTheme=material |
 | Keybindings | bindings: [{key, command}] | Неуказанные сочетания берутся из default preset |
@@ -21,7 +21,7 @@ v1 — первая опубликованная схема. Схемы v0 не 
 
 ## Language package
 
-См. реальные fixtures `assets/languages/dart/` и `assets/languages/csharp/`. В v1 синтаксис — regex rules для одной строки; scope выбирает цвет темы. Пакет не выполняет код. Неизвестный scope получает foreground. Индентация, комментарии, скобки, пары автозакрытия, snippets, icons и adapters доступны нормализованной модели как данные; автоматическое применение всех подсказок не заявляется.
+Встроенные пакеты: `assets/languages/{dart,csharp,html,javascript}/`. Синтаксис поддерживает прежние `{pattern, scope}` и регионы `{begin, end, scope}`. Регион переносит состояние между строками; `escape` пропускает экранированные последовательности, `nested: true` учитывает вложенные начала (комментарии Dart), `endCapture` берёт буквальный закрывающий разделитель из группы begin (raw strings C#), `contentRules` задаёт вложенные правила (атрибуты и строки внутри HTML-тегов). Глубина правил ограничена 8; отсутствующие end, некорректные regex и группы отклоняются. Scope выбирает цвет темы. Пакет не выполняет код. Неизвестный scope получает foreground. Индентация, комментарии, скобки, пары автозакрытия, snippets, icons и adapters доступны нормализованной модели как данные; автоматическое применение всех подсказок не заявляется.
 
 ## Theme
 

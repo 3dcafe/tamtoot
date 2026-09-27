@@ -1,26 +1,78 @@
 {
   "schemaVersion": 1,
-  "packageVersion": "0.1.0",
+  "packageVersion": "0.2.0",
   "rules": [
     {
-      "pattern": "//.*$|/\\*.*?\\*/",
+      "pattern": "//.*$",
       "scope": "comment"
+    },
+    {
+      "begin": "/\\*",
+      "end": "\\*/",
+      "scope": "comment",
+      "nested": true
+    },
+    {
+      "begin": "r\"\"\"",
+      "end": "\"\"\"",
+      "scope": "string"
+    },
+    {
+      "begin": "r'''",
+      "end": "'''",
+      "scope": "string"
+    },
+    {
+      "begin": "\"\"\"",
+      "end": "\"\"\"",
+      "scope": "string",
+      "escape": "\\\\."
+    },
+    {
+      "begin": "'''",
+      "end": "'''",
+      "scope": "string",
+      "escape": "\\\\."
+    },
+    {
+      "pattern": "r\"[^\"]*\"|r\\x27[^\\x27]*\\x27",
+      "scope": "string"
     },
     {
       "pattern": "\"(?:\\\\.|[^\"\\\\])*\"|\\x27(?:\\\\.|[^\\x27\\\\])*\\x27",
       "scope": "string"
     },
     {
-      "pattern": "\\b(?:abstract|as|assert|async|await|break|case|catch|class|const|continue|default|deferred|do|dynamic|else|enum|export|extends|extension|external|factory|false|final|finally|for|Function|get|hide|if|implements|import|in|interface|is|late|library|mixin|new|null|on|operator|part|required|rethrow|return|sealed|set|show|static|super|switch|sync|this|throw|true|try|typedef|var|void|when|while|with|yield)\\b",
+      "pattern": "@[A-Za-z_]\\w*(?:\\.[A-Za-z_]\\w*)*",
+      "scope": "annotation"
+    },
+    {
+      "pattern": "\\b(?:abstract|augment|base|covariant|as|assert|async|await|break|case|catch|class|const|continue|default|deferred|do|dynamic|else|enum|export|extends|extension|type|external|factory|false|final|finally|for|Function|get|hide|if|implements|import|in|interface|is|late|library|mixin|new|null|on|operator|part|required|rethrow|return|sealed|set|show|static|super|switch|sync|this|throw|true|try|typedef|var|void|when|while|with|yield)\\b",
       "scope": "keyword"
     },
     {
-      "pattern": "\\b\\d+(?:\\.\\d+)?\\b",
+      "pattern": "\\b(?:bool|int|double|num|String|Object|Never|Null|Record|List|Map|Set|Iterable|Future|Stream|Duration|DateTime|Uri|Symbol|BigInt)\\b",
+      "scope": "type"
+    },
+    {
+      "pattern": "\\b(?:0[xX][0-9a-fA-F](?:_?[0-9a-fA-F])*|\\d(?:_?\\d)*(?:\\.\\d(?:_?\\d)*)?(?:[eE][+-]?\\d(?:_?\\d)*)?)\\b|(?<!\\w)\\.\\d+(?:[eE][+-]?\\d+)?",
       "scope": "number"
+    },
+    {
+      "pattern": "\\b[A-Za-z_$][\\w$]*(?=\\s*\\()",
+      "scope": "function"
     },
     {
       "pattern": "\\b[A-Z][A-Za-z0-9_]*\\b",
       "scope": "type"
+    },
+    {
+      "pattern": "\\?\\?=?|\\?\\.|=>|===?|!==?|\\*\\*=?|&&=?|\\|\\|=?|\\+\\+|--|<<=?|>>>=?|>>=?|[+*/%~^!<>=&|?:-]=?",
+      "scope": "operator"
+    },
+    {
+      "pattern": "[A-Za-z_$][\\w$]*",
+      "scope": "foreground"
     }
   ]
 }

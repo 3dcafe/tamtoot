@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "packageVersion": "0.2.0",
+  "snippets": {
+    "function": {
+      "prefix": "function",
+      "body": "function example() {\n  \n}"
+    },
+    "async": {
+      "prefix": "async",
+      "body": "async function run() {\n  \n}"
+    },
+    "arrow": {
+      "prefix": "arrow",
+      "body": "const example = () => {\n  \n};"
+    },
+    "import": {
+      "prefix": "import",
+      "body": "import { example } from './module.js';"
+    }
+  }
+}

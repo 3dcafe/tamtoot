@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "packageVersion": "0.2.0",
+  "snippets": {
+    "html": {
+      "prefix": "html",
+      "body": "<!DOCTYPE html>\n<html lang=\"en\">\n<head>\n  <meta charset=\"UTF-8\">\n  <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\">\n  <title>Document</title>\n</head>\n<body>\n  \n</body>\n</html>"
+    },
+    "link": {
+      "prefix": "link",
+      "body": "<link rel=\"stylesheet\" href=\"style.css\">"
+    },
+    "script": {
+      "prefix": "script",
+      "body": "<script type=\"module\" src=\"main.js\"></script>"
+    }
+  }
+}

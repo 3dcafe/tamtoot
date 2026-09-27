@@ -98,6 +98,8 @@ flutter:
   assets:
     - assets/languages/dart/
     - assets/languages/csharp/
+    - assets/languages/html/
+    - assets/languages/javascript/
     - assets/themes/
 
   fonts:

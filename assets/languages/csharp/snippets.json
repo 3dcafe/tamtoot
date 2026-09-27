@@ -1,10 +1,22 @@
 {
   "schemaVersion": 1,
-  "packageVersion": "0.1.0",
+  "packageVersion": "0.2.0",
   "snippets": {
     "class": {
       "prefix": "class",
-      "body": "class Example {\n  \n}"
+      "body": "public class Example\n{\n    \n}"
+    },
+    "record": {
+      "prefix": "record",
+      "body": "public record Example(string Name);"
+    },
+    "async": {
+      "prefix": "async",
+      "body": "public async Task RunAsync()\n{\n    await Task.CompletedTask;\n}"
+    },
+    "property": {
+      "prefix": "property",
+      "body": "public string Name { get; init; } = string.Empty;"
     }
   }
 }

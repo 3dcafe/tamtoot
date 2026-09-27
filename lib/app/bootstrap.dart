@@ -21,7 +21,7 @@ Future<IdeSession> bootstrap() async {
     );
     session.themes[theme.id] = theme;
   }
-  for (final id in ['dart', 'csharp']) {
+  for (final id in bundledLanguageIds) {
     try {
       final base = 'assets/languages/$id';
       session.languages.register(

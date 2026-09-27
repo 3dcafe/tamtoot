@@ -1,10 +1,22 @@
 {
   "schemaVersion": 1,
-  "packageVersion": "0.1.0",
+  "packageVersion": "0.2.0",
   "snippets": {
     "class": {
       "prefix": "class",
       "body": "class Example {\n  \n}"
+    },
+    "main": {
+      "prefix": "main",
+      "body": "void main() {\n  \n}"
+    },
+    "async": {
+      "prefix": "async",
+      "body": "Future<void> run() async {\n  \n}"
+    },
+    "widget": {
+      "prefix": "widget",
+      "body": "class Example extends StatelessWidget {\n  const Example({super.key});\n\n  @override\n  Widget build(BuildContext context) {\n    return const SizedBox();\n  }\n}"
     }
   }
 }

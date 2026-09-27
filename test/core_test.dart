@@ -196,10 +196,10 @@ void main() {
       },
     );
     test(
-      'both real packages recognize and tokenize independently of editor',
+      'all bundled packages recognize and tokenize independently of editor',
       () {
         final registry = LanguageRegistry();
-        for (final id in ['dart', 'csharp']) {
+        for (final id in bundledLanguageIds) {
           final base = 'assets/languages/$id';
           registry.register(
             LanguagePackageLoader().load(
