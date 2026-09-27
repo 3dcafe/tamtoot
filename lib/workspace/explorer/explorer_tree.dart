@@ -17,6 +17,16 @@ class ExplorerTree {
   final Set<Uri> expanded = {}, loading = {};
   final Map<Uri, String> errors = {};
 
+  void clear() {
+    _generation++;
+    root = null;
+    children.clear();
+    expanded.clear();
+    loading.clear();
+    errors.clear();
+    notify();
+  }
+
   Future<void> open(Uri uri) async {
     _generation++;
     root = uri;

@@ -65,6 +65,8 @@ Drag panel dividers to resize. Click folders to expand or collapse them, and fil
 
 Common shortcuts: `Ctrl/⌘+S` saves, `Ctrl/⌘+Z` undoes, `Ctrl/⌘+Shift+Z` redoes, `Ctrl/⌘+F` finds, and `Ctrl/⌘+Shift+P` opens commands.
 
+On startup, Tamtoot reopens the most recent project in history. If there is no project or its folder is unavailable, the project tree stays empty; no demo tabs are created. Existing user drafts are still recovered. Unmodified demo tabs from older installations are removed automatically, while edited drafts and real files are preserved.
+
 The application saves session data after a 450 ms idle period and when it moves into the background. Theme changes are persisted immediately. Session recovery is separate from saving the actual file. Force-quitting during a pending write may lose the latest unsaved changes.
 
 ## Commit and push from the IDE

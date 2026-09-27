@@ -24,6 +24,7 @@ void main() {
     () async {
       final store = MemoryStore();
       final a = await testSession(store: store);
+      seedEditorFixture(a);
       a.documents.active!.editor.replaceSelection('unsaved');
       a.settings.set('fontSize', 20.0);
       a.settings.set('theme', 'day');
@@ -47,7 +48,7 @@ void main() {
       store.data['settings'] = 'not json';
       final session = await testSession(store: store);
       expect(session.errors.length, 2);
-      expect(session.documents.documents.length, 2);
+      expect(session.documents.documents, isEmpty);
       await session.dispose();
     },
   );

@@ -1,3 +1,4 @@
+import 'legacy_examples.dart';
 import 'dart:io';
 import 'package:tamtoot/app/ide_session.dart';
 import 'package:tamtoot/core/filesystem/filesystem.dart';
@@ -45,4 +46,8 @@ Future<IdeSession> testSession({
   }
   await session.restore();
   return session;
+}
+
+void seedEditorFixture(IdeSession session) {
+  session.observe(session.documents.create('example.dart', legacyExample1));
 }

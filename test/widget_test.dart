@@ -63,6 +63,7 @@ void main() {
   ) async {
     await tester.binding.setSurfaceSize(const Size(1280, 800));
     final session = await testSession();
+    seedEditorFixture(session);
     await tester.pumpWidget(
       ProviderScope(
         overrides: [sessionProvider.overrideWithValue(session)],
@@ -107,6 +108,7 @@ void main() {
     tester,
   ) async {
     final session = await testSession();
+    seedEditorFixture(session);
     await tester.pumpWidget(
       ProviderScope(
         overrides: [sessionProvider.overrideWithValue(session)],
@@ -131,6 +133,7 @@ void main() {
     'hardware keybinding routes to commands; touch long-press selects',
     (tester) async {
       final session = await testSession();
+      seedEditorFixture(session);
       await tester.pumpWidget(
         ProviderScope(
           overrides: [sessionProvider.overrideWithValue(session)],

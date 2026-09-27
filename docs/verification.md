@@ -42,3 +42,10 @@ The expanded test suite passes **57 tests**, including folder collapse/reopen, s
 - The interoperability test uses isolated temporary repositories and native `git receive-pack` only as a test server. Native Git accepted the index, commits and multi-commit pushes; `git fsck --strict` passed. Existing external staging was preserved and rejected for modification.
 - Full suite: 64 tests passed, followed by all 7 commit/push tests including the newly added save-failure case (65 tests total). `flutter analyze`: no issues. No dependencies added.
 - Git implementation limits and instructions are documented in the English README. No production repository was changed by the application tests.
+
+
+## Startup project restoration — 2026-09-27
+
+- Startup reopens the first recent project and restores user tabs. An unavailable folder leaves no active project; it does not fall back to an older one.
+- Demo creation was removed from the application. Exact unchanged legacy examples are migrated away without deleting edited drafts or real files. Example contents now exist only in test fixtures.
+- Added tests for first launch, recent-project restore, missing-folder fallback, legacy migration and closed-tab persistence. Full suite: 70 tests passed; analyzer clean.

@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'package:crypto/crypto.dart';
 import '../core/commands/commands.dart';
 import '../core/filesystem/filesystem.dart';
 import '../core/git/git_service.dart';
@@ -181,6 +182,9 @@ class IdeSession {
     gitStatusNote = null;
     await explorer.open(root);
     if (workspaceRoot != root) return;
+    if (explorer.errors.containsKey(root)) {
+      throw StateError(explorer.errors[root]!);
+    }
     recentWorkspaces
       ..remove(root.toString())
       ..insert(0, root.toString());
@@ -260,6 +264,22 @@ class IdeSession {
     }
   }
 
+  // Drop only unchanged, never-saved examples from older installations.
+  // Real files and edited drafts must survive migration.
+  bool _isLegacyExample(Map<String, dynamic> document) {
+    if (document['uri'] != null || document['savedText'] != null) return false;
+    final expected = switch (document['name']) {
+      'welcome.dart' =>
+        '8a210fdf1c5eabca7f974cc93bc2af2171876b62f708dfccc1d059b31dc6fc15',
+      'Program.cs' =>
+        '14490452029d804d7fbc6632ab879a30e651fa9eda525ac53a19af12dc68c6a0',
+      _ => null,
+    };
+    return expected != null &&
+        sha256.convert(utf8.encode(document['text'] as String)).toString() ==
+            expected;
+  }
+
   Future<void> restore() async {
     Future<void> load(String key, void Function(String) apply) async {
       try {
@@ -297,7 +317,11 @@ class IdeSession {
         data['recentWorkspaces'] ?? [],
         'recentWorkspaces',
       );
-      for (final d in normalized) {
+      final active = data['activeIndex'];
+      String? restoredActive;
+      for (var i = 0; i < normalized.length; i++) {
+        final d = normalized[i];
+        if (_isLegacyExample(d)) continue;
         final doc = documents.create(
           d['name'] as String,
           d['text'] as String,
@@ -305,31 +329,34 @@ class IdeSession {
           savedText: d['savedText'] as String?,
         );
         observe(doc);
+        if (i == active) restoredActive = doc.id;
       }
-      final active = data['activeIndex'];
-      if (active is int && active >= 0 && active < documents.documents.length) {
-        documents.activeId = documents.documents[active].id;
-      }
+      if (restoredActive != null) documents.activeId = restoredActive;
       recentWorkspaces.addAll(recent.take(10));
     });
-    if (documents.documents.isEmpty) {
-      observe(
-        documents.create(
-          'welcome.dart',
-          "// Welcome to Tamtoot\n// Your workspace, on every screen.\n\nclass Workspace {\n  final String name;\n\n  const Workspace(this.name);\n\n  void open() {\n    print('Hello, \$name!');\n  }\n}\n\nvoid main() {\n  const workspace = Workspace('Tamtoot');\n  workspace.open();\n}\n",
-        ),
-      );
-      observe(
-        documents.create(
-          'Program.cs',
-          '// C# language package • v0.1\nusing System;\n\nnamespace Hello;\n\npublic class Program\n{\n    public static void Main()\n    {\n        Console.WriteLine("Create something great.");\n    }\n}\n',
-        ),
-      );
-      documents.activeId = documents.documents.first.id;
-    }
     log(
       'Foundation ready · ${languages.languages.length} language packages · API v1',
     );
+    if (recentWorkspaces.isNotEmpty) {
+      try {
+        final root = Uri.parse(recentWorkspaces.first);
+        if (!root.hasScheme) throw const FormatException('Invalid project URI');
+        await openWorkspaceFolder(root);
+      } catch (error) {
+        workspaceRoot = null;
+        workspaceHasGit = false;
+        projectMeta = null;
+        _gitEntries = {};
+        _unpublished = {};
+        gitStatusNote = null;
+        _gitTimer?.cancel();
+        explorer.clear();
+        log(
+          'Last project is unavailable. Open a project to continue: $error',
+          error: true,
+        );
+      }
+    }
   }
 
   Future<void> persistNow() {
