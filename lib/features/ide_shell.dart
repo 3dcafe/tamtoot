@@ -8,6 +8,8 @@ import '../app/session_commands.dart';
 import '../editor/widgets/code_editor.dart';
 import '../editor/input/keyboard_mapping.dart';
 import 'dialogs.dart';
+import 'git_changes_dialog.dart';
+import 'git_diff.dart';
 import 'dock_view.dart';
 
 class IdeShell extends ConsumerStatefulWidget {
@@ -19,6 +21,7 @@ class IdeShell extends ConsumerStatefulWidget {
 class _IdeShellState extends ConsumerState<IdeShell> {
   final _find = TextEditingController(), _replace = TextEditingController();
   late IdeSession session;
+  bool _showGit = false;
   @override
   void initState() {
     super.initState();
@@ -468,31 +471,86 @@ class _IdeShellState extends ConsumerState<IdeShell> {
   Widget _explorer() => ColoredBox(
     color: color('panel'),
     child: Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Container(
           height: 36,
-          padding: const EdgeInsets.only(left: 12),
           decoration: BoxDecoration(
             border: Border(bottom: BorderSide(color: color('border'))),
           ),
           child: Row(
             children: [
-              const Expanded(
-                child: Text(
-                  'Solution Explorer',
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+              Expanded(
+                child: SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Row(
+                    children: [
+                      TextButton(
+                        onPressed: () => setState(() => _showGit = false),
+                        child: Text(
+                          'Solution',
+                          style: TextStyle(
+                            color: color(!_showGit ? 'accent' : 'muted'),
+                            fontSize: 12,
+                          ),
+                        ),
+                      ),
+                      TextButton(
+                        key: const ValueKey('sidebar-git'),
+                        onPressed: () => setState(() => _showGit = true),
+                        child: Text(
+                          'Git',
+                          style: TextStyle(
+                            color: color(_showGit ? 'accent' : 'muted'),
+                            fontSize: 12,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ),
-              action(
-                Icons.refresh,
-                'Refresh project tree and Git status',
-                'workspace.refresh',
-              ),
+              if (!_showGit)
+                action(
+                  Icons.refresh,
+                  'Refresh project tree and Git status',
+                  'workspace.refresh',
+                ),
             ],
           ),
         ),
+        Expanded(
+          child: IndexedStack(
+            index: _showGit ? 1 : 0,
+            children: [
+              _solutionTree(),
+              if (session.workspaceRoot != null && session.workspaceHasGit)
+                GitChangesDialog(
+                  key: ValueKey('git-panel-${session.workspaceRoot}'),
+                  session: session,
+                  embedded: true,
+                  visible: _showGit,
+                )
+              else
+                const Center(
+                  child: Padding(
+                    padding: EdgeInsets.all(12),
+                    child: Text(
+                      'Open a Git project to review changes and create commits.',
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ],
+    ),
+  );
+
+  Widget _solutionTree() => ColoredBox(
+    color: color('panel'),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
         Expanded(
           child: ListView(
             padding: const EdgeInsets.symmetric(vertical: 8),
@@ -516,6 +574,7 @@ class _IdeShellState extends ConsumerState<IdeShell> {
                   d.name,
                   Icons.description_outlined,
                   () => session.run('document.activate', d.id),
+                  fileUri: d.uri,
                   selected: session.documents.active == d,
                   indicators: session.indicators(d.uri, unsaved: d.dirty),
                 ),
@@ -600,6 +659,7 @@ class _IdeShellState extends ConsumerState<IdeShell> {
                       row.entry.directory ? row.entry.uri : row.entry,
                     ),
                     entryKey: ValueKey('explorer-${row.entry.uri}'),
+                    fileUri: row.entry.directory ? null : row.entry.uri,
                     depth: row.depth,
                     directory: row.entry.directory,
                     expanded: session.explorer.expanded.contains(row.entry.uri),
@@ -670,70 +730,81 @@ class _IdeShellState extends ConsumerState<IdeShell> {
     VoidCallback onTap, {
     bool selected = false,
     Key? entryKey,
+    Uri? fileUri,
     int depth = 0,
     bool directory = false,
     bool expanded = false,
     bool loading = false,
     FileIndicators indicators = const FileIndicators(),
-  }) => Tooltip(
-    message: indicators.any ? '$name · ${indicators.description}' : name,
-    child: Semantics(
-      expanded: directory ? expanded : null,
-      child: Material(
-        key: entryKey,
-        color: selected ? color('selection') : Colors.transparent,
-        child: InkWell(
-          onTap: onTap,
-          child: Padding(
-            padding: EdgeInsets.fromLTRB(8 + depth * 14.0, 9, 8, 9),
-            child: Row(
-              children: [
-                if (directory)
+  }) => GestureDetector(
+    onSecondaryTapDown: fileUri == null
+        ? null
+        : (event) =>
+              showFileGitMenu(context, session, fileUri, event.globalPosition),
+    onLongPressStart: fileUri == null
+        ? null
+        : (event) =>
+              showFileGitMenu(context, session, fileUri, event.globalPosition),
+    child: Tooltip(
+      message: indicators.any ? '$name · ${indicators.description}' : name,
+      child: Semantics(
+        expanded: directory ? expanded : null,
+        child: Material(
+          key: entryKey,
+          color: selected ? color('selection') : Colors.transparent,
+          child: InkWell(
+            onTap: onTap,
+            child: Padding(
+              padding: EdgeInsets.fromLTRB(8 + depth * 14.0, 9, 8, 9),
+              child: Row(
+                children: [
+                  if (directory)
+                    Icon(
+                      expanded ? Icons.expand_more : Icons.chevron_right,
+                      size: 14,
+                      color: color('muted'),
+                    )
+                  else
+                    const SizedBox(width: 14),
                   Icon(
-                    expanded ? Icons.expand_more : Icons.chevron_right,
-                    size: 14,
-                    color: color('muted'),
-                  )
-                else
-                  const SizedBox(width: 14),
-                Icon(
-                  icon,
-                  size: 16,
-                  color: color(
-                    indicators.any ? indicators.colorToken : 'muted',
-                  ),
-                ),
-                const SizedBox(width: 6),
-                Expanded(
-                  child: Text(
-                    name,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: indicators.any
-                          ? color(indicators.colorToken)
-                          : null,
+                    icon,
+                    size: 16,
+                    color: color(
+                      indicators.any ? indicators.colorToken : 'muted',
                     ),
                   ),
-                ),
-                if (loading)
-                  const SizedBox(
-                    width: 10,
-                    height: 10,
-                    child: CircularProgressIndicator(strokeWidth: 1),
-                  ),
-                if (indicators.any)
-                  Padding(
-                    padding: const EdgeInsets.only(left: 4),
+                  const SizedBox(width: 6),
+                  Expanded(
                     child: Text(
-                      indicators.badge,
+                      name,
+                      overflow: TextOverflow.ellipsis,
                       style: TextStyle(
-                        fontSize: 10,
-                        color: color(indicators.colorToken),
+                        fontSize: 12,
+                        color: indicators.any
+                            ? color(indicators.colorToken)
+                            : null,
                       ),
                     ),
                   ),
-              ],
+                  if (loading)
+                    const SizedBox(
+                      width: 10,
+                      height: 10,
+                      child: CircularProgressIndicator(strokeWidth: 1),
+                    ),
+                  if (indicators.any)
+                    Padding(
+                      padding: const EdgeInsets.only(left: 4),
+                      child: Text(
+                        indicators.badge,
+                        style: TextStyle(
+                          fontSize: 10,
+                          color: color(indicators.colorToken),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
             ),
           ),
         ),

@@ -71,7 +71,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    expect(find.text('Solution Explorer'), findsOneWidget);
+    expect(find.text('Solution'), findsOneWidget);
     expect(find.byType(CodeEditor), findsOneWidget);
     expect(find.text('Terminal'), findsOneWidget);
     await tester.tap(find.byTooltip('Switch theme'));

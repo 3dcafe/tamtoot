@@ -188,3 +188,23 @@ abstract interface class GitIdentityProvider {
   Future<({String name, String email, String branch})> identity(Uri directory);
   Future<void> setIdentity(Uri directory, String name, String email);
 }
+
+/// Snapshot used for review and optimistic concurrency checks when discarding.
+class GitFileSnapshot {
+  const GitFileSnapshot({
+    required this.directory,
+    required this.path,
+    required this.head,
+    required this.original,
+    required this.working,
+  });
+  final Uri directory;
+  final String path;
+  final String? head;
+  final List<int>? original, working;
+}
+
+abstract interface class GitFileChangesProvider {
+  Future<GitFileSnapshot> fileSnapshot(Uri directory, String path);
+  Future<void> discardFile(GitFileSnapshot snapshot);
+}

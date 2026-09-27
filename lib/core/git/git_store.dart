@@ -17,6 +17,9 @@ abstract class GitRepositoryStore {
   Future<void> delete(String path);
   Future<void> createDirectory(String path);
 
+  /// Stores with symlinks must reject paths that would escape through a link.
+  Future<void> validateRegularFilePath(String path) async {}
+
   /// Relative file paths under [dir], recursive, using `/` separators.
   /// Skips `.git` when listing the work tree root.
   Future<List<String>> listFiles(String dir);

@@ -18,6 +18,23 @@ final class FileGitRepositoryStore extends GitRepositoryStore {
       Directory.fromUri(root.uri.resolveUri(Uri(path: path)));
 
   @override
+  Future<void> validateRegularFilePath(String path) async {
+    var relative = '';
+    for (final part in path.split('/')) {
+      relative = relative.isEmpty ? part : '$relative/$part';
+      if (await FileSystemEntity.type(
+            _file(relative).path,
+            followLinks: false,
+          ) ==
+          FileSystemEntityType.link) {
+        throw GitException(
+          'Comparison and discard do not follow symbolic links',
+        );
+      }
+    }
+  }
+
+  @override
   Future<bool> exists(String path) async {
     final file = _file(path);
     if (await file.exists()) return true;

@@ -102,6 +102,18 @@ class EditorController {
     notify();
   }
 
+  /// Synchronize an explicitly restored disk version, including read-only views.
+  void reloadFromDisk(String text) {
+    buffer.applyEdit(
+      BufferEdit(0, buffer.length, text.replaceAll('\r\n', '\n')),
+    );
+    _undo.clear();
+    _redo.clear();
+    selections = [const EditorSelection(0, 0)];
+    revision++;
+    notify();
+  }
+
   void undo() {
     if (!canUndo) return;
     final t = _undo.removeLast();

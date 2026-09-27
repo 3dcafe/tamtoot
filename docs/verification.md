@@ -57,3 +57,11 @@ The expanded test suite passes **57 tests**, including folder collapse/reopen, s
 - Added per-editor syntax cache; tests cover viewport entry inside a multiline region, delimiter edits and language changes.
 - Tested HTML quoted `>` / multiline attributes / plain text, JavaScript modules / BigInt / regex versus division / templates, Dart annotations / types / raw strings, and C# contextual keywords / attributes / directives / literal forms.
 - Full suite: 81 tests passed. `flutter analyze`: no issues. New packages require no additional dependencies. Lexical limits are documented in README.
+
+## Solution / Git sidebar and file changes — 2026-09-27
+
+- Shortened the project tab to Solution and added an adjacent Git tab with the existing commit/push controls. Switching tabs preserves the form.
+- Clicking a Git filename opens a HEAD comparison with unsaved editor content, line numbers and added/removed colors. Context menus in both tabs support comparison and confirmed discard; touch uses long-press.
+- Restoration uses committed bytes, handles deleted and untracked files, reloads open editors and rejects stale reviews, changed HEAD, external staging and filesystem symlink paths.
+- Added tests for modified/deleted/untracked/binary files, stale disk and editor snapshots, protected paths, bounded text diffs, cancel/confirm interactions and committing from the sidebar.
+- `dart format lib test`: clean. `flutter analyze`: no issues. Full `flutter test` suite: **89 tests passed**. No dependencies added.

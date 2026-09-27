@@ -86,15 +86,23 @@ This is syntax coloring, not semantic analysis. Interpolated expressions inside 
 
 ## Commit and push from the IDE
 
-Open a cloned project, then choose **Git → Commit and push…** (also available in the command palette).
+Open a cloned project and select the **Git** tab beside **Solution** in the sidebar. The same controls are available through **Git → Commit and push…** and the command palette.
 
-1. Select the files to include, including additions or deletions. Selected unsaved editor changes are saved before committing. Files not selected remain outside the commit.
+1. Use the checkboxes to select the files to include, including additions or deletions. Selected unsaved editor changes are saved before committing. Files not selected remain outside the commit.
 2. Enter your author name, author email and commit message, then click **Commit selected**. Author details are stored in that repository's Git configuration.
-3. Enter your HTTPS username and access token (or password accepted by your host), then click **Push commits**. This sends local commits to `origin` on the current branch. Credentials stay in memory only until the dialog closes; they are never saved in settings or repository files.
+3. Enter your HTTPS username and access token (or password accepted by your host), then click **Push commits**. This sends local commits to `origin` on the current branch. Credentials stay in memory while that Git view is open (switching sidebar tabs keeps the view open); they are never saved in settings or repository files.
 
-Commit and push are separate operations: a failed push leaves the local commit available for retry. The dialog shows progress and errors; Explorer indicators refresh after successful operations. Push verifies the remote's unpack/ref status, refuses non-fast-forward updates and sets the current branch's upstream after success. No new dependencies or system Git executable are required by the application.
+Commit and push are separate operations: a failed push leaves the local commit available for retry. The Git view shows progress and errors; Explorer indicators refresh after successful operations. Push verifies the remote's unpack/ref status, refuses non-fast-forward updates and sets the current branch's upstream after success. No new dependencies or system Git executable are required by the application.
 
 File selection is whole-file staging for one commit, not a persistent staging UI. The client maintains a standard Git v2 index and refuses to overwrite existing staging from another client. Advanced indexes, merge conflicts, detached HEAD commits, symlink/submodule edits, hooks, signing and packed object databases are not supported. `.tamtoot` metadata is excluded. Full `.gitignore` semantics are still not implemented: review new files explicitly before selecting them. Web push additionally depends on the remote host allowing browser requests (CORS).
+
+## Compare and discard changes
+
+Click a filename in the Git changes list to compare **HEAD → current content**, including unsaved editor changes. Added and removed lines have separate colors and line numbers. Right-click a file in Solution or Git (long-press on touch devices) for **Compare with HEAD** and **Discard changes…**.
+
+Discard requires confirmation. It restores a tracked file to its last committed contents, including deleted files, and reloads its open editor. For an untracked file, the confirmation explicitly offers deletion. Cancel preserves everything. A stale review, changed HEAD or existing external staging prevents restoration.
+
+Text comparison supports UTF-8 files up to a combined 2 MiB preview limit. Binary files show an explanatory message; large changed text spans use a bounded replacement view. Line endings are normalized only for display; restoration uses the original committed bytes.
 
 ## Current limitations
 

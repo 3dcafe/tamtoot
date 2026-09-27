@@ -145,6 +145,7 @@ class IdeSession {
 
   TamtootProjectMeta? projectMeta;
   bool workspaceHasGit = false;
+  bool gitBusy = false;
   String message = 'Ready';
   bool findVisible = false;
   bool replaceVisible = false;
@@ -173,8 +174,13 @@ class IdeSession {
     changed(persist: false);
   }
 
-  /// Open [root] in Solution Explorer and remember it in recent workspaces.
+  /// Open [root] in Solution and remember it in recent workspaces.
   Future<void> openWorkspaceFolder(Uri root) async {
+    if (gitBusy) {
+      throw StateError(
+        'Wait for the current Git operation before switching projects',
+      );
+    }
     root = Uri.parse('${root.toString().replaceAll(RegExp(r'/+$'), '')}/');
     workspaceRoot = root;
     _gitEntries = {};

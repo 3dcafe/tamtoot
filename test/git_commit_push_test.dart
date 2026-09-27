@@ -247,7 +247,7 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(find.textContaining('Unsaved —'), findsOneWidget);
-    await tester.tap(find.byType(CheckboxListTile));
+    await tester.tap(find.byType(Checkbox));
     await tester.enterText(
       find.widgetWithText(TextField, 'Commit message'),
       'Unsaved edit',
@@ -281,7 +281,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    await tester.tap(find.byType(CheckboxListTile));
+    await tester.tap(find.byType(Checkbox));
     await tester.enterText(
       find.widgetWithText(TextField, 'Commit message'),
       'From UI',

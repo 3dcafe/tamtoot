@@ -13,7 +13,11 @@ import '../workspace/tamtoot_meta.dart';
 /// Pure Dart Smart-HTTP git client. Works on Android / iOS / desktop via
 /// [GitHttpTransport] + [GitRepositoryStore] (no system `git` binary).
 class HttpGitService
-    implements GitService, GitPublicationProvider, GitIdentityProvider {
+    implements
+        GitService,
+        GitPublicationProvider,
+        GitIdentityProvider,
+        GitFileChangesProvider {
   HttpGitService({
     required this.transport,
     required this.openStore,
@@ -678,6 +682,71 @@ class HttpGitService
       lines.insert(end++, '\t${entry.key} = ${entry.value}');
     }
     await store.writeText('.git/config', '${lines.join('\n')}\n');
+  }
+
+  void _validateWorkPath(String path) {
+    if (path.isEmpty ||
+        path.contains('\\') ||
+        path.contains('\x00') ||
+        path
+            .split('/')
+            .any((part) => part.isEmpty || part == '.' || part == '..') ||
+        _internal(path)) {
+      throw GitException('Invalid working-tree path');
+    }
+  }
+
+  @override
+  Future<GitFileSnapshot> fileSnapshot(Uri directory, String path) async {
+    _validateWorkPath(path);
+    final store = openStore(directory);
+    await store.validateRegularFilePath(path);
+    final db = GitObjectDatabase(store, inflateAt, deflate);
+    final head = await db.readHead();
+    final entry = (await _headEntries(db, head))[path];
+    if (entry != null && entry.mode != '100644' && entry.mode != '100755') {
+      throw GitException(
+        'File comparison and discard do not support symlinks or submodules',
+      );
+    }
+    return GitFileSnapshot(
+      directory: directory,
+      path: path,
+      head: head,
+      original: entry == null
+          ? null
+          : List.unmodifiable((await db.read(entry.hash)).content),
+      working: !await store.exists(path)
+          ? null
+          : List.unmodifiable(await store.readBytes(path)),
+    );
+  }
+
+  @override
+  Future<void> discardFile(GitFileSnapshot snapshot) async {
+    _validateWorkPath(snapshot.path);
+    final store = openStore(snapshot.directory);
+    final db = GitObjectDatabase(store, inflateAt, deflate);
+    final current = await fileSnapshot(snapshot.directory, snapshot.path);
+    bool same(List<int>? a, List<int>? b) => a == null || b == null
+        ? a == b
+        : hashObject(GitObjectType.blob, a) ==
+              hashObject(GitObjectType.blob, b);
+    if (current.head != snapshot.head ||
+        !same(current.working, snapshot.working) ||
+        !same(current.original, snapshot.original)) {
+      throw GitException(
+        'The file or HEAD changed after review. Refresh and try again.',
+      );
+    }
+    await _checkIndex(store, await _headEntries(db, current.head));
+    await store.validateRegularFilePath(current.path);
+    if (current.original == null) {
+      if (current.working != null) await store.delete(current.path);
+    } else {
+      await store.writeBytes(current.path, current.original!);
+    }
+    _staged.remove(snapshot.directory);
   }
 
   Future<void> _checkIndex(
