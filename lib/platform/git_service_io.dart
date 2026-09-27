@@ -13,8 +13,9 @@ final class FileGitRepositoryStore extends GitRepositoryStore {
   FileGitRepositoryStore(this.root);
   final Directory root;
 
-  File _file(String path) => File.fromUri(root.uri.resolve(path));
-  Directory _dir(String path) => Directory.fromUri(root.uri.resolve(path));
+  File _file(String path) => File.fromUri(root.uri.resolveUri(Uri(path: path)));
+  Directory _dir(String path) =>
+      Directory.fromUri(root.uri.resolveUri(Uri(path: path)));
 
   @override
   Future<bool> exists(String path) async {

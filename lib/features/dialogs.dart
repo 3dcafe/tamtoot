@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'git_changes_dialog.dart';
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
@@ -57,6 +58,13 @@ class ShellActions implements PresentationActions {
   Future<void> showExtensions() => showDialog<void>(
     context: context(),
     builder: (ctx) => LanguageDialog(session: session),
+  );
+
+  @override
+  Future<void> showGitChanges() => showDialog<void>(
+    context: context(),
+    barrierDismissible: false,
+    builder: (_) => GitChangesDialog(session: session),
   );
 
   @override

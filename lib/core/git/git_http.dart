@@ -269,3 +269,36 @@ Uint8List buildReceivePackRequest({
   out.add(packfile);
   return out.toBytes();
 }
+
+/// A 200 response alone does not confirm a push. Check unpack and ref status,
+/// including report-status packets carried inside side-band channel 1.
+void verifyReceivePackResponse(List<int> body, String refName) {
+  final reader = PktLineReader(body);
+  final report = BytesBuilder();
+  final lines = <String>[];
+  while (reader.hasMore) {
+    final packet = reader.next();
+    if (packet == null || packet.isEmpty) continue;
+    if (packet[0] == 1) {
+      report.add(packet.sublist(1));
+    } else if (packet[0] == 2) {
+      continue;
+    } else if (packet[0] == 3) {
+      throw GitException('Remote reported a fatal push error');
+    } else {
+      lines.add(utf8.decode(packet).trim());
+    }
+  }
+  final nested = PktLineReader(report.toBytes());
+  while (nested.hasMore) {
+    final line = nested.nextText();
+    if (line != null && line.isNotEmpty) lines.add(line.trim());
+  }
+  if (!lines.contains('unpack ok') ||
+      !lines.contains('ok $refName') ||
+      lines.any((line) => line.startsWith('ng ') || line.startsWith('ERR '))) {
+    throw GitException(
+      'Server rejected the update or returned an incomplete status report',
+    );
+  }
+}

@@ -12,6 +12,7 @@ abstract interface class PresentationActions {
   Future<void> showSettings();
   Future<void> showExtensions();
   Future<void> showCloneRepository();
+  Future<void> showGitChanges();
   Future<void> showOpenProject();
 }
 
@@ -101,6 +102,13 @@ void registerSessionCommands(IdeSession s, PresentationActions ui) {
     'Clone repository…',
     (_) => ui.showCloneRepository(),
     enabled: () => s.git.available,
+    visible: () => s.git.available,
+  );
+  add(
+    'git.changes',
+    'Commit and push…',
+    (_) => ui.showGitChanges(),
+    enabled: () => s.git.available && s.workspaceHasGit,
     visible: () => s.git.available,
   );
   add('workspace.browse', 'Browse folder', (arg) async {

@@ -182,3 +182,9 @@ class GitPublicationState {
 abstract interface class GitPublicationProvider {
   Future<GitPublicationState> publicationState(Uri directory);
 }
+
+/// Optional repository identity configuration used by the commit dialog.
+abstract interface class GitIdentityProvider {
+  Future<({String name, String email, String branch})> identity(Uri directory);
+  Future<void> setIdentity(Uri directory, String name, String email);
+}

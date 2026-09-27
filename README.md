@@ -67,6 +67,18 @@ Common shortcuts: `Ctrl/⌘+S` saves, `Ctrl/⌘+Z` undoes, `Ctrl/⌘+Shift+Z` re
 
 The application saves session data after a 450 ms idle period and when it moves into the background. Theme changes are persisted immediately. Session recovery is separate from saving the actual file. Force-quitting during a pending write may lose the latest unsaved changes.
 
+## Commit and push from the IDE
+
+Open a cloned project, then choose **Git → Commit and push…** (also available in the command palette).
+
+1. Select the files to include, including additions or deletions. Selected unsaved editor changes are saved before committing. Files not selected remain outside the commit.
+2. Enter your author name, author email and commit message, then click **Commit selected**. Author details are stored in that repository's Git configuration.
+3. Enter your HTTPS username and access token (or password accepted by your host), then click **Push commits**. This sends local commits to `origin` on the current branch. Credentials stay in memory only until the dialog closes; they are never saved in settings or repository files.
+
+Commit and push are separate operations: a failed push leaves the local commit available for retry. The dialog shows progress and errors; Explorer indicators refresh after successful operations. Push verifies the remote's unpack/ref status, refuses non-fast-forward updates and sets the current branch's upstream after success. No new dependencies or system Git executable are required by the application.
+
+File selection is whole-file staging for one commit, not a persistent staging UI. The client maintains a standard Git v2 index and refuses to overwrite existing staging from another client. Advanced indexes, merge conflicts, detached HEAD commits, symlink/submodule edits, hooks, signing and packed object databases are not supported. `.tamtoot` metadata is excluded. Full `.gitignore` semantics are still not implemented: review new files explicitly before selecting them. Web push additionally depends on the remote host allowing browser requests (CORS).
+
 ## Current limitations
 
 This is an actively developed foundation, not a production compiler/debugger environment. Full LSP integration, PTY terminals, debugging, executable third-party extension hosting, advanced docking/drag-and-drop, and independent split editor groups are still future work. Placeholder panels identify unavailable providers explicitly.

@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'git_http.dart';
+import 'git_index.dart';
 import 'git_objects.dart';
 import 'git_pack.dart';
 import 'git_service.dart';
@@ -11,7 +12,8 @@ import '../workspace/tamtoot_meta.dart';
 
 /// Pure Dart Smart-HTTP git client. Works on Android / iOS / desktop via
 /// [GitHttpTransport] + [GitRepositoryStore] (no system `git` binary).
-class HttpGitService implements GitService, GitPublicationProvider {
+class HttpGitService
+    implements GitService, GitPublicationProvider, GitIdentityProvider {
   HttpGitService({
     required this.transport,
     required this.openStore,
@@ -25,6 +27,8 @@ class HttpGitService implements GitService, GitPublicationProvider {
   final GitRepositoryStore Function(Uri directory) openStore;
   final GitInflaterAt inflateAt;
   final GitDeflater deflate;
+
+  final _staged = <Uri, ({String? parent, List<TreeEntry> files})>{};
 
   static const _zero = '0000000000000000000000000000000000000000';
 
@@ -219,6 +223,12 @@ class HttpGitService implements GitService, GitPublicationProvider {
       return _fail('Remote "$remote" not configured', const ['push']);
     }
     final remoteUrl = Uri.parse(urlText);
+    if (remoteUrl.scheme != 'https' || remoteUrl.userInfo.isNotEmpty) {
+      return _fail(
+        'Push requires an HTTPS remote without embedded credentials',
+        const ['push'],
+      );
+    }
     final branchRef = branch == null || branch.isEmpty
         ? await _currentBranchRef(store)
         : (branch.startsWith('refs/') ? branch : 'refs/heads/$branch');
@@ -239,9 +249,25 @@ class HttpGitService implements GitService, GitPublicationProvider {
     final oldHash = discovery.hashFor(branchRef) ?? _zero;
 
     if (oldHash == newHash) {
+      await db.writeRef(
+        'refs/remotes/$remote/${branchRef.replaceFirst('refs/heads/', '')}',
+        newHash,
+      );
+      if (setUpstream) await _setUpstream(store, branchRef, remote);
       return _ok('Everything up-to-date', const ['push']);
     }
 
+    if (!discovery.capabilities.contains('report-status')) {
+      return _fail('Server does not support push confirmation', const ['push']);
+    }
+    if (oldHash != _zero &&
+        (!await db.has(oldHash) ||
+            !await _isAncestor(db, ancestor: oldHash, tip: newHash))) {
+      return _fail(
+        'Remote has newer or divergent commits. Fetch and reconcile before pushing; force push is disabled.',
+        const ['push'],
+      );
+    }
     final objects = await _objectsToPush(
       db,
       newHash: newHash,
@@ -268,16 +294,18 @@ class HttpGitService implements GitService, GitPublicationProvider {
     );
     if (response.statusCode != 200) {
       return _fail(
-        'Push failed (${response.statusCode}): ${utf8.decode(response.body)}',
+        'Push failed (HTTP ${response.statusCode}). Check credentials and repository write access.',
         const ['push'],
       );
     }
-    final text = utf8.decode(response.body);
-    if (text.contains('ng ')) {
-      return _fail('Push rejected: $text', const ['push']);
+    try {
+      verifyReceivePackResponse(response.body, branchRef);
+    } catch (error) {
+      return _fail('Push not confirmed: $error', const ['push']);
     }
     final short = branchRef.replaceFirst('refs/heads/', '');
     await db.writeRef('refs/remotes/$remote/$short', newHash);
+    if (setUpstream) await _setUpstream(store, branchRef, remote);
     return _ok('Pushed $branchRef → $newHash', const ['push']);
   }
 
@@ -317,7 +345,7 @@ class HttpGitService implements GitService, GitPublicationProvider {
     final workFiles = <String, String>{};
     final paths = await store.listFiles('');
     for (final path in paths) {
-      if (path == '.git' || path.startsWith('.git/')) continue;
+      if (_internal(path)) continue;
       final bytes = await store.readBytes(path);
       workFiles[path] = hashObject(GitObjectType.blob, bytes);
     }
@@ -342,8 +370,35 @@ class HttpGitService implements GitService, GitPublicationProvider {
     Uri directory, {
     List<String> paths = const ['.'],
   }) async {
-    // Snapshot staging is implicit at commit time for this MVP.
-    return _ok('OK (staging applied at commit)', ['add', ...paths]);
+    final store = openStore(directory);
+    final db = GitObjectDatabase(store, inflateAt, deflate);
+    final parent = await db.readHead();
+    final files = await _headEntries(db, parent);
+    await _checkIndex(store, files);
+    final available = {...files.keys, ...await store.listFiles('')};
+    for (final path in available) {
+      if (_internal(path)) continue;
+      if (!paths.any((p) => p == '.' || path == p || path.startsWith('$p/'))) {
+        continue;
+      }
+      final previous = files[path];
+      if (previous != null &&
+          previous.mode != '100644' &&
+          previous.mode != '100755') {
+        throw GitException(
+          'Committing symlinks or submodules is not supported: $path',
+        );
+      }
+      if (!await store.exists(path)) {
+        files.remove(path);
+        continue;
+      }
+      final blob = GitObject(GitObjectType.blob, await store.readBytes(path));
+      await db.write(blob);
+      files[path] = TreeEntry(previous?.mode ?? '100644', path, blob.hash);
+    }
+    _staged[directory] = (parent: parent, files: files.values.toList());
+    return _ok('Selected files prepared', ['add', ...paths]);
   }
 
   @override
@@ -352,28 +407,43 @@ class HttpGitService implements GitService, GitPublicationProvider {
     String message, {
     bool allowEmpty = false,
   }) async {
+    if (message.trim().isEmpty) {
+      return _fail('Enter a commit message', const ['commit']);
+    }
     final store = openStore(directory);
+    final branchRef = await _currentBranchRef(store);
+    if (branchRef == null) {
+      return _fail('Open a branch before committing (detached HEAD)', const [
+        'commit',
+      ]);
+    }
     final db = GitObjectDatabase(store, inflateAt, deflate);
     final parent = await db.readHead();
-    final entries = <TreeEntry>[];
-    final paths = await store.listFiles('');
-    for (final path in paths) {
-      if (path.startsWith('.git/') || path == '.git') continue;
-      final bytes = await store.readBytes(path);
-      final blob = GitObject(GitObjectType.blob, Uint8List.fromList(bytes));
-      await db.write(blob);
-      entries.add(TreeEntry('100644', path, blob.hash));
+    final staged = _staged[directory];
+    if (staged == null) {
+      return _fail('Select and prepare files before committing', const [
+        'commit',
+      ]);
     }
-    // Build nested trees from flat paths
-    final rootHash = await _writePathTree(db, entries);
+    if (staged.parent != parent) {
+      return _fail('HEAD changed; refresh and select files again', const [
+        'commit',
+      ]);
+    }
+    await _checkIndex(store, await _headEntries(db, parent));
+    final rootHash = await _writePathTree(db, staged.files);
     if (!allowEmpty && parent != null) {
       final parentCommit = parseCommit((await db.read(parent)).content);
       if (parentCommit.tree == rootHash) {
         return _fail('Nothing to commit', const ['commit']);
       }
     }
+    final author = await identity(directory);
+    if (author.name.isEmpty || author.email.isEmpty) {
+      return _fail('Set author name and email', const ['commit']);
+    }
     final now = DateTime.now().toUtc();
-    final ident = formatIdent('Tamtoot', 'tamtoot@local', now);
+    final ident = formatIdent(author.name, author.email, now);
     final commit = GitObject(
       GitObjectType.commit,
       encodeCommit(
@@ -387,8 +457,9 @@ class HttpGitService implements GitService, GitPublicationProvider {
       ),
     );
     await db.write(commit);
-    final branchRef = await _currentBranchRef(store) ?? 'refs/heads/main';
+    await store.writeBytes('.git/index', encodeGitIndex(staged.files));
     await db.writeRef(branchRef, commit.hash);
+    _staged.remove(directory);
     await db.writeHead(branchRef);
     return _ok(commit.hash, const ['commit']);
   }
@@ -536,63 +607,169 @@ class HttpGitService implements GitService, GitPublicationProvider {
     required String newHash,
     required String oldHash,
   }) async {
-    final result = <GitObject>[];
     final seen = <String>{};
-    if (oldHash != _zero) seen.add(oldHash);
-
-    Future<void> walk(String hash) async {
-      if (!seen.add(hash)) return;
-      // Stop if we hit old history
-      if (oldHash != _zero &&
-          await _isAncestor(db, ancestor: oldHash, tip: hash) &&
-          hash != newHash) {
-        // Still need objects not on old? Simpler: walk all from newHash and skip
-        // any commit that is ancestor of oldHash...
-      }
-      final obj = await db.read(hash);
-      result.add(obj);
-      if (obj.type == GitObjectType.commit) {
-        final info = parseCommit(obj.content);
-        await walk(info.tree);
-        for (final parent in info.parents) {
-          if (parent == oldHash) continue;
-          if (oldHash != _zero &&
-              await _isAncestor(db, ancestor: oldHash, tip: parent)) {
-            continue;
-          }
-          await walk(parent);
-        }
-      } else if (obj.type == GitObjectType.tree) {
-        for (final entry in parseTree(obj.content)) {
-          await walk(entry.hash);
+    final result = <GitObject>[];
+    Future<void> walk(String start, bool collect) async {
+      final pending = [start];
+      while (pending.isNotEmpty) {
+        final hash = pending.removeLast();
+        if (!seen.add(hash)) continue;
+        final object = await db.read(hash);
+        if (collect) result.add(object);
+        if (object.type == GitObjectType.commit) {
+          final commit = parseCommit(object.content);
+          pending.addAll([commit.tree, ...commit.parents]);
+        } else if (object.type == GitObjectType.tree) {
+          pending.addAll(
+            parseTree(
+              object.content,
+            ).where((e) => e.mode != '160000').map((e) => e.hash),
+          );
         }
       }
     }
 
-    await walk(newHash);
-    // Filter out anything reachable from oldHash
-    if (oldHash != _zero) {
-      final oldReachable = <String>{};
-      Future<void> mark(String hash) async {
-        if (!oldReachable.add(hash)) return;
-        final obj = await db.read(hash);
-        if (obj.type == GitObjectType.commit) {
-          final info = parseCommit(obj.content);
-          await mark(info.tree);
-          for (final p in info.parents) {
-            await mark(p);
-          }
-        } else if (obj.type == GitObjectType.tree) {
-          for (final e in parseTree(obj.content)) {
-            await mark(e.hash);
-          }
-        }
-      }
-
-      await mark(oldHash);
-      result.removeWhere((o) => oldReachable.contains(o.hash));
-    }
+    if (oldHash != _zero) await walk(oldHash, false);
+    await walk(newHash, true);
     return result;
+  }
+
+  Future<void> _setUpstream(
+    GitRepositoryStore store,
+    String ref,
+    String remote,
+  ) async {
+    final branch = ref.replaceFirst('refs/heads/', '');
+    if (RegExp(r'[\r\n"\\]').hasMatch('$branch$remote')) {
+      throw GitException('Unsupported branch or remote name');
+    }
+    await _setConfigValues(store, 'branch "$branch"', {
+      'remote': remote,
+      'merge': ref,
+    });
+  }
+
+  Future<void> _setConfigValues(
+    GitRepositoryStore store,
+    String section,
+    Map<String, String> values,
+  ) async {
+    final text = await store.exists('.git/config')
+        ? await store.readText('.git/config')
+        : '';
+    final lines = text.split('\n');
+    var start = lines.indexWhere((line) => line.trim() == '[$section]');
+    if (start < 0) {
+      lines.add('[$section]');
+      start = lines.length - 1;
+    }
+    var end = start + 1;
+    while (end < lines.length && !lines[end].trimLeft().startsWith('[')) {
+      end++;
+    }
+    for (final entry in values.entries) {
+      final key = RegExp('^\\s*${RegExp.escape(entry.key)}\\s*=');
+      for (var i = end - 1; i > start; i--) {
+        if (key.hasMatch(lines[i])) {
+          lines.removeAt(i);
+          end--;
+        }
+      }
+      lines.insert(end++, '\t${entry.key} = ${entry.value}');
+    }
+    await store.writeText('.git/config', '${lines.join('\n')}\n');
+  }
+
+  Future<void> _checkIndex(
+    GitRepositoryStore store,
+    Map<String, TreeEntry> head,
+  ) async {
+    if (await store.exists('.git/index.lock')) {
+      throw GitException(
+        'Another Git operation is running (index.lock exists).',
+      );
+    }
+    if (!await store.exists('.git/index')) return;
+    final index = readGitIndex(await store.readBytes('.git/index'));
+    if (index.length != head.length ||
+        index.entries.any(
+          (e) =>
+              head[e.key]?.hash != e.value.hash ||
+              head[e.key]?.mode != e.value.mode,
+        )) {
+      throw GitException(
+        'There are staged changes from another Git client. Commit or unstage them there first; Tamtoot has not changed them.',
+      );
+    }
+  }
+
+  bool _internal(String path) =>
+      path.split('/').contains('.git') ||
+      path == '.tamtoot' ||
+      path.startsWith('.tamtoot/');
+
+  Future<Map<String, TreeEntry>> _headEntries(
+    GitObjectDatabase db,
+    String? head,
+  ) async {
+    final entries = <String, TreeEntry>{};
+    Future<void> walk(String hash, String prefix) async {
+      for (final entry in parseTree((await db.read(hash)).content)) {
+        final path = '$prefix${entry.name}';
+        if (entry.isTree) {
+          await walk(entry.hash, '$path/');
+        } else {
+          entries[path] = TreeEntry(entry.mode, path, entry.hash);
+        }
+      }
+    }
+
+    if (head != null) {
+      await walk(parseCommit((await db.read(head)).content).tree, '');
+    }
+    return entries;
+  }
+
+  @override
+  Future<({String name, String email, String branch})> identity(
+    Uri directory,
+  ) async {
+    final store = openStore(directory);
+    final config = await store.exists('.git/config')
+        ? await store.readText('.git/config')
+        : '';
+    final user =
+        RegExp(
+          r'^\[user\]\s*\n([^\[]*)',
+          multiLine: true,
+        ).firstMatch(config)?.group(1) ??
+        '';
+    String value(String key) =>
+        RegExp(
+          '^\\s*$key\\s*=\\s*(.*)\$',
+          multiLine: true,
+        ).firstMatch(user)?.group(1)?.trim() ??
+        '';
+    return (
+      name: value('name'),
+      email: value('email'),
+      branch:
+          (await _currentBranchRef(store))?.replaceFirst('refs/heads/', '') ??
+          'Detached HEAD',
+    );
+  }
+
+  @override
+  Future<void> setIdentity(Uri directory, String name, String email) async {
+    if (name.trim().isEmpty ||
+        email.trim().isEmpty ||
+        RegExp(r'[\r\n<>\x00#;"\\]').hasMatch('$name$email')) {
+      throw GitException('Enter a valid author name and email');
+    }
+    await _setConfigValues(openStore(directory), 'user', {
+      'name': name.trim(),
+      'email': email.trim(),
+    });
   }
 
   Future<String?> _currentBranchRef(GitRepositoryStore store) async {

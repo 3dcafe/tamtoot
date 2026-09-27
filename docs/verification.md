@@ -32,3 +32,13 @@ Web-интерфейс открыт в браузере и визуально п
 The project tree now loads and expands child folders in place, including nested browser workspace paths. Explorer displays independent unsaved/modified/untracked/unpublished indicators and aggregates them onto folders. Publication status compares commit reachability against the locally known upstream; missing or unsupported history is reported explicitly. Theme selection is saved immediately as a user-level IDE preference.
 
 The expanded test suite passes **57 tests**, including folder collapse/reopen, stale asynchronous directory loads, access failures, nested Web paths, immediate theme restoration, combined Git indicators, reverted unpublished commits, branches behind upstream, and actual Explorer widget interactions.
+
+## Commit and push UI — 2026-09-27
+
+- Added Git → Commit and push with explicit whole-file selection, author identity, commit message, HTTPS credentials and separate commit/push actions.
+- Selected unsaved buffers are saved first; failed saves prevent the commit. Credentials are confined to the dialog lifetime.
+- Verified selected snapshots, deletion, excluded metadata, stale/detached HEAD rejection, rejected/incomplete push reports, and multi-commit pack contents.
+- Verified the dialog at desktop and 430px widths, including retry after a save failure.
+- The interoperability test uses isolated temporary repositories and native `git receive-pack` only as a test server. Native Git accepted the index, commits and multi-commit pushes; `git fsck --strict` passed. Existing external staging was preserved and rejected for modification.
+- Full suite: 64 tests passed, followed by all 7 commit/push tests including the newly added save-failure case (65 tests total). `flutter analyze`: no issues. No dependencies added.
+- Git implementation limits and instructions are documented in the English README. No production repository was changed by the application tests.
