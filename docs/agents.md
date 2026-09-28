@@ -1,0 +1,332 @@
+# Models, coding agent, hooks, MCP and Kanban
+
+Tamtoot can send prompts to several model API formats and run a bounded coding
+agent inside the current Git workspace. This document describes the implemented
+behavior, local files, security boundaries and current limitations.
+
+## Quick start with Ollama
+
+1. Start Ollama and download a model, for example `ollama pull qwen3-coder`.
+2. Open a Git project in Tamtoot.
+3. Open **Tools → Settings → Model profiles and prompts**.
+4. Select **Ollama Chat**, keep `http://localhost:11434/api/chat`, then press
+   **Detect Ollama**. Choose a detected model and save the profile.
+5. Use **Run model…** for a single prompt, or **Tools → Agent…** for a coding
+   task that may inspect and modify the project.
+
+Ollama discovery calls `/api/tags`; model details and the context window come
+from `/api/show`. Requests use native streaming `/api/chat`. The default local
+endpoint does not require an API key. If an Ollama installation does require a
+key through a proxy, enter it only when opening the run or agent dialog.
+
+## Model profiles
+
+Profiles are stored per project at:
+
+```text
+.tamtoot/agents/models/<profile-id>.json
+.tamtoot/agents/instructions.md
+```
+
+The instructions file is appended to the system prompt of every profile. A
+profile uses schema version 1:
+
+```json
+{
+  "schemaVersion": 1,
+  "id": "local-code",
+  "name": "Local coding model",
+  "provider": "ollama",
+  "model": "qwen3-coder",
+  "systemPrompt": "You are a coding assistant.",
+  "userTemplate": "Task:\n{{task}}\n\nFile: {{file_path}}\n{{file}}\n\nSelected code:\n{{selection}}",
+  "parameters": {
+    "temperature": 0.2,
+    "num_ctx": 32768
+  },
+  "apiFormat": "ollama",
+  "endpoint": "http://localhost:11434/api/chat"
+}
+```
+
+Supported `apiFormat` values are:
+
+| Value | Protocol |
+| --- | --- |
+| `ollama` | Ollama Chat API |
+| `chat-completions` | OpenAI-compatible Chat Completions |
+| `responses` | OpenAI Responses API |
+| `anthropic` | Anthropic Messages API |
+
+Public endpoints must use HTTPS. Plain HTTP is accepted only for localhost and
+private IPv4 ranges. URLs containing credentials, query parameters or fragments
+are rejected. Redirects are not followed.
+
+The template variables are `{{task}}`, `{{file_path}}`, `{{file}}` and
+`{{selection}}`. Substitution happens once, so template-looking text from a file
+is kept as ordinary file content. The Parameters field must contain a JSON
+object. Request structure and credential fields such as `model`, `messages`,
+`input`, `headers`, `authorization`, `api_key`, `token`, `tools` and `stream` are
+reserved because Tamtoot controls them.
+
+API keys are never written to profiles or application settings. The dialogs keep
+the key in memory until the request finishes or the window closes. The headless
+agent reads `TAMTOOT_API_KEY`. Error text is sanitized before display.
+
+## Single model requests
+
+**Preview prompts** resolves the selected profile locally and sends nothing.
+**Run model…** shows the resolved request, accepts an optional API key, streams
+the response when supported, and provides Stop and Copy controls. The active
+file and selection may include unsaved editor content.
+
+Requests have bounded response sizes and timeouts. Stopping a request closes the
+active HTTP client. Browser builds additionally depend on the endpoint allowing
+cross-origin requests.
+
+## Coding agent
+
+Open **Tools → Agent…**, select a saved profile and enter a task. The model must
+answer with one structured action per iteration. Tamtoot validates the action
+before it runs it. The available actions are:
+
+| Action | Behavior |
+| --- | --- |
+| `say` | Adds a progress message to the run log |
+| `list_files` | Lists one project-relative directory |
+| `read_file` | Reads one project-relative regular file |
+| `write_file` | Replaces one project-relative regular file |
+| `run_command` | Runs an executable directly with an argument list, without a shell |
+| `mcp_call` | Calls a tool advertised by a connected MCP server |
+| `finish` | Completes the task after all run conditions are satisfied |
+
+Paths must stay inside the open project. `.git` and `.tamtoot` cannot be accessed
+through agent file actions. Files and tool output have size limits. The loop has
+a timeout, an iteration limit and a consecutive-mistake limit. Stop cancels the
+active model request and terminates the active command or hook.
+
+Normal mode asks once before each file write, command execution or MCP call.
+Read-only file inspection does not require approval. After changing files, the
+agent cannot report success until a command whose arguments identify a test,
+analyze or check run succeeds.
+
+Commands are passed directly to the operating system and never through a shell.
+The command runner blocks known shell entry points and destructive operations,
+including destructive Git reset/clean/checkout/restore forms. Output and runtime
+are bounded. These checks reduce accidental damage; they are not an operating
+system sandbox.
+
+## YOLO Mode
+
+YOLO Mode automatically approves agent writes, commands and MCP tool calls. The
+IDE displays a warning the first time it is enabled in the current application
+run. Starting YOLO requires a clean Git working tree so the resulting changes
+remain reviewable and reversible.
+
+YOLO still enforces project path checks, command restrictions, response limits,
+the total timeout, the iteration and mistake limits, and the successful-check
+requirement after a write. The default timeout is 600 seconds. The Stop button
+remains available throughout the run.
+
+## Headless CLI
+
+Run the CLI from the root of a supported Git repository:
+
+```sh
+TAMTOOT_API_KEY=... dart run bin/ide_agent.dart \
+  --profile local-code \
+  --timeout 600 \
+  --max-consecutive-mistakes 3 \
+  "fix the failing tests"
+```
+
+Add `-y` or `--yolo` for automatic approvals. Add `--json` for line-delimited
+JSON events suitable for scripts:
+
+```sh
+cat issue.txt | TAMTOOT_API_KEY=... \
+  dart run bin/ide_agent.dart --json --profile local-code "implement this issue"
+```
+
+Piped input is appended as task context. With no explicit profile, the first
+profile returned from `.tamtoot/agents/models/` is used. The process exits with
+0 on success, 1 when the run fails, and 2 for an unsupported repository or a
+missing profile. Invalid CLI usage exits with 64. Ctrl+C requests a clean stop.
+
+Each JSON event contains `type`, `text`, a millisecond Unix timestamp in `ts`,
+and optional `data`. The final `result` event also contains `success` and
+`iterations`. To install a standalone executable, use:
+
+```sh
+dart compile exe bin/ide_agent.dart -o ide-agent
+```
+
+## Lifecycle hooks
+
+Project hooks are executable files with no extension at:
+
+```text
+.tamtoot/hooks/TaskStart
+.tamtoot/hooks/UserPromptSubmit
+.tamtoot/hooks/PreToolUse
+.tamtoot/hooks/PostToolUse
+.tamtoot/hooks/TaskCancel
+```
+
+Tamtoot starts a hook without a shell, uses the project root as its working
+directory and writes one JSON object to standard input. The exact input depends
+on the lifecycle point. Tool hooks include the action and its arguments; start
+and prompt hooks include the task or prompt.
+
+A hook may write no output, or one JSON object:
+
+```json
+{
+  "cancel": false,
+  "errorMessage": "",
+  "contextModification": "Additional instructions for this run"
+}
+```
+
+`cancel: true` blocks the current start, prompt or tool action. A non-empty
+`contextModification` from `UserPromptSubmit`, `PreToolUse` or `PostToolUse` is
+added to the agent context. `TaskStart` currently uses `cancel` and
+`errorMessage`; its context modification is not consumed. Hooks have a 10-second
+timeout and a 1 MiB stdout limit; stderr shown for a failed hook is truncated.
+The executable bit and interpreter line are the hook author's responsibility.
+
+Only project hooks and the five names above are implemented. Global hooks and a
+`TaskResume` lifecycle event are planned but unavailable.
+
+## MCP servers
+
+Open **Tools → Settings → MCP servers** to edit and test `.tamtoot/mcp.json`.
+The file follows the common `mcpServers` shape and currently has no Tamtoot
+`schemaVersion` field.
+
+STDIO example:
+
+```json
+{
+  "mcpServers": {
+    "local-tools": {
+      "type": "stdio",
+      "command": "/absolute/path/to/server",
+      "args": ["--workspace", "."],
+      "timeoutSeconds": 30,
+      "disabled": false
+    }
+  }
+}
+```
+
+Streamable HTTP example:
+
+```json
+{
+  "mcpServers": {
+    "remote-tools": {
+      "type": "streamableHttp",
+      "url": "https://example.com/mcp",
+      "headers": {
+        "Authorization": "Bearer replace-me"
+      },
+      "timeoutSeconds": 30,
+      "disabled": false
+    }
+  }
+}
+```
+
+Tamtoot performs MCP initialization, lists tools, accepts JSON or SSE responses,
+retains the returned session ID, and exposes discovered tools to the agent.
+Server names may contain letters, numbers, `_` and `-`. Timeouts range from 1 to
+600 seconds. HTTP is accepted only for localhost; remote servers require HTTPS.
+STDIO transport is available on platforms with process support.
+
+Header values are stored as plain text in `.tamtoot/mcp.json`. Use short-lived
+credentials where possible and do not commit this file with secrets. Tamtoot's
+built-in Git commit UI excludes `.tamtoot`, but another Git client can still add
+it unless the repository ignores it.
+
+## Agent Kanban and worktrees
+
+Open **Tools → Agent Kanban…** to manage cards in
+`.tamtoot/agents/kanban.json`. Columns are Todo, In Progress, Review and Done.
+A card contains an ID, title, description, model profile, dependencies and run
+metadata. A card is ready only when every referenced dependency is Done.
+
+Starting a ready card on desktop creates a real Git worktree at
+`.tamtoot/worktrees/<card-id>` on branch `tamtoot/<card-id>`. Tamtoot adds
+`/.tamtoot/` to the repository's local `.git/info/exclude` so these local files
+do not pollute the built-in Git view.
+
+The current Kanban UI creates and records worktrees and allows manual status
+movement. It does not yet schedule cards, start agents automatically, stream an
+agent into each card, provide inline diff review, commit changes, push branches,
+or create pull requests. The `autoCommit` and `autoPr` fields are reserved state
+for those future workflows and have no execution effect today.
+
+## Platform support
+
+| Capability | Desktop | Android/iOS | Web |
+| --- | --- | --- | --- |
+| HTTP model requests | Yes | Yes, subject to platform networking | Subject to browser CORS |
+| Agent project file tools | Yes | Depends on the granted project provider | Depends on the granted browser folder |
+| Commands and executable hooks | Yes | No supported OS process workflow | No |
+| STDIO MCP | Yes | No supported OS process workflow | No |
+| HTTP MCP | Yes | Yes, subject to networking | Subject to browser CORS |
+| Git worktree creation | Yes | No | No |
+
+## Local data and Git
+
+All agent configuration belongs to the open project:
+
+```text
+.tamtoot/
+├── agents/
+│   ├── instructions.md
+│   ├── kanban.json
+│   └── models/
+│       └── <profile-id>.json
+├── hooks/
+│   └── <HookType>
+├── mcp.json
+└── worktrees/
+```
+
+The built-in Git UI excludes `.tamtoot`. This makes profiles, prompts, MCP
+headers, hooks, Kanban state and worktrees local by default when committing from
+Tamtoot. Teams that want to share safe parts of the configuration should copy
+reviewed files into version control with another Git client and keep credentials
+out of them.
+
+## Troubleshooting
+
+- **Ollama is not detected:** verify `ollama list`, then check that the profile
+  endpoint is `http://localhost:11434/api/chat` and no proxy blocks localhost.
+- **YOLO refuses to start:** commit or discard every Git change, then refresh the
+  project. `.tamtoot` metadata is excluded by Tamtoot's Git status handling.
+- **The agent cannot finish after editing:** its test/analyze/check command must
+  complete successfully before `finish` is accepted.
+- **A command is rejected:** commands run without a shell. Put the executable and
+  each argument in separate fields; shell operators and scripts that require a
+  shell are intentionally unavailable.
+- **An MCP server does not appear:** test the JSON in Settings, ensure it is not
+  disabled, and verify that initialization and `tools/list` return valid
+  JSON-RPC objects.
+- **HTTP works on desktop but not Web:** configure CORS on the model or MCP server.
+- **A hook does not run:** make it executable and add an interpreter line such as
+  `#!/bin/sh` or `#!/usr/bin/env python3`.
+
+## Implementation status
+
+Implemented: editable model prompts, four API formats, Ollama discovery and
+streaming, bounded agent tools, normal approvals, YOLO checks, headless JSON
+mode, project lifecycle hooks, STDIO and Streamable HTTP MCP tools, persistent
+Kanban cards and desktop Git worktree creation.
+
+Planned: automatic Kanban dependency scheduling, card-owned agent processes,
+inline review and comments, automatic commit/push/pull request creation, global
+hooks, task resume, persistent multi-agent teams, durable per-run log files and
+prompt caching metrics.

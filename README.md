@@ -170,7 +170,7 @@ stdin. Supported lifecycle names are `TaskStart`, `UserPromptSubmit`,
 and `contextModification`. Hooks have a 10-second timeout and their state appears
 in the Agent log.
 
-Configure MCP under **Tools → Settings → MCP servers**. The versioned project file
+Configure MCP under **Tools → Settings → MCP servers**. The project file
 is `.tamtoot/mcp.json`; both STDIO servers and Streamable HTTP/SSE servers are
 supported. The editor can test connections and list tools, and Agent can call
 them with the same normal/YOLO approval rules. Header values are stored verbatim,
@@ -200,6 +200,7 @@ The editor, command system, layout model, schemas and language definitions are i
 - [Requirements matrix](docs/requirements.md)
 - [Architecture](docs/architecture.md)
 - [Versioned formats](docs/schemas.md)
+- [Models, Agent, hooks, MCP and Kanban](docs/agents.md)
 - [Public extension API](docs/extension-api.md)
 - [Foundation verification](docs/verification.md)
 

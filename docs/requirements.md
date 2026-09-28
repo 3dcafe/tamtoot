@@ -46,14 +46,42 @@
 | Decorations/diagnostics/folding/brackets | Domain records, painter decoration support, revision-aware provider seam, bounded bracket hook |
 | Fonts/tab preferences/read-only | Настройки и persistence; bundled JetBrains Mono |
 | Plugin-contributed panels | Публичный PanelRegistry/descriptor; executable-host ещё нет |
-| Terminal/LSP/SCM/debug/process boundaries | Честные интерфейсы, без фиктивных процессов |
+| Terminal/LSP/SCM/debug/process boundaries | Публичные capability interfaces; отдельно реализованы внутренние Git и bounded agent process adapters |
 | Future desktop compilation | Scaffolds всех платформ, conditional IO; проверяемые сборки перечислены отдельно |
+
+## Агентное ТЗ
+
+| Возможность | Статус | Реализация / граница |
+|---|---|---|
+| Редактируемые prompts per model | Готово | Model profiles schema v1, общие instructions, preview и reset |
+| OpenAI Responses / compatible Chat Completions / Anthropic | Готово | Отдельная сборка request/response, timeout, cancel, size limit, redaction |
+| Ollama native integration | Готово | `/api/tags`, `/api/show`, streaming `/api/chat`, context metadata |
+| Безопасное хранение API keys | Готово в заявленной модели | Ключ только в памяти dialog или `TAMTOOT_API_KEY`; persistence отсутствует |
+| Agent file tools | Готово | list/read/write только внутри project; `.git`/`.tamtoot` закрыты; размеры ограничены |
+| Agent commands | Готово на desktop | Direct process без shell, timeout/output limits, stop, dangerous command denylist |
+| Normal approvals | Готово | One-time approval перед write/command/MCP call |
+| YOLO Mode | Готово | First-use warning, clean Git, auto-approval; остальные ограничения остаются |
+| Завершение после проверки | Готово | После write нужен successful test/analyze/check command |
+| Headless `ide-agent` | Готово | `-y`, JSON Lines, stdin, timeout, mistake limit, profile, exit codes, Ctrl+C |
+| Project hooks | Частично | 5 lifecycle hooks, cancel/context, timeout; global hooks и TaskResume отсутствуют |
+| MCP STDIO + Streamable HTTP | Готово | initialize, tools/list, tools/call, SSE/JSON, session ID, test UI |
+| MCP management UI | Частично | Raw JSON editor и connection test; отдельные add/restart controls отсутствуют |
+| Kanban persistence/dependencies | Готово | 4 статуса, schema v1, dependency validation и ready state |
+| Git worktree per card | Готово на desktop | `.tamtoot/worktrees/<id>`, branch `tamtoot/<id>` |
+| Автоматический Kanban scheduler | Не реализовано | Карточки запускаются/двигаются вручную |
+| Inline review и комментарии | Не реализовано | Остаётся будущим UI |
+| Auto-commit/push/PR | Не реализовано | Поля зарезервированы, действие не выполняется |
+| Persistent Agent Teams | Не реализовано | Нет ролей, shared task list и межагентных сообщений |
+| Durable JSONL logs и prompt cache metrics | Не реализовано | Есть live/copyable events текущего запуска |
+
+Полная пользовательская и конфигурационная документация находится в [agents.md](agents.md).
 
 ## Что специально оставлено на следующий этап
 
 - Dock move / left-right-top-bottom DnD, editor splits и несколько независимых document groups.
 - Stateful lexer, snippets insertion UI, auto-close/indent behavior, folding controls, полноценная accessibility semantics документа, полная grapheme navigation.
-- Production analyzer/compiler/LSP, terminals/PTY, debugging/SCM/SSH, executable extension host, marketplace, collaboration, AI.
+- Production analyzer/compiler/LSP, terminals/PTY, debugging/SSH, executable extension host, marketplace и collaboration.
+- Agent scheduler, inline review, auto-commit/push/PR, global hooks, TaskResume и persistent Agent Teams.
 - SAF tree, iOS export, sandbox bookmarks, remote filesystem.
 
 Это границы текущей реализации, а не скрытые готовые функции. Нет тестов миграции несуществующей legacy-схемы; есть v1 normalization/defaults и rejection старой/будущей неподдерживаемой версии. Migration fixtures обязательны при первом изменении схемы.

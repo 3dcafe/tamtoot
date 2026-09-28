@@ -1,6 +1,8 @@
 # Внешние форматы · schema v1
 
-Все JSON-контракты несут `schemaVersion: 1`. Центральный `decodeVersioned` проверяет JSON object и поддерживаемую версию; loader валидирует обязательную семантику и создаёт нормализованную доменную модель. Неизвестные необязательные поля игнорируются. Неподдерживаемая версия возвращает `SchemaException`; bootstrap/command boundary показывает понятное сообщение вместо падения.
+Версионируемые JSON-контракты Tamtoot несут `schemaVersion: 1`. Центральный `decodeVersioned` проверяет JSON object и поддерживаемую версию для основных IDE-форматов; специализированные loaders профилей и Kanban выполняют такую же проверку самостоятельно. Loader валидирует обязательную семантику и создаёт нормализованную доменную модель. Неизвестные необязательные поля игнорируются там, где это разрешает конкретный loader. Неподдерживаемая версия возвращает понятную ошибку вместо падения.
+
+Исключение — `.tamtoot/mcp.json`: он следует внешней форме `mcpServers` и сейчас не содержит Tamtoot `schemaVersion`. Ответы model APIs, MCP JSON-RPC и hook JSON являются транспортными сообщениями, а не сохраняемыми схемами Tamtoot.
 
 v1 — первая опубликованная схема. Схемы v0 не было: данные без версии и `schemaVersion: 0` отвергаются. Сейчас нормализация v1 тестирует defaults; фиктивная миграция не добавлена. При введении v2 нужно добавить DTO v1, переход v1→v2 и fixtures migration tests, сохранив единый version-aware loader.
 
@@ -16,6 +18,8 @@ v1 — первая опубликованная схема. Схемы v0 не 
 | Session | documents: [{name,text}] | uri/savedText=null, recentWorkspaces=[], activeIndex — последний документ при отсутствии |
 | Installed package | manifest, syntax (JSON strings) | snippets=null |
 | Package index | ids: string[] | — |
+| Model profile | id, name, provider, model, systemPrompt, userTemplate, parameters | apiFormat=chat-completions для старого v1; endpoint="" |
+| Agent Kanban | cards: object[] | Пустая доска разрешена; поля карточки имеют безопасные defaults |
 
 `schemaVersion` — формат, `packageVersion` — релиз конкретного пакета, `apiVersion` — совместимость executable API. Это независимые числа/версии.
 
@@ -47,3 +51,27 @@ Theme is an IDE-wide user preference: its effective value comes from the user la
 ## Persistence
 
 Ключи SharedPreferences имеют префикс `tamtoot.`: settings, layout, keybindings, session, language.index, language.<id>. Данные локальны. Сессия содержит текст открытых документов; это восстанавливаемые черновики, а не замена файловой системы проекта. Можно очистить данные приложения стандартными средствами ОС/браузера.
+
+## Model profile v1
+
+Путь: `.tamtoot/agents/models/<id>.json`. `id` состоит из lowercase ASCII letters, numbers, `_` и `-`, длина 1–64. Обязательные строки: `id`, `name`, `provider`, `model`, `systemPrompt`, `userTemplate`. `parameters` — JSON object. `apiFormat`: `ollama`, `chat-completions`, `responses` или `anthropic`. `endpoint` — HTTPS URL без credentials/query/fragment; HTTP разрешён для localhost и private IPv4.
+
+Допустимые template variables: `task`, `file_path`, `file`, `selection`. Credentials и transport-owned keys в `parameters` запрещены рекурсивно. API key в JSON не хранится. Общие текстовые инструкции лежат отдельно в `.tamtoot/agents/instructions.md` и добавляются к system prompt во время запуска.
+
+## Agent Kanban v1
+
+Путь: `.tamtoot/agents/kanban.json`. Корень содержит `schemaVersion: 1` и `cards`. Поля карточки: `id`, `title`, `description`, `status`, `dependencies`, `profileId`, `worktree`, `lastOutput`, `autoCommit`, `autoPr`. Status: `todo`, `inProgress`, `review`, `done`. ID уникален и следует тем же ограничениям, что ID профиля. Dependency обязан ссылаться на другую существующую карточку; self-dependency запрещена. Поля `autoCommit` и `autoPr` сохранены для будущей автоматизации и сейчас не запускают действие.
+
+## MCP configuration
+
+Путь: `.tamtoot/mcp.json`. Корень: `{ "mcpServers": { "name": { ... } } }`. Server name: ASCII letters, numbers, `_`, `-`, длина 1–64. Transport `stdio` требует `command` и допускает string array `args`. Transport `streamableHttp` требует безопасный `url` и допускает string-to-string `headers`. Общие поля: `disabled` и `timeoutSeconds` в диапазоне 1–600. При отсутствии `type` он выводится из наличия `command`. Формат намеренно не объявлен Tamtoot schema v1.
+
+## Hook response и CLI events
+
+Hook может вернуть пустой stdout или object с `cancel: bool`, `errorMessage: string`, `contextModification: string`. Это одноразовый IPC-контракт, не persistence schema.
+
+`ide-agent --json` пишет JSON Lines. Обычное событие содержит `type`, `text`, `ts` (Unix milliseconds) и необязательный `data`. Финальный result содержит `success`, `text`, `iterations`, `ts`. Формат предназначен для автоматизации текущей версии CLI; отдельный `schemaVersion` пока не зафиксирован.
+
+## Workspace `.tamtoot`
+
+Локальная структура и security-поведение подробно описаны в [agents.md](agents.md). Встроенный Git UI исключает `.tamtoot`, однако это не заменяет `.gitignore` для внешнего Git-клиента. Secrets нельзя добавлять в model profiles; MCP headers хранятся verbatim и требуют отдельной осторожности.
