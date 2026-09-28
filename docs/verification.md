@@ -72,4 +72,15 @@ The expanded test suite passes **57 tests**, including folder collapse/reopen, s
 - Versioned profiles live in `.tamtoot/agents/models/<id>.json`; shared instructions are saved separately in `.tamtoot/agents/instructions.md`.
 - Tested template substitution without recursively interpreting source code, schema/path/parameter validation, native disk persistence, project isolation, stale-write rejection and symlink rejection.
 - Widget test creates, previews and reopens a profile at 600px window width. Full suite: **93 tests passed**. Analyzer: no issues.
-- No new dependencies. This is configuration and preview only: model API execution, provider-specific parameter validation and secure credentials are not implemented. Browser metadata listing now supports explicit reads under `.tamtoot` while keeping metadata excluded from ordinary work-tree listings.
+- No new dependencies. At this checkpoint the feature was configuration and preview only; model execution was added in the 2026-09-29 update below. Browser metadata listing supports explicit reads under `.tamtoot` while keeping metadata excluded from ordinary work-tree listings.
+
+## Agent coding foundation — 2026-09-29
+
+- Added model execution for Ollama Chat streaming, OpenAI Responses, compatible Chat Completions and Anthropic Messages. Ollama discovery covers `/api/tags` and `/api/show` context metadata.
+- Added Tools → Agent with bounded file/command/MCP actions, per-action approval, YOLO clean-Git gate, timeout, mistake/iteration limits, emergency stop, JSON logs and a successful-test completion guard.
+- Added `bin/ide_agent.dart` with `-y`, `--json`, piped input, profile/timeout/mistake options, Ctrl+C cancellation and meaningful exit codes.
+- Added project hooks with cancel/context injection, 10-second timeout and lifecycle logging.
+- Added Streamable HTTP/SSE and STDIO MCP configuration, discovery and tool calls, plus Settings UI.
+- Added persistent Kanban columns, dependency validation and isolated desktop Git worktree creation.
+- Targeted tests cover request shapes, response parsing, streaming, credential redaction, cancellation, Ollama discovery, approvals, YOLO clean-tree enforcement, command safety, premature-completion protection, hooks, HTTP/SSE/STDIO MCP, Kanban persistence and real temporary Git worktrees.
+- `flutter analyze`: no issues. Full suite: **114 tests passed**. Debug Android APK, macOS app and web builds compile successfully.

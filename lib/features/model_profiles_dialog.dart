@@ -2,8 +2,11 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import '../app/ide_session.dart';
 import '../core/agents/model_profile.dart';
+import '../core/agents/model_client.dart';
+import '../core/agents/ollama_client.dart';
 import '../core/agents/profile_store.dart';
 import '../core/git/http_git_service.dart';
+import 'model_request_dialog.dart';
 
 class ModelProfilesDialog extends StatefulWidget {
   const ModelProfilesDialog({super.key, required this.session});
@@ -17,11 +20,14 @@ class _ModelProfilesDialogState extends State<ModelProfilesDialog> {
       name = TextEditingController(),
       provider = TextEditingController(),
       model = TextEditingController(),
+      endpoint = TextEditingController(),
       system = TextEditingController(text: defaultSystemPrompt),
       template = TextEditingController(text: defaultUserTemplate),
       parameters = TextEditingController(text: '{}'),
       instructions = TextEditingController(),
       task = TextEditingController();
+  String apiFormat = 'chat-completions';
+  List<OllamaModel> ollamaModels = const [];
   ProfileStore? store;
   List<String> paths = [];
   String? selected, original, originalInstructions, error;
@@ -41,6 +47,7 @@ class _ModelProfilesDialogState extends State<ModelProfilesDialog> {
       name,
       provider,
       model,
+      endpoint,
       system,
       template,
       parameters,
@@ -130,6 +137,8 @@ class _ModelProfilesDialogState extends State<ModelProfilesDialog> {
       name.text = p?.name ?? '';
       provider.text = p?.provider ?? '';
       model.text = p?.model ?? '';
+      endpoint.text = p?.endpoint ?? '';
+      apiFormat = p?.apiFormat ?? 'chat-completions';
       system.text = p?.systemPrompt ?? defaultSystemPrompt;
       template.text = p?.userTemplate ?? defaultUserTemplate;
       parameters.text = const JsonEncoder.withIndent(
@@ -152,6 +161,8 @@ class _ModelProfilesDialogState extends State<ModelProfilesDialog> {
       systemPrompt: system.text,
       userTemplate: template.text,
       parameters: params,
+      apiFormat: apiFormat,
+      endpoint: endpoint.text.trim(),
     )..validate();
   }
 
@@ -206,25 +217,31 @@ class _ModelProfilesDialogState extends State<ModelProfilesDialog> {
       name.clear();
       provider.clear();
       model.clear();
+      endpoint.clear();
+      apiFormat = 'chat-completions';
       system.text = defaultSystemPrompt;
       template.text = defaultUserTemplate;
       parameters.text = '{}';
     });
   }
 
+  Map<String, dynamic> _prompt() {
+    final doc = widget.session.documents.active;
+    final selection = doc?.editor.selection;
+    return _profile().preview(
+      task: task.text,
+      instructions: instructions.text,
+      filePath: doc?.uri?.toString() ?? doc?.name ?? '',
+      file: doc?.editor.text ?? '',
+      selection: doc == null || selection == null
+          ? ''
+          : doc.editor.text.substring(selection.start, selection.end),
+    );
+  }
+
   Future<void> _preview() async {
     try {
-      final doc = widget.session.documents.active;
-      final selection = doc?.editor.selection;
-      final preview = _profile().preview(
-        task: task.text,
-        instructions: instructions.text,
-        filePath: doc?.uri?.toString() ?? doc?.name ?? '',
-        file: doc?.editor.text ?? '',
-        selection: doc == null || selection == null
-            ? ''
-            : doc.editor.text.substring(selection.start, selection.end),
-      );
+      final preview = _prompt();
       await showDialog<void>(
         context: context,
         builder: (ctx) => AlertDialog(
@@ -247,6 +264,63 @@ class _ModelProfilesDialogState extends State<ModelProfilesDialog> {
       );
     } catch (e) {
       if (mounted) setState(() => error = '$e');
+    }
+  }
+
+  Future<void> _runModel() async {
+    try {
+      _checkProject();
+      final profile = _profile();
+      profile.requestUri();
+      final prompt = _prompt();
+      ModelClient.requestBody(profile, prompt);
+      await showDialog<void>(
+        context: context,
+        barrierDismissible: false,
+        builder: (_) => ModelRequestDialog(profile: profile, prompt: prompt),
+      );
+    } catch (e) {
+      if (mounted) setState(() => error = '$e');
+    }
+  }
+
+  Future<void> _detectOllama() => _run(() async {
+    final source = endpoint.text.trim().isEmpty
+        ? 'http://localhost:11434'
+        : endpoint.text.trim().replaceFirst(RegExp(r'/api/chat$'), '');
+    final client = OllamaClient();
+    try {
+      final found = await client.models(source);
+      if (!mounted) return;
+      ollamaModels = found;
+      provider.text = 'ollama';
+      apiFormat = 'ollama';
+      endpoint.text = '$source/api/chat';
+      if (model.text.isEmpty && found.isNotEmpty) model.text = found.first.name;
+      dirty = true;
+    } finally {
+      client.close();
+    }
+  });
+
+  Future<void> _selectOllamaModel(String value) async {
+    setState(() {
+      model.text = value;
+      dirty = true;
+    });
+    final base = endpoint.text.replaceFirst(RegExp(r'/api/chat$'), '');
+    final client = OllamaClient();
+    try {
+      final contextWindow = await client.contextWindow(base, value);
+      if (contextWindow == null || !mounted) return;
+      final current = jsonDecode(parameters.text);
+      if (current is Map<String, dynamic>) {
+        current['num_ctx'] = contextWindow < 32768 ? 32768 : contextWindow;
+        parameters.text = const JsonEncoder.withIndent('  ').convert(current);
+        setState(() => dirty = true);
+      }
+    } finally {
+      client.close();
     }
   }
 
@@ -294,12 +368,13 @@ class _ModelProfilesDialogState extends State<ModelProfilesDialog> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               const Text(
-                'Project profiles and prompt templates. API execution is not connected yet. No API keys are stored here.',
+                'Project profiles and prompt templates. Run uses the current form, including unsaved prompt edits. API keys are entered separately and are never saved.',
               ),
               const SizedBox(height: 12),
               if (busy) const LinearProgressIndicator(),
               if (store != null) ...[
                 DropdownButton<String>(
+                  key: const ValueKey('model-profile-picker'),
                   isExpanded: true,
                   value: selected,
                   hint: const Text('New profile'),
@@ -352,6 +427,74 @@ class _ModelProfilesDialogState extends State<ModelProfilesDialog> {
                 _field('Display name', name),
                 _field('Provider ID', provider),
                 _field('Model ID', model),
+                DropdownButton<String>(
+                  isExpanded: true,
+                  value: apiFormat,
+                  items: [
+                    for (final entry in ModelProfile.apiFormats.entries)
+                      DropdownMenuItem(
+                        value: entry.key,
+                        child: Text(entry.value),
+                      ),
+                  ],
+                  onChanged: busy
+                      ? null
+                      : (value) => setState(() {
+                          apiFormat = value!;
+                          dirty = true;
+                        }),
+                ),
+                _field('API endpoint (full URL)', endpoint),
+                Wrap(
+                  spacing: 8,
+                  children: [
+                    TextButton(
+                      onPressed: busy ? null : _detectOllama,
+                      child: const Text('Detect Ollama'),
+                    ),
+                    for (final preset in const {
+                      'OpenAI': (
+                        'responses',
+                        'https://api.openai.com/v1/responses',
+                      ),
+                      'Anthropic': (
+                        'anthropic',
+                        'https://api.anthropic.com/v1/messages',
+                      ),
+                    }.entries)
+                      TextButton(
+                        onPressed: busy
+                            ? null
+                            : () => setState(() {
+                                apiFormat = preset.value.$1;
+                                endpoint.text = preset.value.$2;
+                                provider.text = preset.key.toLowerCase();
+                                dirty = true;
+                              }),
+                        child: Text(preset.key),
+                      ),
+                  ],
+                ),
+                if (ollamaModels.isNotEmpty)
+                  DropdownButton<String>(
+                    isExpanded: true,
+                    value: ollamaModels.any((item) => item.name == model.text)
+                        ? model.text
+                        : null,
+                    hint: const Text('Choose an Ollama model'),
+                    items: [
+                      for (final item in ollamaModels)
+                        DropdownMenuItem(
+                          value: item.name,
+                          child: Text(item.name),
+                        ),
+                    ],
+                    onChanged: busy
+                        ? null
+                        : (value) {
+                            if (value != null) _selectOllamaModel(value);
+                          },
+                  ),
                 _field('System prompt', system, lines: 3),
                 _field('User prompt template', template, lines: 5),
                 const Text(
@@ -360,7 +503,7 @@ class _ModelProfilesDialogState extends State<ModelProfilesDialog> {
                 const SizedBox(height: 12),
                 _field('API parameters (JSON object)', parameters, lines: 3),
                 const Text(
-                  'Use parameters supported by your model. Provider-specific validation will happen when API adapters are connected.',
+                  'Parameters are sent to the selected API. Ollama uses num_ctx for its context window. Streaming and tool calls are not used in this simple request view.',
                 ),
                 const SizedBox(height: 12),
                 TextField(
@@ -369,7 +512,7 @@ class _ModelProfilesDialogState extends State<ModelProfilesDialog> {
                   minLines: 2,
                   maxLines: 5,
                   decoration: const InputDecoration(
-                    labelText: 'Task for preview',
+                    labelText: 'Task',
                     border: OutlineInputBorder(),
                   ),
                 ),
@@ -379,6 +522,10 @@ class _ModelProfilesDialogState extends State<ModelProfilesDialog> {
                     TextButton(
                       onPressed: busy ? null : _preview,
                       child: const Text('Preview prompts'),
+                    ),
+                    FilledButton(
+                      onPressed: busy ? null : _runModel,
+                      child: const Text('Run model…'),
                     ),
                     FilledButton(
                       onPressed: busy ? null : _save,

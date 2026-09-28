@@ -1,4 +1,7 @@
 import 'model_profiles_dialog.dart';
+import 'agent_dialog.dart';
+import 'mcp_dialog.dart';
+import 'kanban_dialog.dart';
 import 'dart:async';
 import 'git_changes_dialog.dart';
 import 'dart:convert';
@@ -54,6 +57,18 @@ class ShellActions implements PresentationActions {
   Future<void> showSettings() => showDialog<void>(
     context: context(),
     builder: (ctx) => SettingsDialog(session: session),
+  );
+  @override
+  Future<void> showAgent() => showDialog<void>(
+    context: context(),
+    barrierDismissible: false,
+    builder: (_) => AgentDialog(session: session),
+  );
+  @override
+  Future<void> showKanban() => showDialog<void>(
+    context: context(),
+    barrierDismissible: false,
+    builder: (_) => KanbanDialog(session: session),
   );
   @override
   Future<void> showExtensions() => showDialog<void>(
@@ -276,6 +291,18 @@ class _SettingsDialogState extends State<SettingsDialog> {
                   context: context,
                   barrierDismissible: false,
                   builder: (_) => ModelProfilesDialog(session: widget.session),
+                ),
+              ),
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: const Icon(Icons.extension_outlined),
+                title: const Text('MCP servers'),
+                subtitle: const Text('External tools for project agents'),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () => showDialog<void>(
+                  context: context,
+                  barrierDismissible: false,
+                  builder: (_) => McpDialog(session: widget.session),
                 ),
               ),
               const Align(

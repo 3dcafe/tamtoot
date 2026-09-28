@@ -176,7 +176,7 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.text('Open'));
       await tester.pumpAndSettle();
-      await tester.tap(find.byType(DropdownButton<String>));
+      await tester.tap(find.byKey(const ValueKey('model-profile-picker')));
       await tester.pumpAndSettle();
       await tester.tap(find.text('coding.json').last);
       await tester.pumpAndSettle();

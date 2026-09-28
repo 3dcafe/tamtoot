@@ -1,10 +1,13 @@
 import 'dart:async';
 import 'dart:convert';
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:tamtoot/core/agents/model_client.dart';
 import 'package:tamtoot/core/agents/model_profile.dart';
+import 'package:tamtoot/core/agents/ollama_client.dart';
+import 'package:tamtoot/features/model_request_dialog.dart';
 
 ModelProfile profile([
   String format = 'chat-completions',
@@ -163,6 +166,73 @@ void main() {
       );
     },
   );
+  test('Ollama discovers models, context and streams chat deltas', () async {
+    final requests = <String>[];
+    final transport = MockClient((request) async {
+      requests.add(request.url.path);
+      if (request.url.path == '/api/tags') {
+        return http.Response(
+          jsonEncode({
+            'models': [
+              {'name': 'qwen3:8b'},
+              {'name': 'rnj:latest'},
+            ],
+          }),
+          200,
+        );
+      }
+      if (request.url.path == '/api/show') {
+        return http.Response(
+          jsonEncode({
+            'model_info': {'qwen3.context_length': 32768},
+          }),
+          200,
+        );
+      }
+      return http.Response('', 404);
+    });
+    final ollama = OllamaClient(client: transport);
+    expect((await ollama.models('http://localhost:11434')).map((m) => m.name), [
+      'qwen3:8b',
+      'rnj:latest',
+    ]);
+    expect(
+      await ollama.contextWindow('http://localhost:11434', 'qwen3:8b'),
+      32768,
+    );
+    expect(requests, ['/api/tags', '/api/show']);
+
+    final deltas = <String>[];
+    final client = ModelClient(
+      client: MockClient((request) async {
+        final body = jsonDecode(request.body);
+        expect(body['options'], {'temperature': 0.2});
+        expect(body['stream'], isTrue);
+        return http.Response(
+          '${jsonEncode({
+            'message': {'content': 'Hel'},
+            'done': false,
+          })}\n'
+          '${jsonEncode({
+            'message': {'content': 'lo'},
+            'done': true,
+            'prompt_eval_count': 4,
+            'eval_count': 2,
+          })}\n',
+          200,
+        );
+      }),
+    );
+    final answer = await client.send(
+      profile('ollama', 'http://localhost:11434/api/chat'),
+      prompt,
+      onDelta: deltas.add,
+    );
+    expect(answer.text, 'Hello');
+    expect(deltas, ['Hel', 'lo']);
+    expect(answer.usage['output_tokens'], 2);
+  });
+
   test('HTTP failures redact credentials and do not retry', () async {
     var calls = 0;
     final client = ModelClient(
@@ -228,4 +298,59 @@ void main() {
       pending.complete(http.Response('{}', 200));
     },
   );
+
+  testWidgets('request dialog sends and displays a model response', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(700, 850));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final p = profile();
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: Builder(
+            builder: (context) => TextButton(
+              onPressed: () => showDialog<void>(
+                context: context,
+                builder: (_) => ModelRequestDialog(
+                  profile: p,
+                  prompt: prompt,
+                  clientFactory: () => ModelClient(
+                    client: MockClient(
+                      (_) async => http.Response(
+                        jsonEncode({
+                          'choices': [
+                            {
+                              'message': {'content': 'Ready'},
+                              'finish_reason': 'stop',
+                            },
+                          ],
+                        }),
+                        200,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              child: const Text('Open'),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('Open'));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.byWidgetPredicate(
+        (widget) =>
+            widget is TextField && widget.decoration?.labelText == 'API key',
+      ),
+      'secret',
+    );
+    await tester.tap(find.text('Send'));
+    await tester.pumpAndSettle();
+    expect(find.text('Ready'), findsOneWidget);
+    expect(find.text('Copy response'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
 }

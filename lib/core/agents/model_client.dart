@@ -33,6 +33,7 @@ class ModelClient {
     ModelProfile profile,
     Map<String, dynamic> prompt, {
     String apiKey = '',
+    void Function(String delta)? onDelta,
   }) async {
     if (_started) {
       throw const ModelApiException(
@@ -52,7 +53,11 @@ class ModelClient {
       if (key.contains('\n') || key.contains('\r')) {
         throw const ModelApiException('Invalid API key.');
       }
-      final body = requestBody(profile, prompt);
+      final body = requestBody(
+        profile,
+        prompt,
+        stream: profile.apiFormat == 'ollama' && onDelta != null,
+      );
       final encoded = utf8.encode(jsonEncode(body));
       if (encoded.length > 2 * 1024 * 1024) {
         throw const ModelApiException(
@@ -70,7 +75,7 @@ class ModelClient {
       request.bodyBytes = encoded;
       final reply =
           await Future.any([
-            _perform(request, profile.apiFormat),
+            _perform(request, profile.apiFormat, onDelta: onDelta),
             _cancelled.future.then<ModelReply>(
               (_) => throw const ModelApiException('Request cancelled.'),
             ),
@@ -108,8 +113,9 @@ class ModelClient {
 
   static Map<String, dynamic> requestBody(
     ModelProfile p,
-    Map<String, dynamic> prompt,
-  ) {
+    Map<String, dynamic> prompt, {
+    bool stream = false,
+  }) {
     p.validate();
     final system = prompt['systemPrompt'] as String;
     final user = prompt['userPrompt'] as String;
@@ -117,6 +123,15 @@ class ModelClient {
       throw const ModelApiException('The user prompt is empty.');
     }
     return switch (p.apiFormat) {
+      'ollama' => {
+        'model': p.model,
+        'messages': [
+          if (system.isNotEmpty) {'role': 'system', 'content': system},
+          {'role': 'user', 'content': user},
+        ],
+        'options': p.parameters,
+        'stream': stream,
+      },
       'responses' => {
         'store': false,
         ...p.parameters,
@@ -147,8 +162,15 @@ class ModelClient {
     };
   }
 
-  Future<ModelReply> _perform(http.Request request, String format) async {
+  Future<ModelReply> _perform(
+    http.Request request,
+    String format, {
+    void Function(String delta)? onDelta,
+  }) async {
     final response = await _client.send(request);
+    if (format == 'ollama' && onDelta != null && response.statusCode == 200) {
+      return _ollamaStream(response, onDelta);
+    }
     final bytes = <int>[];
     await for (final chunk in response.stream) {
       if (bytes.length + chunk.length > 4 * 1024 * 1024) {
@@ -189,6 +211,46 @@ class ModelClient {
     return parseReply(format, data);
   }
 
+  Future<ModelReply> _ollamaStream(
+    http.StreamedResponse response,
+    void Function(String delta) onDelta,
+  ) async {
+    final parts = <String>[];
+    final usage = <String, dynamic>{};
+    var size = 0;
+    await for (final line
+        in response.stream
+            .transform(utf8.decoder)
+            .transform(const LineSplitter())) {
+      size += utf8.encode(line).length;
+      if (size > 4 * 1024 * 1024) {
+        throw const ModelApiException('API response exceeds 4 MiB.');
+      }
+      if (line.trim().isEmpty) continue;
+      final event = jsonDecode(line);
+      if (event is! Map) continue;
+      if (event['error'] is String) {
+        throw ModelApiException(event['error'] as String);
+      }
+      final message = event['message'];
+      if (message is Map && message['content'] is String) {
+        final delta = message['content'] as String;
+        parts.add(delta);
+        onDelta(delta);
+      }
+      if (event['prompt_eval_count'] is num) {
+        usage['input_tokens'] = event['prompt_eval_count'];
+      }
+      if (event['eval_count'] is num) {
+        usage['output_tokens'] = event['eval_count'];
+      }
+    }
+    if (parts.join().trim().isEmpty) {
+      throw const ModelApiException('Ollama returned no text answer.');
+    }
+    return ModelReply(parts.join(), usage: usage);
+  }
+
   static ModelReply parseReply(String format, Map<String, dynamic> data) {
     final parts = <String>[];
     String note = '';
@@ -211,7 +273,16 @@ class ModelClient {
       }
     }
 
-    if (format == 'responses') {
+    if (format == 'ollama') {
+      final message = data['message'];
+      if (message is Map) content(message['content']);
+      if (data['prompt_eval_count'] is num) {
+        data['usage'] = {
+          'input_tokens': data['prompt_eval_count'],
+          'output_tokens': data['eval_count'],
+        };
+      }
+    } else if (format == 'responses') {
       final output = data['output'];
       if (output is List) {
         for (final item in output) {

@@ -21,6 +21,7 @@ class ModelProfile {
   final Map<String, dynamic> parameters;
   final String apiFormat, endpoint;
   static const apiFormats = {
+    'ollama': 'Ollama Chat',
     'chat-completions': 'Chat Completions (compatible APIs)',
     'responses': 'OpenAI Responses',
     'anthropic': 'Anthropic Messages',
@@ -28,9 +29,7 @@ class ModelProfile {
 
   Uri requestUri() {
     final uri = Uri.tryParse(endpoint);
-    final local =
-        uri != null &&
-        {'localhost', '127.0.0.1', '::1', '[::1]'}.contains(uri.host);
+    final local = uri != null && _isPrivateHost(uri.host);
     if (uri == null ||
         uri.host.isEmpty ||
         uri.userInfo.isNotEmpty ||
@@ -42,6 +41,15 @@ class ModelProfile {
       );
     }
     return uri;
+  }
+
+  static bool _isPrivateHost(String host) {
+    if ({'localhost', '127.0.0.1', '::1', '[::1]'}.contains(host)) return true;
+    final parts = host.split('.').map(int.tryParse).toList();
+    if (parts.length != 4 || parts.any((part) => part == null)) return false;
+    return parts[0] == 10 ||
+        (parts[0] == 192 && parts[1] == 168) ||
+        (parts[0] == 172 && parts[1]! >= 16 && parts[1]! <= 31);
   }
 
   static final idPattern = RegExp(r'^[a-z0-9][a-z0-9_-]{0,63}$');
@@ -91,6 +99,7 @@ class ModelProfile {
       'function_call',
       'previous_response_id',
       'conversation',
+      'options',
     };
     void check(dynamic value) {
       if (value is Map) {

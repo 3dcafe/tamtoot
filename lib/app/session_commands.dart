@@ -14,6 +14,8 @@ abstract interface class PresentationActions {
   Future<void> showCloneRepository();
   Future<void> showGitChanges();
   Future<void> showOpenProject();
+  Future<void> showAgent();
+  Future<void> showKanban();
 }
 
 void registerSessionCommands(IdeSession s, PresentationActions ui) {
@@ -97,6 +99,18 @@ void registerSessionCommands(IdeSession s, PresentationActions ui) {
     visible: () => s.documents.dialogs.supportsDirectories,
   );
   add('workspace.openProject', 'Open project…', (_) => ui.showOpenProject());
+  add(
+    'agent.open',
+    'Agent…',
+    (_) => ui.showAgent(),
+    enabled: () => s.workspaceRoot != null,
+  );
+  add(
+    'agent.kanban',
+    'Agent Kanban…',
+    (_) => ui.showKanban(),
+    enabled: () => s.workspaceRoot != null && s.workspaceHasGit,
+  );
   add(
     'git.clone',
     'Clone repository…',

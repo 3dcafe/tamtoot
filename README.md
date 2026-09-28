@@ -120,17 +120,67 @@ persists edits. Profiles can be selected, edited and deleted independently.
   unsaved content. Substitution happens once; file contents are not reinterpreted
   as templates.
 
-**Preview prompts** displays the resolved, provider-neutral configuration locally.
-This release does **not** send model API requests or run agents. Provider adapters,
-model-specific parameter validation and secure credential storage are not yet
-implemented. Do not put credentials in prompts or parameters; common credential
-and request-structure parameter names are rejected. No API-key field is exposed.
+**Preview prompts** displays the resolved request locally. **Run model…** sends it
+through OpenAI Responses, OpenAI-compatible Chat Completions, Anthropic Messages,
+or Ollama Chat. The API key is entered in the run window, stays in memory only,
+and is cleared when the request finishes. Error messages redact the supplied key.
+Common credential and request-structure parameter names are rejected in profiles.
+
+For Ollama, press **Detect Ollama**. Tamtoot queries `/api/tags`, offers the models
+reported by the server, reads context metadata from `/api/show`, and uses native
+streaming `/api/chat`. The default address is `http://localhost:11434`; HTTP is
+also accepted for private-network addresses, while public endpoints require HTTPS.
 
 The profiles belong to the open workspace and are reloaded from disk when the
 editor opens. External changes are detected before saving or deleting. The current
 Git UI still excludes `.tamtoot` entirely, so these settings remain local when
 committing through Tamtoot. Existing browser folder stores support profile files;
 actual browser permission behavior requires a writable folder grant.
+
+## Agent, YOLO and headless mode
+
+Open **Tools → Agent…**, choose a saved model profile, enter a task and run it.
+The agent has bounded tools to list/read/write project files, run a command without
+a shell, and call connected MCP tools. File writes and commands require one-time
+approval in normal mode. API keys remain in the open window only.
+
+**YOLO Mode** auto-approves these actions after a visible first-use warning and a
+clean-Git check. It has a 600-second default timeout, a configurable consecutive
+mistake limit, an iteration limit, a live log and a **Stop** button. Dangerous
+executables and destructive Git commands are blocked. If files changed, the agent
+cannot finish until a test/analyze/check command succeeds.
+
+For scripts and CI:
+
+```sh
+TAMTOOT_API_KEY=... dart run bin/ide_agent.dart -y --profile local-code "fix the tests"
+cat README.md | dart run bin/ide_agent.dart --json "summarize"
+```
+
+The CLI reads profiles from the current repository, supports `--timeout` and
+`--max-consecutive-mistakes`, emits line-delimited JSON with `--json`, accepts
+piped input, handles Ctrl+C, and returns a nonzero status on failure. Compile
+`bin/ide_agent.dart` with `dart compile exe` to install it as `ide-agent`.
+
+## Hooks, MCP and Kanban
+
+Executable project hooks live at `.tamtoot/hooks/<HookType>` and receive JSON on
+stdin. Supported lifecycle names are `TaskStart`, `UserPromptSubmit`,
+`PreToolUse`, `PostToolUse`, and `TaskCancel`. A JSON response may set `cancel`, `errorMessage`,
+and `contextModification`. Hooks have a 10-second timeout and their state appears
+in the Agent log.
+
+Configure MCP under **Tools → Settings → MCP servers**. The versioned project file
+is `.tamtoot/mcp.json`; both STDIO servers and Streamable HTTP/SSE servers are
+supported. The editor can test connections and list tools, and Agent can call
+them with the same normal/YOLO approval rules. Header values are stored verbatim,
+so do not commit long-lived secrets.
+
+**Tools → Agent Kanban…** stores cards in `.tamtoot/agents/kanban.json` with Todo,
+In Progress, Review and Done states. Cards can express dependencies. Starting a
+ready desktop card creates an isolated `tamtoot/<card-id>` Git worktree under
+`.tamtoot/worktrees/`; Tamtoot adds its metadata folder to the repository's local
+Git exclude file.
 
 ## Current limitations
 
@@ -140,7 +190,7 @@ The editor virtualizes visible lines with overscan. Storage currently uses an in
 
 Platform file access differs: desktop supports local files/folders; Android uses system document selection and SAF export; Web file/folder capabilities depend on browser support and permission; the iOS export provider remains incomplete. macOS may require reopening a sandbox-protected folder after restart because security-scoped bookmarks are not implemented.
 
-The existing Git client has limitations around staging, ignore rules, packed/shallow histories and repository layouts. Unsupported Git reads are reported in Explorer; ordinary file browsing remains available.
+The existing Git client has limitations around staging, ignore rules, packed/shallow histories and repository layouts. Unsupported Git reads are reported in Explorer; ordinary file browsing remains available. Kanban currently creates and tracks worktrees, but automated dependency scheduling, inline diff review, auto-commit/PR and persistent multi-agent teams remain future work.
 
 ## Architecture and documentation
 

@@ -169,7 +169,12 @@ class _IdeShellState extends ConsumerState<IdeShell> {
                     'view.commands',
                   ]),
                   _menuItem('Git', ['git.changes', 'git.clone']),
-                  _menuItem('Tools', ['settings.open', 'extensions.manage']),
+                  _menuItem('Tools', [
+                    'agent.open',
+                    'agent.kanban',
+                    'settings.open',
+                    'extensions.manage',
+                  ]),
                 ],
               ),
             ),
