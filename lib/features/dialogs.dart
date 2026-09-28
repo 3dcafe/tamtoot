@@ -6,7 +6,6 @@ import 'dart:async';
 import 'git_changes_dialog.dart';
 import 'dart:convert';
 
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../app/ide_session.dart';
@@ -473,10 +472,6 @@ class _CloneRepositoryDialogState extends State<CloneRepositoryDialog> {
   @override
   void initState() {
     super.initState();
-    if (kDebugMode) {
-      url.text = 'https://gitverse.ru/latin/tamtoot.git';
-      folder.text = 'tamtoot';
-    }
     url.addListener(_suggestFolder);
     unawaited(_prepareDefaultDestination());
   }

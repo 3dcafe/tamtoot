@@ -4,7 +4,7 @@ import 'package:tamtoot/core/workspace/tamtoot_meta.dart';
 void main() {
   test('TamtootProjectMeta round-trips', () {
     final meta = TamtootProjectMeta(
-      remoteUrl: 'https://gitverse.ru/latin/tamtoot.git',
+      remoteUrl: 'https://example.com/team/project.git',
       branch: 'master',
       head: '0123456789abcdef0123456789abcdef01234567',
       clonedAt: DateTime.utc(2026, 9, 26, 12),

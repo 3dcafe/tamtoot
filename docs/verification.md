@@ -1,6 +1,6 @@
 # Проверка v0.1 · 26 сентября 2026
 
-Окружение: macOS 26.6.2; SDK `/Users/latin/Documents/Flutter/3_44_1`, фактически Flutter 3.44.0 stable / Dart 3.12.0; Xcode 26.5; Android SDK 36.
+Окружение: macOS 26.6.2; Flutter 3.44.0 stable / Dart 3.12.0; Xcode 26.5; Android SDK 36. Путь к Flutter SDK намеренно не фиксируется: для сборки достаточно добавить `<flutter-sdk>/bin` в `PATH`.
 
 ## Автоматические проверки
 

@@ -32,7 +32,8 @@ flutter devices
 flutter run -d <device-id>
 ```
 
-The original development SDK is located at `/Users/latin/Documents/Flutter/3_44_1`; despite the directory name, that installation reports Flutter 3.44.0.
+The project was verified with Flutter 3.44.0. The SDK may be installed anywhere;
+add its `bin` directory to `PATH` instead of relying on a machine-specific path.
 
 ```sh
 dart format --output=none --set-exit-if-changed lib test

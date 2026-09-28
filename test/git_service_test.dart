@@ -100,7 +100,7 @@ R  old.txt -> renamed.txt
   group('gitRemoteWithCredentials', () {
     test('embeds token for HTTPS remotes', () {
       final withAuth = gitRemoteWithCredentials(
-        Uri.parse('https://gitverse.ru/latin/tamtoot.git'),
+        Uri.parse('https://example.com/team/project.git'),
         const GitCredentials(token: 'secret-token'),
       );
       expect(withAuth.userInfo, 'git:secret-token');
@@ -109,7 +109,7 @@ R  old.txt -> renamed.txt
     test('rejects non-http remotes', () {
       expect(
         () => gitRemoteWithCredentials(
-          Uri.parse('ssh://git@gitverse.ru/latin/tamtoot.git'),
+          Uri.parse('ssh://git@example.com/team/project.git'),
           const GitCredentials(token: 'x'),
         ),
         throwsArgumentError,
