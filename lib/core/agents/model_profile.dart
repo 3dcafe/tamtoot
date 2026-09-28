@@ -14,14 +14,45 @@ class ModelProfile {
     this.systemPrompt = defaultSystemPrompt,
     this.userTemplate = defaultUserTemplate,
     this.parameters = const {},
+    this.apiFormat = 'chat-completions',
+    this.endpoint = '',
   });
   final String id, name, provider, model, systemPrompt, userTemplate;
   final Map<String, dynamic> parameters;
+  final String apiFormat, endpoint;
+  static const apiFormats = {
+    'chat-completions': 'Chat Completions (compatible APIs)',
+    'responses': 'OpenAI Responses',
+    'anthropic': 'Anthropic Messages',
+  };
+
+  Uri requestUri() {
+    final uri = Uri.tryParse(endpoint);
+    final local =
+        uri != null &&
+        {'localhost', '127.0.0.1', '::1', '[::1]'}.contains(uri.host);
+    if (uri == null ||
+        uri.host.isEmpty ||
+        uri.userInfo.isNotEmpty ||
+        uri.hasQuery ||
+        uri.hasFragment ||
+        (uri.scheme != 'https' && !(uri.scheme == 'http' && local))) {
+      throw const FormatException(
+        'Enter a full HTTPS API endpoint without credentials or query parameters. HTTP is allowed only for localhost.',
+      );
+    }
+    return uri;
+  }
+
   static final idPattern = RegExp(r'^[a-z0-9][a-z0-9_-]{0,63}$');
   static final variables = RegExp(r'\{\{\s*([a-zA-Z_]+)\s*\}\}');
   static const allowedVariables = {'task', 'file_path', 'file', 'selection'};
 
   void validate() {
+    if (!apiFormats.containsKey(apiFormat)) {
+      throw const FormatException('Unsupported API format.');
+    }
+    if (endpoint.isNotEmpty) requestUri();
     if (!idPattern.hasMatch(id)) {
       throw const FormatException(
         'Profile ID: use lowercase letters, numbers, - or _ (1–64 characters).',
@@ -50,6 +81,16 @@ class ModelProfile {
       'access_token',
       'password',
       'headers',
+      'instructions',
+      'stream',
+      'stream_options',
+      'background',
+      'tools',
+      'tool_choice',
+      'functions',
+      'function_call',
+      'previous_response_id',
+      'conversation',
     };
     void check(dynamic value) {
       if (value is Map) {
@@ -81,6 +122,8 @@ class ModelProfile {
       'systemPrompt': systemPrompt,
       'userTemplate': userTemplate,
       'parameters': parameters,
+      'apiFormat': apiFormat,
+      'endpoint': endpoint,
     });
   }
 
@@ -106,6 +149,10 @@ class ModelProfile {
       systemPrompt: string('systemPrompt'),
       userTemplate: string('userTemplate'),
       parameters: data['parameters'] as Map<String, dynamic>,
+      apiFormat: data.containsKey('apiFormat')
+          ? string('apiFormat')
+          : 'chat-completions',
+      endpoint: data.containsKey('endpoint') ? string('endpoint') : '',
     );
     profile.validate();
     return profile;
@@ -132,6 +179,8 @@ class ModelProfile {
       'provider': provider,
       'model': model,
       'parameters': parameters,
+      'apiFormat': apiFormat,
+      'endpoint': endpoint,
       'systemPrompt': [
         expand(systemPrompt),
         instructions,
