@@ -90,4 +90,7 @@ The expanded test suite passes **57 tests**, including folder collapse/reopen, s
 - Added a Requests sidebar and Tools command with project-scoped CRUD, nested folders, explicit save state, Markdown attachments, environments and individual/batch execution.
 - Shared requests and `.tamtoot/environment.json` participate in the built-in Git status/commit flow; `.tamtoot/environment.local.json` and other private metadata remain excluded.
 - Verified disk persistence in a temporary project, path containment, schema rejection, variable precedence, inherited bearer authorization, JSON/query/header resolution, sequential stop-on-error, parallel ordering, empty batches and Git visibility rules.
-- `flutter analyze`: no issues. Full suite: **118 tests passed**. No dependencies added.
+- `flutter analyze`: no issues. Full suite: **123 tests passed**. No dependencies added.
+- Additional regression coverage verifies the five-request concurrency ceiling,
+  form encoding, authorization precedence, streamed response limits, malformed-file
+  isolation, move conflict rollback and symlink containment.

@@ -1,7 +1,9 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
 import 'package:tamtoot/core/requests/http_request.dart';
 import 'package:tamtoot/core/requests/request_executor.dart';
 import 'package:tamtoot/core/requests/request_storage.dart';
@@ -25,6 +27,32 @@ class _Transport implements RequestHttpTransport {
       headers: {'content-type': 'application/json'},
       body: [123, 34, 111, 107, 34, 58, 116, 114, 117, 101, 125],
     );
+  }
+
+  @override
+  void close() {}
+}
+
+class _StreamingClient extends http.BaseClient {
+  _StreamingClient(this.chunks);
+  final List<List<int>> chunks;
+
+  @override
+  Future<http.StreamedResponse> send(http.BaseRequest request) async =>
+      http.StreamedResponse(Stream.fromIterable(chunks), 200);
+}
+
+class _ConcurrencyTransport implements RequestHttpTransport {
+  int active = 0;
+  int maximum = 0;
+
+  @override
+  Future<HttpTransportResponse> send(ResolvedHttpRequest request) async {
+    active++;
+    if (active > maximum) maximum = active;
+    await Future<void>.delayed(const Duration(milliseconds: 5));
+    active--;
+    return const HttpTransportResponse(statusCode: 200, headers: {}, body: []);
   }
 
   @override
@@ -144,6 +172,153 @@ void main() {
     expect(parallel.results.map((item) => item.id), ['one', 'fail', 'three']);
     expect((await executor.executeMany([], const RequestExecutionContext())).results, isEmpty);
   });
+
+  test('parallel execution never exceeds the hard concurrency limit', () async {
+    final transport = _ConcurrencyTransport();
+    final executor = RequestExecutor(transport: transport);
+    final requests = List.generate(
+      20,
+      (index) => (
+        id: '$index',
+        request: HttpRequestFile(
+          name: 'Request $index',
+          url: 'https://example.com/$index',
+        ),
+      ),
+    );
+    final result = await executor.executeMany(
+      requests,
+      const RequestExecutionContext(),
+      const BatchExecutionOptions(parallel: true, maxConcurrency: 100),
+    );
+    expect(result.results, hasLength(20));
+    expect(transport.maximum, 5);
+  });
+
+  test('form encoding and authorization overrides are deterministic', () {
+    final executor = RequestExecutor(transport: _Transport());
+    const context = RequestExecutionContext(
+      secretVariables: {'token': 'inherited-secret'},
+      projectAuth: RequestEnvironment(
+        authType: 'bearer',
+        authToken: '{{token}}',
+      ),
+    );
+    final form = executor.resolve(
+      'form',
+      const HttpRequestFile(
+        name: 'Form',
+        method: 'POST',
+        url: 'https://example.com',
+        body: RequestBody(
+          type: 'form',
+          value: {'space': 'a b', 'symbol': 'a&b'},
+        ),
+        auth: RequestAuth(mode: 'none'),
+      ),
+      context,
+    );
+    expect(utf8.decode(form.body), 'space=a+b&symbol=a%26b');
+    expect(form.headers, isNot(contains('Authorization')));
+    expect(
+      form.headers['Content-Type'],
+      'application/x-www-form-urlencoded',
+    );
+
+    final explicit = executor.resolve(
+      'explicit',
+      const HttpRequestFile(
+        name: 'Explicit',
+        url: 'https://example.com',
+        headers: [
+          RequestKeyValue(key: 'Authorization', value: 'Custom value'),
+        ],
+      ),
+      context,
+    );
+    expect(explicit.headers['Authorization'], 'Custom value');
+  });
+
+  test('streaming transport stops before retaining an oversized response', () async {
+    final client = _StreamingClient([
+      Uint8List(3 * 1024 * 1024),
+      Uint8List(2 * 1024 * 1024),
+    ]);
+    final transport = PackageRequestHttpTransport(client: client);
+    await expectLater(
+      transport.send(
+        ResolvedHttpRequest(
+          id: 'large',
+          name: 'Large',
+          method: 'GET',
+          uri: Uri.parse('https://example.com'),
+          headers: const {},
+          body: const [],
+        ),
+      ),
+      throwsStateError,
+    );
+    transport.close();
+  });
+
+  test('malformed files are isolated and move conflicts preserve sources', () async {
+    final directory = await Directory.systemTemp.createTemp('tamtoot-broken-');
+    addTearDown(() => directory.delete(recursive: true));
+    final store = FileGitRepositoryStore(directory);
+    final storage = RequestStorage(store);
+    await store.writeText('.tamtoot/requests/broken.json', '{broken');
+    await storage.create(
+      'source',
+      const HttpRequestFile(
+        name: 'Health',
+        url: 'https://example.com/health',
+        attachments: [
+          RequestAttachment(type: 'markdown', path: 'health.md'),
+        ],
+      ),
+    );
+    await storage.saveMarkdown('source/health.json', 'health.md', '# Health');
+    await storage.create(
+      'target',
+      const HttpRequestFile(name: 'Existing', url: 'https://example.com'),
+    );
+    await storage.saveMarkdown(
+      'target/existing.json',
+      'health.md',
+      '# Existing',
+    );
+
+    final entries = await storage.list();
+    expect(entries.where((entry) => !entry.valid).single.path, 'broken.json');
+    await expectLater(
+      storage.move('source/health.json', 'target'),
+      throwsStateError,
+    );
+    expect((await storage.read('source/health.json')).name, 'Health');
+    expect(
+      await storage.readMarkdown('source/health.json', 'health.md'),
+      '# Health',
+    );
+  });
+
+  test('native storage rejects a symlinked requests directory', () async {
+    final directory = await Directory.systemTemp.createTemp('tamtoot-links-');
+    addTearDown(() => directory.delete(recursive: true));
+    final outside = await Directory('${directory.path}/outside').create();
+    await Directory('${directory.path}/project/.tamtoot').create(recursive: true);
+    await Link('${directory.path}/project/.tamtoot/requests').create(outside.path);
+    final storage = RequestStorage(
+      FileGitRepositoryStore(Directory('${directory.path}/project')),
+    );
+    await expectLater(
+      storage.create(
+        '',
+        const HttpRequestFile(name: 'Escape'),
+      ),
+      throwsA(isA<Exception>()),
+    );
+    expect(await outside.list().toList(), isEmpty);
+  }, skip: Platform.isWindows);
 
   test('invalid schema and unresolved variables produce safe errors', () async {
     expect(
