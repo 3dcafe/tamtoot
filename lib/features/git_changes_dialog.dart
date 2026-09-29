@@ -220,6 +220,64 @@ class _GitChangesDialogState extends State<GitChangesDialog> {
     }
   }
 
+  Future<void> _pull() async {
+    if (widget.session.gitBusy) return;
+    if (widget.session.documents.documents.any(
+      (document) =>
+          document.dirty &&
+          document.uri != null &&
+          document.uri!.toString().startsWith(root.toString()),
+    )) {
+      setState(() {
+        feedback = 'Save, commit or discard open editor changes before pulling.';
+      });
+      return;
+    }
+    widget.session.gitBusy = true;
+    widget.session.changed(persist: false);
+    setState(() {
+      busy = true;
+      feedback = '';
+    });
+    try {
+      final result = await git.pull(
+        root,
+        credentials: token.text.isEmpty
+            ? null
+            : GitCredentials(
+                username: username.text.trim().isEmpty
+                    ? 'git'
+                    : username.text.trim(),
+                token: token.text,
+              ),
+      );
+      result.ensureOk();
+      for (final document in widget.session.documents.documents.toList()) {
+        final uri = document.uri;
+        if (uri == null || !uri.toString().startsWith(root.toString())) {
+          continue;
+        }
+        try {
+          final text = await widget.session.documents.files.read(uri);
+          document.editor.reloadFromDisk(text);
+          document.savedText = document.editor.text;
+        } catch (_) {
+          await widget.session.documents.close(document);
+        }
+      }
+      feedback = result.stdout.trim();
+      await widget.session.refreshExplorer();
+      await widget.session.persistNow();
+      await _load();
+    } catch (error) {
+      feedback = safeError(error);
+    } finally {
+      widget.session.gitBusy = false;
+      widget.session.changed(persist: false);
+      if (mounted) setState(() => busy = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final content = SizedBox(
@@ -347,10 +405,21 @@ class _GitChangesDialogState extends State<GitChangesDialog> {
               'Push sends existing local commits on this branch. Uncommitted files are not sent.',
             ),
             const SizedBox(height: 8),
-            FilledButton.icon(
-              onPressed: busy || !ready || remote.isEmpty ? null : _push,
-              icon: const Icon(Icons.cloud_upload_outlined),
-              label: const Text('Push commits'),
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                FilledButton.tonalIcon(
+                  onPressed: busy || !ready || remote.isEmpty ? null : _pull,
+                  icon: const Icon(Icons.sync),
+                  label: const Text('Pull changes'),
+                ),
+                FilledButton.icon(
+                  onPressed: busy || !ready || remote.isEmpty ? null : _push,
+                  icon: const Icon(Icons.cloud_upload_outlined),
+                  label: const Text('Push commits'),
+                ),
+              ],
             ),
             if (feedback.isNotEmpty)
               Padding(

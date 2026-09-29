@@ -94,3 +94,10 @@ The expanded test suite passes **57 tests**, including folder collapse/reopen, s
 - Additional regression coverage verifies the five-request concurrency ceiling,
   form encoding, authorization precedence, streamed response limits, malformed-file
   isolation, move conflict rollback and symlink containment.
+
+## Git Pull / Sync — 2026-09-29
+
+- Added **Pull changes** beside Push in the Git panel, using the existing Smart HTTP client and the same in-memory credentials.
+- Pull accepts only a clean work tree, performs a fast-forward, updates the Git index, removes upstream deletions and reloads open project documents and Solution.
+- Added regression tests for fast-forward content, additions, deletions, index and remote-tracking updates, dirty-tree rejection without network access, and the clean local-ahead case.
+- `flutter analyze`: no issues. Full suite: **125 tests passed**. No dependencies added.

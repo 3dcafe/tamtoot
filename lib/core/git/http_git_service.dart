@@ -150,9 +150,17 @@ class HttpGitService
     if (resolvedWant == null) {
       return _fail('Remote ref not found', const ['fetch']);
     }
+    final short = wantRef.replaceFirst('refs/heads/', '');
     final have = await db.readHead();
     if (have == resolvedWant) {
+      await db.writeRef('refs/remotes/$remote/$short', resolvedWant);
       return _ok('Already up to date', const ['fetch']);
+    }
+    if (have != null &&
+        await db.has(resolvedWant) &&
+        await _isAncestor(db, ancestor: resolvedWant, tip: have)) {
+      await db.writeRef('refs/remotes/$remote/$short', resolvedWant);
+      return _ok('Remote tracking updated', const ['fetch']);
     }
     final pack = await _fetchPack(
       remoteUrl,
@@ -164,7 +172,6 @@ class HttpGitService
     for (final obj in unpackPackfile(pack, inflateAt)) {
       await db.writeUnpacked(obj);
     }
-    final short = wantRef.replaceFirst('refs/heads/', '');
     await db.writeRef('refs/remotes/$remote/$short', resolvedWant);
     return _ok('Fetched $resolvedWant', ['fetch', remote]);
   }
@@ -176,6 +183,19 @@ class HttpGitService
     String remote = 'origin',
     String? branch,
   }) async {
+    final changes = await statusEntries(directory);
+    if (changes.isNotEmpty) {
+      return _fail(
+        'Commit or discard local changes before pulling',
+        const ['pull'],
+      );
+    }
+    final initialStore = openStore(directory);
+    final initialDb = GitObjectDatabase(initialStore, inflateAt, deflate);
+    await _checkIndex(
+      initialStore,
+      await _headEntries(initialDb, await initialDb.readHead()),
+    );
     final fetchResult = await fetch(
       directory,
       credentials: credentials,
@@ -201,14 +221,29 @@ class HttpGitService
       return _ok('Already up to date', const ['pull']);
     }
     if (localHash != null &&
+        await _isAncestor(db, ancestor: remoteHash, tip: localHash)) {
+      return _ok('Already up to date; local branch is ahead', const ['pull']);
+    }
+    if (localHash != null &&
         !await _isAncestor(db, ancestor: localHash, tip: remoteHash)) {
       return _fail(
         'Non fast-forward pull; merge is not supported in this client',
         const ['pull'],
       );
     }
+    await _checkout(
+      db,
+      store,
+      remoteHash,
+      previousCommitHash: localHash,
+    );
+    final remoteEntries = await _headEntries(db, remoteHash);
+    await store.writeBytes(
+      '.git/index',
+      encodeGitIndex(remoteEntries.values.toList()),
+    );
     await db.writeRef(branchRef, remoteHash);
-    await _checkout(db, store, remoteHash);
+    _staged.remove(directory);
     return _ok('Fast-forward to $remoteHash', const ['pull']);
   }
 
@@ -356,6 +391,7 @@ class HttpGitService
     final entries = <GitStatusEntry>[];
     final all = {...headFiles.keys, ...workFiles.keys};
     for (final path in all.toList()..sort()) {
+      if (_internal(path)) continue;
       final headHash = headFiles[path];
       final workHash = workFiles[path];
       if (headHash == null && workHash != null) {
@@ -525,12 +561,26 @@ class HttpGitService
   Future<void> _checkout(
     GitObjectDatabase db,
     GitRepositoryStore store,
-    String commitHash,
+    String commitHash, {
+    String? previousCommitHash,
+  }
   ) async {
     final commit = parseCommit((await db.read(commitHash)).content);
     final files = <String, String>{};
     await _walkTree(db, commit.tree, '', files);
+    if (previousCommitHash != null) {
+      final previous = await _headEntries(db, previousCommitHash);
+      for (final path in previous.keys) {
+        if (_internal(path) || files.containsKey(path)) continue;
+        _validateWorkPath(path);
+        await store.validateRegularFilePath(path);
+        if (await store.exists(path)) await store.delete(path);
+      }
+    }
     for (final entry in files.entries) {
+      if (_internal(entry.key)) continue;
+      _validateWorkPath(entry.key);
+      await store.validateRegularFilePath(entry.key);
       final blob = await db.read(entry.value);
       await store.writeBytes(entry.key, blob.content);
     }
