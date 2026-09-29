@@ -86,7 +86,7 @@ class _RequestsPanelState extends State<RequestsPanel> {
                 title: Text(entry.name, maxLines: 1, overflow: TextOverflow.ellipsis),
                 subtitle: Text(entry.path, maxLines: 1, overflow: TextOverflow.ellipsis),
                 trailing: entry.valid ? null : const Icon(Icons.warning_amber, size: 16),
-                onTap: () => _open(entry.path),
+                onTap: entry.valid ? () => _open(entry.path) : null,
               );
             },
           ),
@@ -181,7 +181,7 @@ class _HttpRequestsDialogState extends State<HttpRequestsDialog> {
       var request = _draft();
       if (request.auth.mode == 'bearer' &&
           request.auth.token.isNotEmpty &&
-          !VariableResolver.pattern.hasMatch(request.auth.token)) {
+          !VariableResolver.isVariableReference(request.auth.token)) {
         final environment = await storage.loadEnvironment();
         final key = '${RequestStorage.safeName(request.name).replaceAll('-', '_')}_token';
         await storage.saveLocalEnvironment(
@@ -256,6 +256,8 @@ class _HttpRequestsDialogState extends State<HttpRequestsDialog> {
       for (final path in paths) { items.add((id: path, request: path == activePath && dirty ? _draft() : await storage.read(path))); }
       final batch = await executor.executeMany(items, await _context(), BatchExecutionOptions(parallel: parallel, stopOnError: stopOnError));
       if (mounted) setState(() { results = batch.results; feedback = 'Completed: ${batch.completed} · Failed: ${batch.failed} · Total: ${batch.results.length}'; });
+    } catch (error) {
+      if (mounted) setState(() => feedback = '$error');
     } finally { executor.close(); if (mounted) setState(() => busy = false); }
   }
 
@@ -283,7 +285,7 @@ class _HttpRequestsDialogState extends State<HttpRequestsDialog> {
         var sharedToken = token.text.trim();
         if (auth == 'bearer' &&
             sharedToken.isNotEmpty &&
-            !VariableResolver.pattern.hasMatch(sharedToken)) {
+            !VariableResolver.isVariableReference(sharedToken)) {
           localVariables['token'] = sharedToken;
           sharedToken = '{{token}}';
         }
@@ -358,14 +360,14 @@ class _HttpRequestsDialogState extends State<HttpRequestsDialog> {
     if (activePath == null) return const Center(child: Text('Select or create a request.'));
     return ListView(padding: const EdgeInsets.all(12), children: [
       Row(children: [
-        SizedBox(width: 115, child: DropdownButtonFormField<String>(initialValue: method, items: [for (final value in httpMethods) DropdownMenuItem(value: value, child: Text(value))], onChanged: (v) => setState(() { method = v!; dirty = true; }))),
+        SizedBox(width: 115, child: DropdownButtonFormField<String>(key: ValueKey('method-$activePath-$method'), initialValue: method, items: [for (final value in httpMethods) DropdownMenuItem(value: value, child: Text(value))], onChanged: (v) => setState(() { method = v!; dirty = true; }))),
         const SizedBox(width: 8), Expanded(child: TextField(controller: url, onChanged: (_) => _changed(), decoration: const InputDecoration(labelText: 'URL'))),
         const SizedBox(width: 8), FilledButton.icon(onPressed: busy ? null : () => _run([activePath!]), icon: const Icon(Icons.send), label: const Text('Send')),
       ]),
       const SizedBox(height: 10), TextField(controller: name, onChanged: (_) => _changed(), decoration: const InputDecoration(labelText: 'Name')),
       _kv('Params', query), _kv('Headers', headers),
-      ExpansionTile(title: const Text('Authorization'), children: [DropdownButtonFormField<String>(initialValue: authMode, items: const [DropdownMenuItem(value: 'inherit', child: Text('Inherit project authorization')), DropdownMenuItem(value: 'none', child: Text('No authorization')), DropdownMenuItem(value: 'bearer', child: Text('Bearer override'))], onChanged: (v) => setState(() { authMode = v!; dirty = true; })), if (authMode == 'bearer') TextFormField(initialValue: authToken, obscureText: true, onChanged: (v) { authToken = v; _changed(); }, decoration: const InputDecoration(labelText: 'Token or {{variable}}'))]),
-      ExpansionTile(title: const Text('Body'), children: [DropdownButtonFormField<String>(initialValue: bodyType, items: [for (final value in requestBodyTypes) DropdownMenuItem(value: value, child: Text(value))], onChanged: (v) => setState(() { bodyType = v!; dirty = true; })), if (bodyType != 'none') TextField(controller: body, minLines: 5, maxLines: 14, onChanged: (_) => _changed(), style: const TextStyle(fontFamily: 'monospace'), decoration: InputDecoration(hintText: bodyType == 'form' ? 'key=value, one per line' : null))]),
+      ExpansionTile(title: const Text('Authorization'), children: [DropdownButtonFormField<String>(key: ValueKey('auth-$activePath-$authMode'), initialValue: authMode, items: const [DropdownMenuItem(value: 'inherit', child: Text('Inherit project authorization')), DropdownMenuItem(value: 'none', child: Text('No authorization')), DropdownMenuItem(value: 'bearer', child: Text('Bearer override'))], onChanged: (v) => setState(() { authMode = v!; dirty = true; })), if (authMode == 'bearer') TextFormField(key: ValueKey('token-$activePath-$authToken'), initialValue: authToken, obscureText: true, onChanged: (v) { authToken = v; _changed(); }, decoration: const InputDecoration(labelText: 'Token or {{variable}}'))]),
+      ExpansionTile(title: const Text('Body'), children: [DropdownButtonFormField<String>(key: ValueKey('body-$activePath-$bodyType'), initialValue: bodyType, items: [for (final value in requestBodyTypes) DropdownMenuItem(value: value, child: Text(value))], onChanged: (v) => setState(() { bodyType = v!; dirty = true; })), if (bodyType != 'none') TextField(controller: body, minLines: 5, maxLines: 14, onChanged: (_) => _changed(), style: const TextStyle(fontFamily: 'monospace'), decoration: InputDecoration(hintText: bodyType == 'form' ? 'key=value, one per line' : null))]),
       ExpansionTile(title: const Text('Documentation'), children: [for (final attachment in attachments) ListTile(title: Text(attachment.path), leading: const Icon(Icons.description_outlined), onTap: () => _editMarkdown(attachment.path)), Align(alignment: Alignment.centerLeft, child: Wrap(children: [TextButton.icon(onPressed: _newDocumentation, icon: const Icon(Icons.note_add_outlined), label: const Text('New Documentation')), TextButton.icon(onPressed: _attachDocumentation, icon: const Icon(Icons.attach_file), label: const Text('Attach Markdown'))]))]),
       if (results.isNotEmpty) ...[const Divider(), Text('Run: ${results.length} requests', style: Theme.of(context).textTheme.titleMedium), for (final result in results) ListTile(dense: true, leading: Icon(result.success ? Icons.check_circle : Icons.cancel, color: result.success ? Colors.green : Theme.of(context).colorScheme.error), title: Text('${result.method}  ${result.name}'), subtitle: Text(result.error.isNotEmpty ? result.error : result.responseBody, maxLines: 3, overflow: TextOverflow.ellipsis), trailing: Text('${result.statusCode ?? '-'}  ${result.duration.inMilliseconds} ms'))],
     ]);

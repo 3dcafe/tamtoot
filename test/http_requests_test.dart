@@ -43,6 +43,9 @@ void main() {
       headers: [RequestKeyValue(key: 'X-Team', value: '{{team}}')],
       body: RequestBody(type: 'json', value: {'name': 'Sam'}),
       auth: RequestAuth(mode: 'inherit'),
+      attachments: [
+        RequestAttachment(type: 'markdown', path: 'README.md'),
+      ],
     );
 
     final created = await storage.create('users/admin', request);
@@ -73,6 +76,10 @@ void main() {
 
     final moved = await storage.move(created.path, 'shared');
     expect(moved.path, 'shared/create-user.json');
+    expect(
+      await storage.readMarkdown(moved.path, 'README.md'),
+      '# Create user',
+    );
     final renamed = await storage.rename(moved.path, 'Create account');
     expect(renamed.path, 'shared/create-account.json');
     await storage.delete(renamed.path);
@@ -152,5 +159,43 @@ void main() {
     expect(result.success, isFalse);
     expect(result.error, contains('Missing variables'));
     expect(result.error, isNot(contains('do-not-print')));
+    expect(
+      () => const HttpRequestFile(
+        name: 'Escape',
+        attachments: [
+          RequestAttachment(type: 'markdown', path: '../outside.md'),
+        ],
+      ).encode(),
+      throwsFormatException,
+    );
+    expect(
+      () => const RequestEnvironment(authType: 'basic').encode(),
+      throwsFormatException,
+    );
+    expect(
+      () => executor.resolve(
+        'credentials',
+        const HttpRequestFile(
+          name: 'Credentials',
+          url: 'https://user:password@example.com',
+        ),
+        const RequestExecutionContext(),
+      ),
+      throwsFormatException,
+    );
+    expect(
+      () => executor.resolve(
+        'header',
+        const HttpRequestFile(
+          name: 'Header',
+          url: 'https://example.com',
+          headers: [RequestKeyValue(key: 'X-Test', value: '{{value}}')],
+        ),
+        const RequestExecutionContext(
+          runtimeVariables: {'value': 'ok\r\nInjected: true'},
+        ),
+      ),
+      throwsFormatException,
+    );
   });
 }

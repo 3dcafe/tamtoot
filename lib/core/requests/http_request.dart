@@ -28,13 +28,25 @@ class RequestAttachment {
   final String type, path;
   Map<String, dynamic> toJson() => {'type': type, 'path': path};
 
+  static bool isSafeMarkdownPath(String path) {
+    final normalized = path.replaceAll('\\', '/');
+    return normalized.isNotEmpty &&
+        !normalized.startsWith('/') &&
+        normalized.toLowerCase().endsWith('.md') &&
+        normalized
+            .split('/')
+            .every((part) => part.isNotEmpty && part != '.' && part != '..');
+  }
+
   factory RequestAttachment.parse(dynamic value) {
     if (value is! Map || value['type'] != 'markdown' || value['path'] is! String) {
       throw const FormatException('Only Markdown request attachments are supported.');
     }
     final path = value['path'] as String;
-    if (!path.toLowerCase().endsWith('.md')) {
-      throw const FormatException('Markdown attachment must use .md.');
+    if (!isSafeMarkdownPath(path)) {
+      throw const FormatException(
+        'Markdown attachment must stay beside the request.',
+      );
     }
     return RequestAttachment(type: 'markdown', path: path);
   }
@@ -97,9 +109,23 @@ class HttpRequestFile {
       throw const FormatException('Unsupported request body or authorization mode.');
     }
     for (final item in [...headers, ...query]) {
-      if (item.key.contains('\n') || item.key.contains('\r')) {
-        throw const FormatException('Header and query keys cannot contain new lines.');
+      if (item.key.contains('\n') ||
+          item.key.contains('\r') ||
+          item.value.contains('\n') ||
+          item.value.contains('\r')) {
+        throw const FormatException(
+          'Header and query values cannot contain new lines.',
+        );
       }
+    }
+    if (attachments.any(
+      (item) =>
+          item.type != 'markdown' ||
+          !RequestAttachment.isSafeMarkdownPath(item.path),
+    )) {
+      throw const FormatException(
+        'Markdown attachment must stay beside the request.',
+      );
     }
   }
 
@@ -151,11 +177,20 @@ class RequestEnvironment {
   final Map<String, String> variables;
   final String authType, authToken;
 
-  String encode({bool includeAuth = true}) => const JsonEncoder.withIndent('  ').convert({
-    'version': 1,
-    'variables': variables,
-    if (includeAuth) 'auth': {'type': authType, if (authType == 'bearer') 'token': authToken},
-  });
+  String encode({bool includeAuth = true}) {
+    if (authType != 'none' && authType != 'bearer') {
+      throw const FormatException('Invalid project authorization.');
+    }
+    return const JsonEncoder.withIndent('  ').convert({
+      'version': 1,
+      'variables': variables,
+      if (includeAuth)
+        'auth': {
+          'type': authType,
+          if (authType == 'bearer') 'token': authToken,
+        },
+    });
+  }
 
   factory RequestEnvironment.parse(String? source) {
     if (source == null || source.trim().isEmpty) return const RequestEnvironment();

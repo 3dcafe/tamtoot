@@ -42,17 +42,42 @@ class RequestStorage {
   Future<List<RequestEntry>> list() async {
     if (!await store.exists(root)) return const [];
     final paths = await store.listFiles(root);
-    final entries = <RequestEntry>[];
-    for (final fullPath in paths.where((path) => path.startsWith('$root/') && path.toLowerCase().endsWith('.json'))) {
-      if (fullPath == localEnvironmentPath || fullPath.endsWith('.tmp')) continue;
-      final relative = fullPath.substring(root.length + 1);
-      try {
-        final request = HttpRequestFile.parse(await store.readText(fullPath));
-        entries.add(RequestEntry(path: relative, name: request.name, method: request.method));
-      } catch (error) {
-        entries.add(RequestEntry(path: relative, name: relative.split('/').last, method: 'ERR', error: '$error'));
+    final requestPaths = paths
+        .where(
+          (path) =>
+              path.startsWith('$root/') &&
+              path.toLowerCase().endsWith('.json') &&
+              !path.endsWith('.tmp'),
+        )
+        .toList();
+    final loaded = List<RequestEntry?>.filled(requestPaths.length, null);
+    var next = 0;
+    Future<void> worker() async {
+      while (true) {
+        final index = next++;
+        if (index >= requestPaths.length) return;
+        final fullPath = requestPaths[index];
+        final relative = fullPath.substring(root.length + 1);
+        try {
+          final request = HttpRequestFile.parse(await store.readText(fullPath));
+          loaded[index] = RequestEntry(
+            path: relative,
+            name: request.name,
+            method: request.method,
+          );
+        } catch (error) {
+          loaded[index] = RequestEntry(
+            path: relative,
+            name: relative.split('/').last,
+            method: 'ERR',
+            error: '$error',
+          );
+        }
       }
     }
+    final workers = requestPaths.length.clamp(0, 8);
+    await Future.wait(List.generate(workers, (_) => worker()));
+    final entries = loaded.whereType<RequestEntry>().toList();
     entries.sort((a, b) => a.path.compareTo(b.path));
     return entries;
   }
@@ -108,6 +133,7 @@ class RequestStorage {
     final targetDirectory = _folder(targetFolder);
     for (final attachment in request.attachments) {
       final destination = '$targetDirectory/${attachment.path}';
+      await store.validateRegularFilePath(destination);
       if (await store.exists(destination)) {
         throw StateError('Documentation already exists: ${attachment.path}');
       }
@@ -129,13 +155,14 @@ class RequestStorage {
   Future<void> delete(String path) => store.delete(_requestPath(path));
 
   String _attachmentPath(String requestPath, String attachmentPath) {
-    if (!attachmentPath.toLowerCase().endsWith('.md')) throw const FormatException('Attachment must use .md.');
+    if (!RequestAttachment.isSafeMarkdownPath(attachmentPath)) {
+      throw const FormatException(
+        'Attachment path must remain beside the request.',
+      );
+    }
     final request = _requestPath(requestPath);
     final folder = request.substring(0, request.lastIndexOf('/'));
     final raw = attachmentPath.replaceAll('\\', '/');
-    if (raw.startsWith('/') || raw.split('/').any((part) => part.isEmpty || part == '.' || part == '..')) {
-      throw const FormatException('Attachment path must remain beside the request.');
-    }
     return '$folder/$raw';
   }
 

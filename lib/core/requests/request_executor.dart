@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
 
@@ -7,6 +8,12 @@ import 'http_request.dart';
 
 class VariableResolver {
   static final pattern = RegExp(r'\{\{\s*([A-Za-z_][A-Za-z0-9_.-]*)\s*\}\}');
+  static final variableReference = RegExp(
+    r'^\{\{\s*[A-Za-z_][A-Za-z0-9_.-]*\s*\}\}$',
+  );
+
+  static bool isVariableReference(String value) =>
+      variableReference.hasMatch(value.trim());
 
   Map<String, String> combine({
     Map<String, String> project = const {},
@@ -70,9 +77,18 @@ class PackageRequestHttpTransport implements RequestHttpTransport {
       ..headers.addAll(resolved.headers)
       ..bodyBytes = resolved.body;
     final response = await _client.send(request).timeout(timeout);
-    final bytes = await response.stream.toBytes();
-    if (bytes.length > 4 * 1024 * 1024) throw StateError('Response exceeds 4 MiB.');
-    return HttpTransportResponse(statusCode: response.statusCode, headers: response.headers, body: bytes);
+    final bytes = BytesBuilder(copy: false);
+    await for (final chunk in response.stream.timeout(timeout)) {
+      if (bytes.length + chunk.length > 4 * 1024 * 1024) {
+        throw StateError('Response exceeds 4 MiB.');
+      }
+      bytes.add(chunk);
+    }
+    return HttpTransportResponse(
+      statusCode: response.statusCode,
+      headers: response.headers,
+      body: bytes.takeBytes(),
+    );
   }
 
   @override
@@ -116,10 +132,14 @@ class RequestExecutor {
   final VariableResolver resolver;
 
   ResolvedHttpRequest resolve(String id, HttpRequestFile request, RequestExecutionContext context) {
+    request.validate();
     final variables = resolver.combine(project: context.projectVariables, secret: context.secretVariables, runtime: context.runtimeVariables);
     final rawUrl = resolver.resolve(request.url, variables);
     final base = Uri.tryParse(rawUrl);
-    if (base == null || base.host.isEmpty || (base.scheme != 'http' && base.scheme != 'https')) {
+    if (base == null ||
+        base.host.isEmpty ||
+        base.userInfo.isNotEmpty ||
+        (base.scheme != 'http' && base.scheme != 'https')) {
       throw const FormatException('Request URL must be an absolute HTTP(S) URL.');
     }
     final query = <String, String>{...base.queryParameters};
@@ -128,7 +148,16 @@ class RequestExecutor {
     }
     final headers = <String, String>{};
     for (final item in request.headers.where((item) => item.enabled)) {
-      headers[resolver.resolve(item.key, variables)] = resolver.resolve(item.value, variables);
+      final key = resolver.resolve(item.key, variables);
+      final value = resolver.resolve(item.value, variables);
+      if (key.trim().isEmpty ||
+          key.contains(RegExp(r'[\r\n]')) ||
+          value.contains(RegExp(r'[\r\n]'))) {
+        throw const FormatException(
+          'HTTP header names are required and cannot contain new lines.',
+        );
+      }
+      headers[key] = value;
     }
     String token = '';
     if (request.auth.mode == 'bearer') {
@@ -150,6 +179,9 @@ class RequestExecutor {
       if (value is! Map) throw const FormatException('Form body must be an object.');
       headers.putIfAbsent('Content-Type', () => 'application/x-www-form-urlencoded');
       body = utf8.encode(value.entries.map((entry) => '${Uri.encodeQueryComponent(entry.key.toString())}=${Uri.encodeQueryComponent(entry.value.toString())}').join('&'));
+    }
+    if (body.length > 4 * 1024 * 1024) {
+      throw const FormatException('Request body exceeds 4 MiB.');
     }
     return ResolvedHttpRequest(id: id, name: request.name, method: request.method, uri: base.replace(queryParameters: query.isEmpty ? null : query), headers: headers, body: body);
   }
