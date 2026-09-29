@@ -2,8 +2,10 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:crypto/crypto.dart';
 import '../core/commands/commands.dart';
+import '../core/completion/project_completion.dart';
 import '../core/filesystem/filesystem.dart';
 import '../core/git/git_service.dart';
+import '../core/git/http_git_service.dart';
 import '../core/persistence/schema.dart';
 import '../core/settings/settings.dart';
 import '../core/themes/ide_theme.dart';
@@ -34,6 +36,7 @@ class IdeSession {
   final List<String> errors = [];
   final List<String> recentWorkspaces = [];
   Uri? workspaceRoot;
+  ProjectCompletionIndex? completionIndex;
   late final explorer = ExplorerTree(
     documents.files.list,
     () => changed(persist: false),
@@ -187,6 +190,7 @@ class IdeSession {
     }
     root = Uri.parse('${root.toString().replaceAll(RegExp(r'/+$'), '')}/');
     workspaceRoot = root;
+    completionIndex = null;
     _gitEntries = {};
     _unpublished = {};
     gitStatusNote = null;
@@ -201,6 +205,12 @@ class IdeSession {
     if (recentWorkspaces.length > 10) recentWorkspaces.removeLast();
 
     workspaceHasGit = git.available && await git.isRepository(root);
+    if (git is HttpGitService) {
+      completionIndex = ProjectCompletionIndex(
+        (git as HttpGitService).openStore(root),
+      );
+      unawaited(completionIndex!.initialize());
+    }
     var meta = await readTamtootProjectMeta(root);
     if (meta != null) {
       meta = meta.copyWith(lastOpenedAt: DateTime.now().toUtc());

@@ -4,6 +4,7 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../../app/ide_session.dart';
+import '../../core/completion/project_completion.dart';
 import '../../languages/language_registry.dart';
 import '../../languages/document_syntax.dart';
 import '../buffer/text_buffer.dart';
@@ -39,6 +40,9 @@ class _CodeEditorState extends State<CodeEditor> implements TextInputClient {
   bool _receiving = false;
   double _height = 400;
   int? _dragAnchor;
+  Timer? _completionTimer;
+  List<CompletionSymbol> _completions = const [];
+  int _completionSelection = 0;
   double get _fontSize => widget.session.settings.fontSize;
   double get _lineHeight => _fontSize * 1.6;
   EditorController get _editor => widget.controller;
@@ -88,6 +92,7 @@ class _CodeEditorState extends State<CodeEditor> implements TextInputClient {
     } else {
       _connection?.close();
       _connection = null;
+      _completions = const [];
     }
     _repaint();
   }
@@ -125,6 +130,53 @@ class _CodeEditorState extends State<CodeEditor> implements TextInputClient {
     _syncIme();
     _ensureVisible();
     _repaint();
+    _completionTimer?.cancel();
+    _completionTimer = Timer(
+      const Duration(milliseconds: 35),
+      _updateCompletions,
+    );
+  }
+
+  void _updateCompletions() {
+    if (!mounted || !_focus.hasFocus || widget.language == null) return;
+    final index = widget.session.completionIndex;
+    if (index == null) return;
+    final suggestions = index.suggest(
+      source: _editor.text,
+      offset: _editor.selection.extent,
+      language: widget.language!.id,
+    );
+    setState(() {
+      _completions = suggestions;
+      _completionSelection = 0;
+    });
+    if (suggestions.isEmpty &&
+        index.refreshing &&
+        RegExp(
+          r'\.([A-Za-z_$][\w$]*)?$',
+        ).hasMatch(_editor.text.substring(0, _editor.selection.extent))) {
+      _completionTimer = Timer(
+        const Duration(milliseconds: 350),
+        _updateCompletions,
+      );
+    }
+  }
+
+  void _acceptCompletion(CompletionSymbol item) {
+    final cursor = _editor.selection.extent;
+    final before = _editor.text.substring(0, cursor);
+    final prefix =
+        RegExp(r'[A-Za-z_$][\w$]*$').firstMatch(before)?.group(0) ?? '';
+    widget.session.commands.execute('editor.select', [
+      cursor - prefix.length,
+      cursor,
+    ]);
+    widget.session.commands.execute('editor.insert', '${item.name}()');
+    if (item.signature != '${item.name}()') {
+      final inside = cursor - prefix.length + item.name.length + 1;
+      widget.session.commands.execute('editor.select', [inside, inside]);
+    }
+    setState(() => _completions = const []);
   }
 
   void _ensureVisible() {
@@ -144,6 +196,31 @@ class _CodeEditorState extends State<CodeEditor> implements TextInputClient {
   KeyEventResult _key(FocusNode node, KeyEvent event) {
     if (event is! KeyDownEvent && event is! KeyRepeatEvent) {
       return KeyEventResult.ignored;
+    }
+    if (_completions.isNotEmpty) {
+      if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
+        setState(() {
+          _completionSelection =
+              (_completionSelection + 1) % _completions.length;
+        });
+        return KeyEventResult.handled;
+      }
+      if (event.logicalKey == LogicalKeyboardKey.arrowUp) {
+        setState(() {
+          _completionSelection =
+              (_completionSelection - 1) % _completions.length;
+        });
+        return KeyEventResult.handled;
+      }
+      if (event.logicalKey == LogicalKeyboardKey.enter ||
+          event.logicalKey == LogicalKeyboardKey.tab) {
+        _acceptCompletion(_completions[_completionSelection]);
+        return KeyEventResult.handled;
+      }
+      if (event.logicalKey == LogicalKeyboardKey.escape) {
+        setState(() => _completions = const []);
+        return KeyEventResult.handled;
+      }
     }
     final command = widget.session.keys.resolve(keyChord(event));
     if (command != null) {
@@ -361,6 +438,8 @@ class _CodeEditorState extends State<CodeEditor> implements TextInputClient {
                           ),
                         ),
                       ),
+                      if (_completions.isNotEmpty)
+                        _completionPopup(constraints.maxWidth),
                     ],
                   ),
                 ),
@@ -369,6 +448,62 @@ class _CodeEditorState extends State<CodeEditor> implements TextInputClient {
           ),
         );
       },
+    );
+  }
+
+  Widget _completionPopup(double maxWidth) {
+    final point = _editor.buffer.positionAt(_editor.selection.extent);
+    final left =
+        (64 +
+                point.column * _fontSize * 0.62 -
+                (_horizontal.hasClients ? _horizontal.offset : 0))
+            .clamp(8.0, math.max(8.0, maxWidth - 330))
+            .toDouble();
+    final top =
+        ((point.line + 1) * _lineHeight -
+                (_scroll.hasClients ? _scroll.offset : 0))
+            .clamp(4.0, math.max(4.0, _height - 260))
+            .toDouble();
+    return Positioned(
+      left: left,
+      top: top,
+      width: math.min(330, maxWidth - 16),
+      child: Material(
+        elevation: 8,
+        color: Color(widget.session.theme.color('panel')),
+        shape: RoundedRectangleBorder(
+          side: BorderSide(color: Color(widget.session.theme.color('border'))),
+          borderRadius: BorderRadius.circular(6),
+        ),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxHeight: 240),
+          child: ListView.builder(
+            padding: const EdgeInsets.symmetric(vertical: 4),
+            shrinkWrap: true,
+            itemCount: _completions.length,
+            itemBuilder: (_, index) {
+              final item = _completions[index];
+              return ListTile(
+                dense: true,
+                selected: index == _completionSelection,
+                leading: const Icon(Icons.functions, size: 17),
+                title: Text(item.signature, maxLines: 1),
+                subtitle: Text(
+                  item.documentation.isEmpty
+                      ? [
+                          item.owner,
+                          item.path,
+                        ].where((value) => value.isNotEmpty).join(' · ')
+                      : item.documentation,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                onTap: () => _acceptCompletion(item),
+              );
+            },
+          ),
+        ),
+      ),
     );
   }
 
@@ -460,6 +595,7 @@ class _CodeEditorState extends State<CodeEditor> implements TextInputClient {
   ) {}
   @override
   void dispose() {
+    _completionTimer?.cancel();
     _subscription?.cancel();
     _connection?.close();
     _focus.dispose();

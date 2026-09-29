@@ -108,3 +108,9 @@ The expanded test suite passes **57 tests**, including folder collapse/reopen, s
 - Moved provider IDs, endpoint URLs, compatibility formats and raw JSON parameters into an optional Advanced section; new profile IDs are generated from display names.
 - Added a connection and compatibility check that discovers Ollama or OpenAI-compatible models, verifies the selected model and recognizes authenticated APIs without storing credentials.
 - Added mocked compatibility tests for Ollama and OpenAI-style model discovery. `flutter analyze`: no issues. Full suite: **126 tests passed**.
+
+## Cached project completion — 2026-09-29
+
+- Added dot-triggered method completion for Dart, C# and JavaScript, including signatures, declaring types and documentation extracted from adjacent line or block comments.
+- The project index refreshes asynchronously, hashes files to parse only changes, includes unsaved editor contents and stores its private cache under `.tamtoot/cache/`.
+- Added tests for C# and Dart parsing, documentation, type-based ordering, incremental refresh and unsaved source completion. Full suite: **129 tests passed**. No dependencies added.

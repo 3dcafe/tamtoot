@@ -87,7 +87,11 @@ Bundled language packages are versioned independently (currently 0.2.0). File ex
 
 Multiline states remain correct when scrolling into the middle of a document. Editing a preceding delimiter invalidates the cached suffix. Existing single-line regex language packages remain supported.
 
-This is syntax coloring, not semantic analysis. Interpolated expressions inside strings/templates use the string color; JavaScript regular-expression detection is heuristic. Embedded JavaScript/CSS in HTML, JSX/TypeScript, completion, live preview and code execution are not implemented by these packages. Snippet definitions are supplied as package data; an interactive snippet insertion UI remains future work.
+This is syntax coloring, not semantic analysis. Interpolated expressions inside strings/templates use the string color; JavaScript regular-expression detection is heuristic. Embedded JavaScript/CSS in HTML, JSX/TypeScript, live preview and code execution are not implemented by these packages. Snippet definitions are supplied as package data; an interactive snippet insertion UI remains future work.
+
+For Dart, C# and JavaScript files, typing `.` after a variable opens project-aware method suggestions. Each item shows its signature and the nearest preceding line or block comment, so API documentation remains visible while calling a method. Tamtoot prioritizes methods whose declaring type matches a local variable declaration or constructor expression. This lightweight index is lexical rather than a full compiler or LSP, so type inference is intentionally limited.
+
+The project index runs asynchronously and reparses only files whose SHA-1 content hash changed. Its share-independent cache is stored in `.tamtoot/cache/completions-v1.json` and ignored by Git. Tamtoot checks for changes at most once every ten seconds while completion is used, while the current unsaved document is indexed directly in memory.
 
 ## Commit and push from the IDE
 

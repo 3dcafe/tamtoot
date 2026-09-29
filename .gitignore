@@ -38,6 +38,7 @@ migrate_working_dir/
 .tamtoot/hooks/
 .tamtoot/mcp.json
 .tamtoot/worktrees/
+.tamtoot/cache/
 
 # Symbolication related
 app.*.symbols
