@@ -1,6 +1,9 @@
 import 'dart:io';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
+import 'package:tamtoot/core/agents/model_api_probe.dart';
 import 'package:tamtoot/core/agents/model_profile.dart';
 import 'package:tamtoot/core/agents/profile_store.dart';
 import 'package:tamtoot/core/git/http_git_service.dart';
@@ -15,6 +18,14 @@ class ProfileMemory extends RepositoryMemory {
   @override
   Future<bool> exists(String path) async =>
       data.containsKey(path) || data.keys.any((p) => p.startsWith('$path/'));
+}
+
+class ProbeClient extends http.BaseClient {
+  ProbeClient(this.handler);
+  final http.StreamedResponse Function(http.BaseRequest request) handler;
+  @override
+  Future<http.StreamedResponse> send(http.BaseRequest request) async =>
+      handler(request);
 }
 
 void main() {
@@ -73,6 +84,57 @@ void main() {
       );
     },
   );
+  test('API probe validates Ollama and compatible model discovery', () async {
+    final ollama = ModelApiProbe(
+      client: ProbeClient(
+        (request) => http.StreamedResponse(
+          Stream.value(
+            utf8.encode(
+              '{"models":[{"name":"qwen2.5-coder"},{"name":"llama3"}]}',
+            ),
+          ),
+          200,
+        ),
+      ),
+    );
+    final ollamaResult = await ollama.check(
+      ModelProfile(
+        id: 'ollama',
+        name: 'Ollama',
+        provider: 'ollama',
+        model: 'qwen2.5-coder',
+        apiFormat: 'ollama',
+        endpoint: 'http://localhost:11434/api/chat',
+      ),
+    );
+    expect(ollamaResult.models, ['llama3', 'qwen2.5-coder']);
+    expect(ollamaResult.message, contains('is installed'));
+    ollama.close();
+
+    late Uri checked;
+    final compatible = ModelApiProbe(
+      client: ProbeClient((request) {
+        checked = request.url;
+        return http.StreamedResponse(
+          Stream.value(utf8.encode('{"data":[{"id":"local-code"}]}')),
+          200,
+        );
+      }),
+    );
+    final compatibleResult = await compatible.check(
+      ModelProfile(
+        id: 'studio',
+        name: 'LM Studio',
+        provider: 'lm-studio',
+        model: 'local-code',
+        endpoint: 'http://localhost:1234/v1/chat/completions',
+      ),
+    );
+    expect(checked.path, '/v1/models');
+    expect(compatibleResult.models, ['local-code']);
+    expect(compatibleResult.message, contains('compatible'));
+    compatible.close();
+  });
   test(
     'native storage persists profiles and instructions, rejects stale writes and isolates projects',
     () async {
@@ -151,10 +213,8 @@ void main() {
       );
       await open();
       for (final entry in {
-        'Profile ID': 'coding',
         'Display name': 'Coding',
-        'Provider ID': 'custom',
-        'Model ID': 'local-model',
+        'Model name': 'local-model',
       }.entries) {
         await tester.ensureVisible(field(entry.key));
         await tester.enterText(field(entry.key), entry.value);
@@ -181,7 +241,7 @@ void main() {
       await tester.tap(find.text('coding.json').last);
       await tester.pumpAndSettle();
       expect(
-        tester.widget<TextField>(field('Model ID')).controller!.text,
+        tester.widget<TextField>(field('Model name')).controller!.text,
         'local-model',
       );
       expect(tester.takeException(), isNull);

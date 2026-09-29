@@ -101,3 +101,10 @@ The expanded test suite passes **57 tests**, including folder collapse/reopen, s
 - Pull accepts only a clean work tree, performs a fast-forward, updates the Git index, removes upstream deletions and reloads open project documents and Solution.
 - Added regression tests for fast-forward content, additions, deletions, index and remote-tracking updates, dirty-tree rejection without network access, and the clean local-ahead case.
 - `flutter analyze`: no issues. Full suite: **125 tests passed**. No dependencies added.
+
+## Friendly local model setup — 2026-09-29
+
+- Added guided presets for Ollama, LM Studio, LocalAI, OpenAI and Anthropic with automatic endpoints and API formats.
+- Moved provider IDs, endpoint URLs, compatibility formats and raw JSON parameters into an optional Advanced section; new profile IDs are generated from display names.
+- Added a connection and compatibility check that discovers Ollama or OpenAI-compatible models, verifies the selected model and recognizes authenticated APIs without storing credentials.
+- Added mocked compatibility tests for Ollama and OpenAI-style model discovery. `flutter analyze`: no issues. Full suite: **126 tests passed**.

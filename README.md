@@ -126,10 +126,18 @@ Request documentation is ordinary Markdown beside its request. Use **New Documen
 ## Model profiles and prompts
 
 Open a project, then go to **Tools → Settings → Model profiles and prompts**.
-Create a profile with a stable ID, display name, provider ID and model ID. Each
-profile has an editable system prompt, user prompt template and JSON object of
+Create a profile with a display name and model name. Each profile has an editable
+system prompt, user prompt template and optional JSON object of
 API parameters. **Reset prompts** restores the built-in templates; **Save profile**
 persists edits. Profiles can be selected, edited and deleted independently.
+
+For a new profile, choose **Ollama**, **LM Studio**, **LocalAI**, **OpenAI** or
+**Anthropic** from **Model server**. Tamtoot fills in the provider, API format and
+standard endpoint automatically; the profile ID is generated from its display
+name. URLs and provider details remain available under **Advanced connection
+settings** for custom servers. **Check connection** verifies that the API is
+reachable and compatible, loads its model list when supported, and confirms
+whether the selected model is available. This check does not send a prompt.
 
 - Profiles: `.tamtoot/agents/models/<profile-id>.json` (schema version 1).
 - Shared instructions: `.tamtoot/agents/instructions.md`, saved separately and

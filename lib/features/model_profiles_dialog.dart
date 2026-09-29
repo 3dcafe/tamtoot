@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../app/ide_session.dart';
 import '../core/agents/model_profile.dart';
 import '../core/agents/model_client.dart';
+import '../core/agents/model_api_probe.dart';
 import '../core/agents/ollama_client.dart';
 import '../core/agents/profile_store.dart';
 import '../core/git/http_git_service.dart';
@@ -18,16 +19,19 @@ class ModelProfilesDialog extends StatefulWidget {
 class _ModelProfilesDialogState extends State<ModelProfilesDialog> {
   final id = TextEditingController(),
       name = TextEditingController(),
-      provider = TextEditingController(),
+      provider = TextEditingController(text: 'ollama'),
       model = TextEditingController(),
-      endpoint = TextEditingController(),
+      endpoint = TextEditingController(text: 'http://localhost:11434/api/chat'),
       system = TextEditingController(text: defaultSystemPrompt),
       template = TextEditingController(text: defaultUserTemplate),
       parameters = TextEditingController(text: '{}'),
       instructions = TextEditingController(),
       task = TextEditingController();
-  String apiFormat = 'chat-completions';
+  String apiFormat = 'ollama';
+  String serverType = 'ollama';
   List<OllamaModel> ollamaModels = const [];
+  List<String> detectedModels = const [];
+  String? connectionStatus;
   ProfileStore? store;
   List<String> paths = [];
   String? selected, original, originalInstructions, error;
@@ -135,10 +139,13 @@ class _ModelProfilesDialogState extends State<ModelProfilesDialog> {
       original = text;
       id.text = p?.id ?? '';
       name.text = p?.name ?? '';
-      provider.text = p?.provider ?? '';
+      provider.text = p?.provider ?? 'ollama';
       model.text = p?.model ?? '';
-      endpoint.text = p?.endpoint ?? '';
-      apiFormat = p?.apiFormat ?? 'chat-completions';
+      endpoint.text = p?.endpoint ?? 'http://localhost:11434/api/chat';
+      apiFormat = p?.apiFormat ?? 'ollama';
+      serverType = _serverType(p);
+      detectedModels = const [];
+      connectionStatus = null;
       system.text = p?.systemPrompt ?? defaultSystemPrompt;
       template.text = p?.userTemplate ?? defaultUserTemplate;
       parameters.text = const JsonEncoder.withIndent(
@@ -153,8 +160,13 @@ class _ModelProfilesDialogState extends State<ModelProfilesDialog> {
     if (params is! Map<String, dynamic>) {
       throw const FormatException('Parameters must be a JSON object.');
     }
+    final generatedId = name.text
+        .trim()
+        .toLowerCase()
+        .replaceAll(RegExp(r'[^a-z0-9]+'), '-')
+        .replaceAll(RegExp(r'^-+|-+$'), '');
     return ModelProfile(
-      id: id.text.trim(),
+      id: id.text.trim().isEmpty ? generatedId : id.text.trim(),
       name: name.text.trim(),
       provider: provider.text.trim(),
       model: model.text.trim(),
@@ -165,6 +177,82 @@ class _ModelProfilesDialogState extends State<ModelProfilesDialog> {
       endpoint: endpoint.text.trim(),
     )..validate();
   }
+
+  String _serverType(ModelProfile? profile) {
+    if (profile == null) return 'ollama';
+    final value = profile.endpoint.toLowerCase();
+    if (profile.apiFormat == 'ollama') return 'ollama';
+    if (value.contains('localhost:1234')) return 'lm-studio';
+    if (value.contains('localhost:8080')) return 'localai';
+    if (value.contains('api.openai.com')) return 'openai';
+    if (value.contains('api.anthropic.com')) return 'anthropic';
+    return 'custom';
+  }
+
+  void _chooseServer(String value) {
+    const presets = <String, (String, String, String)>{
+      'ollama': ('ollama', 'ollama', 'http://localhost:11434/api/chat'),
+      'lm-studio': (
+        'lm-studio',
+        'chat-completions',
+        'http://localhost:1234/v1/chat/completions',
+      ),
+      'localai': (
+        'localai',
+        'chat-completions',
+        'http://localhost:8080/v1/chat/completions',
+      ),
+      'openai': (
+        'openai',
+        'responses',
+        'https://api.openai.com/v1/responses',
+      ),
+      'anthropic': (
+        'anthropic',
+        'anthropic',
+        'https://api.anthropic.com/v1/messages',
+      ),
+    };
+    setState(() {
+      serverType = value;
+      final preset = presets[value];
+      if (preset != null) {
+        provider.text = preset.$1;
+        apiFormat = preset.$2;
+        endpoint.text = preset.$3;
+      }
+      detectedModels = const [];
+      ollamaModels = const [];
+      connectionStatus = null;
+      dirty = true;
+    });
+  }
+
+  Future<void> _checkConnection() => _run(() async {
+    final profile = ModelProfile(
+      id: 'connection-check',
+      name: 'Connection check',
+      provider: provider.text.trim().isEmpty
+          ? serverType
+          : provider.text.trim(),
+      model: model.text.trim().isEmpty ? '__probe__' : model.text.trim(),
+      apiFormat: apiFormat,
+      endpoint: endpoint.text.trim(),
+    );
+    final probe = ModelApiProbe();
+    try {
+      final result = await probe.check(profile);
+      if (!mounted) return;
+      detectedModels = result.models;
+      connectionStatus = result.message;
+      if (model.text.isEmpty && result.models.isNotEmpty) {
+        model.text = result.models.first;
+        dirty = true;
+      }
+    } finally {
+      probe.close();
+    }
+  });
 
   void _checkProject() {
     if (widget.session.workspaceRoot != root) {
@@ -215,10 +303,13 @@ class _ModelProfilesDialogState extends State<ModelProfilesDialog> {
       dirty = false;
       id.clear();
       name.clear();
-      provider.clear();
+      provider.text = 'ollama';
       model.clear();
-      endpoint.clear();
-      apiFormat = 'chat-completions';
+      endpoint.text = 'http://localhost:11434/api/chat';
+      apiFormat = 'ollama';
+      serverType = 'ollama';
+      detectedModels = const [];
+      connectionStatus = null;
       system.text = defaultSystemPrompt;
       template.text = defaultUserTemplate;
       parameters.text = '{}';
@@ -423,58 +514,78 @@ class _ModelProfilesDialogState extends State<ModelProfilesDialog> {
                     ),
                   ],
                 ),
-                _field('Profile ID', id, enabled: selected == null),
                 _field('Display name', name),
-                _field('Provider ID', provider),
-                _field('Model ID', model),
-                DropdownButton<String>(
+                DropdownButtonFormField<String>(
+                  key: ValueKey('server-$serverType'),
                   isExpanded: true,
-                  value: apiFormat,
-                  items: [
-                    for (final entry in ModelProfile.apiFormats.entries)
-                      DropdownMenuItem(
-                        value: entry.key,
-                        child: Text(entry.value),
-                      ),
+                  initialValue: serverType,
+                  decoration: const InputDecoration(
+                    labelText: 'Model server',
+                    border: OutlineInputBorder(),
+                  ),
+                  items: const [
+                    DropdownMenuItem(value: 'ollama', child: Text('Ollama · local')),
+                    DropdownMenuItem(value: 'lm-studio', child: Text('LM Studio · local')),
+                    DropdownMenuItem(value: 'localai', child: Text('LocalAI · local')),
+                    DropdownMenuItem(value: 'openai', child: Text('OpenAI')),
+                    DropdownMenuItem(value: 'anthropic', child: Text('Anthropic')),
+                    DropdownMenuItem(value: 'custom', child: Text('Custom compatible API')),
                   ],
-                  onChanged: busy
-                      ? null
-                      : (value) => setState(() {
-                          apiFormat = value!;
-                          dirty = true;
-                        }),
+                  onChanged: busy ? null : (value) => _chooseServer(value!),
                 ),
-                _field('API endpoint (full URL)', endpoint),
+                const SizedBox(height: 12),
+                if (detectedModels.isEmpty && ollamaModels.isEmpty)
+                  _field('Model name', model),
+                if (detectedModels.isNotEmpty)
+                  DropdownButtonFormField<String>(
+                    key: ValueKey('detected-${model.text}'),
+                    isExpanded: true,
+                    initialValue: detectedModels.contains(model.text)
+                        ? model.text
+                        : null,
+                    hint: const Text('Choose a detected model'),
+                    decoration: const InputDecoration(
+                      labelText: 'Available models',
+                      border: OutlineInputBorder(),
+                    ),
+                    items: [
+                      for (final value in detectedModels)
+                        DropdownMenuItem(value: value, child: Text(value)),
+                    ],
+                    onChanged: busy
+                        ? null
+                        : (value) => setState(() {
+                            model.text = value!;
+                            dirty = true;
+                          }),
+                  ),
                 Wrap(
                   spacing: 8,
+                  runSpacing: 8,
                   children: [
-                    TextButton(
-                      onPressed: busy ? null : _detectOllama,
-                      child: const Text('Detect Ollama'),
+                    FilledButton.tonalIcon(
+                      key: const ValueKey('check-model-api'),
+                      onPressed: busy ? null : _checkConnection,
+                      icon: const Icon(Icons.health_and_safety_outlined),
+                      label: const Text('Check connection'),
                     ),
-                    for (final preset in const {
-                      'OpenAI': (
-                        'responses',
-                        'https://api.openai.com/v1/responses',
-                      ),
-                      'Anthropic': (
-                        'anthropic',
-                        'https://api.anthropic.com/v1/messages',
-                      ),
-                    }.entries)
+                    if (serverType == 'ollama')
                       TextButton(
-                        onPressed: busy
-                            ? null
-                            : () => setState(() {
-                                apiFormat = preset.value.$1;
-                                endpoint.text = preset.value.$2;
-                                provider.text = preset.key.toLowerCase();
-                                dirty = true;
-                              }),
-                        child: Text(preset.key),
+                        onPressed: busy ? null : _detectOllama,
+                        child: const Text('Find Ollama models'),
                       ),
                   ],
                 ),
+                if (connectionStatus != null)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: Text(
+                      connectionStatus!,
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.primary,
+                      ),
+                    ),
+                  ),
                 if (ollamaModels.isNotEmpty)
                   DropdownButton<String>(
                     isExpanded: true,
@@ -495,13 +606,46 @@ class _ModelProfilesDialogState extends State<ModelProfilesDialog> {
                             if (value != null) _selectOllamaModel(value);
                           },
                   ),
+                ExpansionTile(
+                  title: const Text('Advanced connection settings'),
+                  subtitle: const Text('Usually no changes are needed'),
+                  children: [
+                    _field('Profile ID', id, enabled: selected == null),
+                    _field('Provider ID', provider),
+                    DropdownButtonFormField<String>(
+                      key: ValueKey('format-$apiFormat'),
+                      isExpanded: true,
+                      initialValue: apiFormat,
+                      decoration: const InputDecoration(
+                        labelText: 'API compatibility format',
+                        border: OutlineInputBorder(),
+                      ),
+                      items: [
+                        for (final entry in ModelProfile.apiFormats.entries)
+                          DropdownMenuItem(
+                            value: entry.key,
+                            child: Text(entry.value),
+                          ),
+                      ],
+                      onChanged: busy
+                          ? null
+                          : (value) => setState(() {
+                              apiFormat = value!;
+                              serverType = 'custom';
+                              dirty = true;
+                            }),
+                    ),
+                    const SizedBox(height: 12),
+                    _field('API endpoint', endpoint),
+                    _field('API parameters (JSON object)', parameters, lines: 3),
+                  ],
+                ),
                 _field('System prompt', system, lines: 3),
                 _field('User prompt template', template, lines: 5),
                 const Text(
                   'Variables: {{task}}, {{file_path}}, {{file}}, {{selection}}. Project instructions are appended to the system prompt.',
                 ),
                 const SizedBox(height: 12),
-                _field('API parameters (JSON object)', parameters, lines: 3),
                 const Text(
                   'Parameters are sent to the selected API. Ollama uses num_ctx for its context window. Streaming and tool calls are not used in this simple request view.',
                 ),
