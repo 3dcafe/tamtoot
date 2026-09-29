@@ -41,7 +41,9 @@ void main() {
   test('all packages load; extensions recognize case and Windows paths', () {
     final registry = LanguageRegistry();
     for (final id in bundledLanguageIds) {
-      registry.register(loadLanguage(id));
+      final language = loadLanguage(id);
+      expect(language.snippets, isNotEmpty);
+      registry.register(language);
     }
     for (final path in ['page.html', 'PAGE.HTM']) {
       expect(registry.forPath(path)?.id, 'html');
@@ -57,7 +59,6 @@ void main() {
     expect(registry.forPath('main.DART')?.id, 'dart');
     expect(registry.forPath('Program.CS')?.id, 'csharp');
     expect(registry.forPath('script.js.txt'), isNull);
-    expect(registry.languages.every((l) => l.snippets.isNotEmpty), isTrue);
   });
   test('Dart recognizes modern declarations, annotations, numbers and calls', () {
     final language = loadLanguage('dart');

@@ -300,13 +300,12 @@ class LanguagePackageLoader {
 
 class LanguageRegistry {
   final Map<String, LanguageDefinition> _languages = {};
-  Iterable<LanguageDefinition> get languages => _languages.values;
   void register(LanguageDefinition language) =>
       _languages[language.id] = language;
   LanguageDefinition? forPath(String path) {
     final name = path.replaceAll('\\', '/').split('/').last;
     final lower = name.toLowerCase();
-    for (final language in languages) {
+    for (final language in _languages.values) {
       if (language.filenames.contains(name) ||
           language.extensions.any(
             (extension) => lower.endsWith(extension.toLowerCase()),

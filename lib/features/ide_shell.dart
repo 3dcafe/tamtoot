@@ -711,21 +711,6 @@ class _IdeShellState extends ConsumerState<IdeShell> {
             ],
           ),
         ),
-        Padding(
-          padding: const EdgeInsets.all(12),
-          child: Row(
-            children: [
-              Icon(Icons.extension_outlined, size: 15, color: color('accent')),
-              const SizedBox(width: 7),
-              Expanded(
-                child: Text(
-                  '${session.languages.languages.length} languages',
-                  style: TextStyle(fontSize: 11, color: color('muted')),
-                ),
-              ),
-            ],
-          ),
-        ),
       ],
     ),
   );

@@ -340,9 +340,7 @@ class IdeSession {
       if (restoredActive != null) documents.activeId = restoredActive;
       recentWorkspaces.addAll(recent.take(10));
     });
-    log(
-      'Foundation ready · ${languages.languages.length} language packages · API v1',
-    );
+    log('Foundation ready · API v1');
     if (recentWorkspaces.isNotEmpty) {
       try {
         final root = Uri.parse(recentWorkspaces.first);

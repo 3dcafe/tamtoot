@@ -70,9 +70,9 @@ class ShellActions implements PresentationActions {
     builder: (_) => KanbanDialog(session: session),
   );
   @override
-  Future<void> showExtensions() => showDialog<void>(
+  Future<void> showLanguagePackageInstaller() => showDialog<void>(
     context: context(),
-    builder: (ctx) => LanguageDialog(session: session),
+    builder: (ctx) => LanguagePackageInstallerDialog(session: session),
   );
 
   @override
@@ -343,14 +343,16 @@ class _SettingsDialogState extends State<SettingsDialog> {
   }
 }
 
-class LanguageDialog extends StatefulWidget {
-  const LanguageDialog({super.key, required this.session});
+class LanguagePackageInstallerDialog extends StatefulWidget {
+  const LanguagePackageInstallerDialog({super.key, required this.session});
   final IdeSession session;
   @override
-  State<LanguageDialog> createState() => _LanguageDialogState();
+  State<LanguagePackageInstallerDialog> createState() =>
+      _LanguagePackageInstallerDialogState();
 }
 
-class _LanguageDialogState extends State<LanguageDialog> {
+class _LanguagePackageInstallerDialogState
+    extends State<LanguagePackageInstallerDialog> {
   final manifest = TextEditingController(),
       syntax = TextEditingController(),
       snippets = TextEditingController();
@@ -365,7 +367,7 @@ class _LanguageDialogState extends State<LanguageDialog> {
 
   @override
   Widget build(BuildContext context) => AlertDialog(
-    title: const Text('Language packages'),
+    title: const Text('Install language package'),
     content: SizedBox(
       width: 600,
       child: SingleChildScrollView(
@@ -373,14 +375,6 @@ class _LanguageDialogState extends State<LanguageDialog> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            for (final language in widget.session.languages.languages)
-              ListTile(
-                leading: const Icon(Icons.code),
-                title: Text(language.name),
-                subtitle: Text(
-                  '${language.extensions.join(', ')} · ${language.version} · declarative',
-                ),
-              ),
             const Text(
               'Install a declarative package without rebuilding. Paste its versioned JSON files below.',
             ),

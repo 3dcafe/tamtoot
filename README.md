@@ -60,7 +60,7 @@ The existing Windows workflows remain available separately.
 - **Edit**: undo/redo, clipboard, find and replace.
 - **View**: show/hide panels, switch theme, reset layout, command palette.
 - **Tools → Settings**: theme, font, size, tabs, read-only mode, and keybindings.
-- **Tools → Language packages**: install versioned `language.json`, `syntax.json`, and optional `snippets.json` without rebuilding the IDE.
+- **Tools → Install language package**: install versioned `language.json`, `syntax.json`, and optional `snippets.json` without rebuilding the IDE. The bundled languages and their extensions are documented below instead of being enumerated in the application UI.
 
 Drag panel dividers to resize. Click folders to expand or collapse them, and files to open them. Tap in the editor to position the cursor; long-press and drag to select text. Ordinary touch dragging scrolls the document.
 

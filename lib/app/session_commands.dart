@@ -10,7 +10,7 @@ abstract interface class PresentationActions {
   Future<bool> confirmDiscard(String name);
   Future<void> showCommands();
   Future<void> showSettings();
-  Future<void> showExtensions();
+  Future<void> showLanguagePackageInstaller();
   Future<void> showCloneRepository();
   Future<void> showGitChanges();
   Future<void> showOpenProject();
@@ -224,7 +224,11 @@ void registerSessionCommands(IdeSession s, PresentationActions ui) {
   );
   add('view.commands', 'Command palette', (_) => ui.showCommands());
   add('settings.open', 'Settings & keybindings', (_) => ui.showSettings());
-  add('extensions.manage', 'Language packages', (_) => ui.showExtensions());
+  add(
+    'extensions.manage',
+    'Install language package',
+    (_) => ui.showLanguagePackageInstaller(),
+  );
   add('extensions.install', 'Install language package', (arg) async {
     final values = arg as List<String>;
     final language = await PackageService(
