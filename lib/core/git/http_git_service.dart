@@ -772,10 +772,14 @@ class HttpGitService
     }
   }
 
-  bool _internal(String path) =>
-      path.split('/').contains('.git') ||
-      path == '.tamtoot' ||
-      path.startsWith('.tamtoot/');
+  bool _internal(String path) {
+    if (path.split('/').contains('.git')) return true;
+    if (path == '.tamtoot/environment.json' ||
+        path.startsWith('.tamtoot/requests/')) {
+      return false;
+    }
+    return path == '.tamtoot' || path.startsWith('.tamtoot/');
+  }
 
   Future<Map<String, TreeEntry>> _headEntries(
     GitObjectDatabase db,

@@ -105,7 +105,13 @@ class _GitChangesDialogState extends State<GitChangesDialog> {
         final path = Uri.decodeComponent(
           uri.toString().substring(root.toString().length),
         );
-        if (path.startsWith('.tamtoot/') || path.startsWith('.git/')) continue;
+        final sharedRequestFile =
+            path == '.tamtoot/environment.json' ||
+            path.startsWith('.tamtoot/requests/');
+        if ((!sharedRequestFile && path.startsWith('.tamtoot/')) ||
+            path.startsWith('.git/')) {
+          continue;
+        }
         unsaved.add(path);
         if (!entries.any((entry) => entry.path == path)) {
           entries.add(GitStatusEntry(' ', 'M', path));

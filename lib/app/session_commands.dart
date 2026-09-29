@@ -13,6 +13,7 @@ abstract interface class PresentationActions {
   Future<void> showLanguagePackageInstaller();
   Future<void> showCloneRepository();
   Future<void> showGitChanges();
+  Future<void> showHttpRequests();
   Future<void> showOpenProject();
   Future<void> showAgent();
   Future<void> showKanban();
@@ -124,6 +125,12 @@ void registerSessionCommands(IdeSession s, PresentationActions ui) {
     (_) => ui.showGitChanges(),
     enabled: () => s.git.available && s.workspaceHasGit,
     visible: () => s.git.available,
+  );
+  add(
+    'requests.open',
+    'HTTP Requests…',
+    (_) => ui.showHttpRequests(),
+    enabled: () => s.workspaceRoot != null,
   );
   add('workspace.browse', 'Browse folder', (arg) async {
     await s.openWorkspaceFolder(arg as Uri);

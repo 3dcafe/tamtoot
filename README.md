@@ -99,7 +99,7 @@ Open a cloned project and select the **Git** tab beside **Solution** in the side
 
 Commit and push are separate operations: a failed push leaves the local commit available for retry. The Git view shows progress and errors; Explorer indicators refresh after successful operations. Push verifies the remote's unpack/ref status, refuses non-fast-forward updates and sets the current branch's upstream after success. No new dependencies or system Git executable are required by the application.
 
-File selection is whole-file staging for one commit, not a persistent staging UI. The client maintains a standard Git v2 index and refuses to overwrite existing staging from another client. Advanced indexes, merge conflicts, detached HEAD commits, symlink/submodule edits, hooks, signing and packed object databases are not supported. `.tamtoot` metadata is excluded. Full `.gitignore` semantics are still not implemented: review new files explicitly before selecting them. Web push additionally depends on the remote host allowing browser requests (CORS).
+File selection is whole-file staging for one commit, not a persistent staging UI. The client maintains a standard Git v2 index and refuses to overwrite existing staging from another client. Advanced indexes, merge conflicts, detached HEAD commits, symlink/submodule edits, hooks, signing and packed object databases are not supported. Private `.tamtoot` metadata is excluded; shared HTTP requests and their project environment are visible to Git. Full `.gitignore` semantics are still not implemented: review new files explicitly before selecting them. Web push additionally depends on the remote host allowing browser requests (CORS).
 
 ## Compare and discard changes
 
@@ -108,6 +108,16 @@ Click a filename in the Git changes list to compare **HEAD → current content**
 Discard requires confirmation. It restores a tracked file to its last committed contents, including deleted files, and reloads its open editor. For an untracked file, the confirmation explicitly offers deletion. Cancel preserves everything. A stale review, changed HEAD or existing external staging prevents restoration.
 
 Text comparison supports UTF-8 files up to a combined 2 MiB preview limit. Binary files show an explanatory message; large changed text spans use a bounded replacement view. Line endings are normalized only for display; restoration uses the original committed bytes.
+
+## HTTP Requests
+
+Open **Requests** beside Solution and Git, or choose **Tools → HTTP Requests…**. Requests can be organized in nested folders, edited, renamed, moved, deleted and run individually or as a selected batch. Batch execution can run sequentially or in parallel with a maximum of five concurrent requests, with an optional stop-on-error mode. Each result shows status, duration and a response preview.
+
+Requests support GET, POST, PUT, PATCH, DELETE, HEAD and OPTIONS; query parameters and headers can be enabled independently. Bodies support JSON, text and URL-encoded forms. Project authorization can be inherited, disabled or overridden with a bearer token. `{{variable}}` placeholders are resolved in URLs, query parameters, headers, bodies and tokens. Runtime values override local secrets, which override shared project variables.
+
+Project request files live under `.tamtoot/requests/**` and shared variables live in `.tamtoot/environment.json`. These files appear in Tamtoot's Git view so a team can commit and exchange them with the rest of the project. Secrets belong in `.tamtoot/environment.local.json`; this file is excluded from Tamtoot Git operations and from the repository `.gitignore`. If a literal project or request bearer token is entered, Tamtoot moves it into the local environment and stores only a `{{variable}}` reference in the shared file.
+
+Request documentation is ordinary Markdown beside its request. Use **New Documentation** to create it or **Attach Markdown** to link an existing neighboring `.md` file. Request and environment files use version 1 JSON and reject unsupported versions or paths outside their project folders.
 
 ## Model profiles and prompts
 
@@ -137,9 +147,9 @@ streaming `/api/chat`. The default address is `http://localhost:11434`; HTTP is
 also accepted for private-network addresses, while public endpoints require HTTPS.
 
 The profiles belong to the open workspace and are reloaded from disk when the
-editor opens. External changes are detected before saving or deleting. The current
-Git UI still excludes `.tamtoot` entirely, so these settings remain local when
-committing through Tamtoot. Existing browser folder stores support profile files;
+editor opens. External changes are detected before saving or deleting. The Git UI
+excludes these agent settings, so they remain local when committing through
+Tamtoot. Existing browser folder stores support profile files;
 actual browser permission behavior requires a writable folder grant.
 
 ## Agent, YOLO and headless mode

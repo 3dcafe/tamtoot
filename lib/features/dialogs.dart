@@ -4,6 +4,7 @@ import 'mcp_dialog.dart';
 import 'kanban_dialog.dart';
 import 'dart:async';
 import 'git_changes_dialog.dart';
+import 'http_requests_dialog.dart';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -80,6 +81,13 @@ class ShellActions implements PresentationActions {
     context: context(),
     barrierDismissible: false,
     builder: (_) => GitChangesDialog(session: session),
+  );
+
+  @override
+  Future<void> showHttpRequests() => showDialog<void>(
+    context: context(),
+    barrierDismissible: false,
+    builder: (_) => HttpRequestsDialog(session: session),
   );
 
   @override

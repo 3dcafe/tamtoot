@@ -84,3 +84,10 @@ The expanded test suite passes **57 tests**, including folder collapse/reopen, s
 - Added persistent Kanban columns, dependency validation and isolated desktop Git worktree creation.
 - Targeted tests cover request shapes, response parsing, streaming, credential redaction, cancellation, Ollama discovery, approvals, YOLO clean-tree enforcement, command safety, premature-completion protection, hooks, HTTP/SSE/STDIO MCP, Kanban persistence and real temporary Git worktrees.
 - `flutter analyze`: no issues. Full suite: **114 tests passed**. Debug Android APK, macOS app and web builds compile successfully.
+
+## HTTP Requests — 2026-09-29
+
+- Added a Requests sidebar and Tools command with project-scoped CRUD, nested folders, explicit save state, Markdown attachments, environments and individual/batch execution.
+- Shared requests and `.tamtoot/environment.json` participate in the built-in Git status/commit flow; `.tamtoot/environment.local.json` and other private metadata remain excluded.
+- Verified disk persistence in a temporary project, path containment, schema rejection, variable precedence, inherited bearer authorization, JSON/query/header resolution, sequential stop-on-error, parallel ordering, empty batches and Git visibility rules.
+- `flutter analyze`: no issues. Full suite: **118 tests passed**. No dependencies added.

@@ -20,6 +20,8 @@ v1 — первая опубликованная схема. Схемы v0 не 
 | Package index | ids: string[] | — |
 | Model profile | id, name, provider, model, systemPrompt, userTemplate, parameters | apiFormat=chat-completions для старого v1; endpoint="" |
 | Agent Kanban | cards: object[] | Пустая доска разрешена; поля карточки имеют безопасные defaults |
+| HTTP request | version, name, method, url | headers/query/attachments=[]; body=none; auth=inherit |
+| HTTP environment | version, variables | auth=none |
 
 `schemaVersion` — формат, `packageVersion` — релиз конкретного пакета, `apiVersion` — совместимость executable API. Это независимые числа/версии.
 
@@ -66,6 +68,27 @@ Theme is an IDE-wide user preference: its effective value comes from the user la
 
 Путь: `.tamtoot/mcp.json`. Корень: `{ "mcpServers": { "name": { ... } } }`. Server name: ASCII letters, numbers, `_`, `-`, длина 1–64. Transport `stdio` требует `command` и допускает string array `args`. Transport `streamableHttp` требует безопасный `url` и допускает string-to-string `headers`. Общие поля: `disabled` и `timeoutSeconds` в диапазоне 1–600. При отсутствии `type` он выводится из наличия `command`. Формат намеренно не объявлен Tamtoot schema v1.
 
+## HTTP Requests v1
+
+Общие запросы проекта хранятся в `.tamtoot/requests/**/*.json`. В отличие от
+остальных локальных метаданных `.tamtoot`, эти файлы, соседняя Markdown-документация
+и `.tamtoot/environment.json` отображаются в Git UI и предназначены для коммита.
+Секреты хранятся только в `.tamtoot/environment.local.json`, который исключён из Git.
+
+Корень запроса содержит `version: 1`, `name`, `method`, `url`, массивы `headers` и
+`query`, объект `body`, объект `auth` и необязательный массив `attachments`. Method:
+`GET`, `POST`, `PUT`, `PATCH`, `DELETE`, `HEAD`, `OPTIONS`. Body type: `none`, `json`,
+`text`, `form`. Auth mode: `inherit`, `none`, `bearer`. Каждый header/query имеет
+`key`, `value`, `enabled`; Markdown attachment имеет `type: markdown` и относительный
+`path` рядом с запросом. Пути с `..`, абсолютные пути и другие типы вложений запрещены.
+
+Environment содержит `version: 1`, string-to-string `variables` и общий `auth` с
+типом `none` или `bearer`. Для общего bearer рекомендуется `{{token}}`; фактическое
+значение находится в локальных variables. При выполнении приоритет значений:
+runtime → local secret → shared project. Шаблоны `{{name}}` разрешаются в URL,
+параметрах, заголовках, body и bearer token; отсутствующая переменная завершает
+конкретный запрос ошибкой до сетевой отправки.
+
 ## Hook response и CLI events
 
 Hook может вернуть пустой stdout или object с `cancel: bool`, `errorMessage: string`, `contextModification: string`. Это одноразовый IPC-контракт, не persistence schema.
@@ -74,4 +97,4 @@ Hook может вернуть пустой stdout или object с `cancel: boo
 
 ## Workspace `.tamtoot`
 
-Локальная структура и security-поведение подробно описаны в [agents.md](agents.md). Встроенный Git UI исключает `.tamtoot`, однако это не заменяет `.gitignore` для внешнего Git-клиента. Secrets нельзя добавлять в model profiles; MCP headers хранятся verbatim и требуют отдельной осторожности.
+Локальная структура и security-поведение подробно описаны в [agents.md](agents.md). Встроенный Git UI исключает локальные данные `.tamtoot`, но включает HTTP requests и общий request environment. Это не заменяет `.gitignore` для внешнего Git-клиента. Secrets нельзя добавлять в model profiles; MCP headers хранятся verbatim и требуют отдельной осторожности.

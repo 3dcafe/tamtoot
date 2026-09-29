@@ -32,6 +32,12 @@ migrate_working_dir/
 .pub/
 /build/
 /coverage/
+.tamtoot/environment.local.json
+.tamtoot/project.json
+.tamtoot/agents/
+.tamtoot/hooks/
+.tamtoot/mcp.json
+.tamtoot/worktrees/
 
 # Symbolication related
 app.*.symbols

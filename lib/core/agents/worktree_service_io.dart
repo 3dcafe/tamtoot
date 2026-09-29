@@ -9,10 +9,28 @@ class AgentWorktreeService {
     final repository = Directory.fromUri(root);
     final exclude = File('${repository.path}/.git/info/exclude');
     final existing = await exclude.exists() ? await exclude.readAsString() : '';
-    if (!existing.split('\n').contains('/.tamtoot/')) {
+    const localPatterns = [
+      '/.tamtoot/project.json',
+      '/.tamtoot/environment.local.json',
+      '/.tamtoot/agents/',
+      '/.tamtoot/hooks/',
+      '/.tamtoot/mcp.json',
+      '/.tamtoot/worktrees/',
+    ];
+    final existingLines = existing.split('\n').toSet();
+    if (existingLines.contains('/.tamtoot/') ||
+        localPatterns.any((pattern) => !existingLines.contains(pattern))) {
       await exclude.parent.create(recursive: true);
+      final retained = existing
+          .split('\n')
+          .where((line) => line.trim() != '/.tamtoot/')
+          .where((line) => line.trim().isNotEmpty)
+          .toList();
+      for (final pattern in localPatterns) {
+        if (!retained.contains(pattern)) retained.add(pattern);
+      }
       await exclude.writeAsString(
-        '${existing.trimRight()}${existing.trim().isEmpty ? '' : '\n'}/.tamtoot/\n',
+        '${retained.join('\n')}\n',
         flush: true,
       );
     }

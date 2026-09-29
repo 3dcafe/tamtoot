@@ -118,6 +118,18 @@ void main() {
       await store.writeText('a.txt', 'selected');
       await store.writeText('b.txt', 'not selected');
       await store.writeText('.tamtoot/project.json', 'private metadata');
+      await store.writeText(
+        '.tamtoot/requests/health.json',
+        '{"version":1,"name":"Health","method":"GET","url":"https://example.com","headers":[],"query":[],"body":{"type":"none"},"auth":{"mode":"none"}}',
+      );
+      await store.writeText(
+        '.tamtoot/environment.json',
+        '{"version":1,"variables":{}}',
+      );
+      await store.writeText(
+        '.tamtoot/environment.local.json',
+        '{"version":1,"variables":{"token":"secret"}}',
+      );
       await store.writeText('secret.txt', 'not selected');
       (await git.add(root, paths: ['a.txt'])).ensureOk();
       await store.writeText('a.txt', 'later edit');
@@ -134,6 +146,17 @@ void main() {
       expect(
         (await git.statusEntries(root)).map((e) => e.path),
         isNot(contains('.tamtoot/project.json')),
+      );
+      expect(
+        (await git.statusEntries(root)).map((e) => e.path),
+        containsAll([
+          '.tamtoot/requests/health.json',
+          '.tamtoot/environment.json',
+        ]),
+      );
+      expect(
+        (await git.statusEntries(root)).map((e) => e.path),
+        isNot(contains('.tamtoot/environment.local.json')),
       );
       await store.delete('a.txt');
       await commit('Delete', ['a.txt']);

@@ -10,6 +10,7 @@ import '../editor/input/keyboard_mapping.dart';
 import 'dialogs.dart';
 import 'git_changes_dialog.dart';
 import 'git_diff.dart';
+import 'http_requests_dialog.dart';
 import 'dock_view.dart';
 
 class IdeShell extends ConsumerStatefulWidget {
@@ -21,7 +22,7 @@ class IdeShell extends ConsumerStatefulWidget {
 class _IdeShellState extends ConsumerState<IdeShell> {
   final _find = TextEditingController(), _replace = TextEditingController();
   late IdeSession session;
-  bool _showGit = false;
+  int _sidebar = 0;
   @override
   void initState() {
     super.initState();
@@ -170,6 +171,7 @@ class _IdeShellState extends ConsumerState<IdeShell> {
                   ]),
                   _menuItem('Git', ['git.changes', 'git.clone']),
                   _menuItem('Tools', [
+                    'requests.open',
                     'agent.open',
                     'agent.kanban',
                     'settings.open',
@@ -490,22 +492,33 @@ class _IdeShellState extends ConsumerState<IdeShell> {
                   child: Row(
                     children: [
                       TextButton(
-                        onPressed: () => setState(() => _showGit = false),
+                        onPressed: () => setState(() => _sidebar = 0),
                         child: Text(
                           'Solution',
                           style: TextStyle(
-                            color: color(!_showGit ? 'accent' : 'muted'),
+                            color: color(_sidebar == 0 ? 'accent' : 'muted'),
                             fontSize: 12,
                           ),
                         ),
                       ),
                       TextButton(
                         key: const ValueKey('sidebar-git'),
-                        onPressed: () => setState(() => _showGit = true),
+                        onPressed: () => setState(() => _sidebar = 1),
                         child: Text(
                           'Git',
                           style: TextStyle(
-                            color: color(_showGit ? 'accent' : 'muted'),
+                            color: color(_sidebar == 1 ? 'accent' : 'muted'),
+                            fontSize: 12,
+                          ),
+                        ),
+                      ),
+                      TextButton(
+                        key: const ValueKey('sidebar-requests'),
+                        onPressed: () => setState(() => _sidebar = 2),
+                        child: Text(
+                          'Requests',
+                          style: TextStyle(
+                            color: color(_sidebar == 2 ? 'accent' : 'muted'),
                             fontSize: 12,
                           ),
                         ),
@@ -514,7 +527,7 @@ class _IdeShellState extends ConsumerState<IdeShell> {
                   ),
                 ),
               ),
-              if (!_showGit)
+              if (_sidebar == 0)
                 action(
                   Icons.refresh,
                   'Refresh project tree and Git status',
@@ -525,7 +538,7 @@ class _IdeShellState extends ConsumerState<IdeShell> {
         ),
         Expanded(
           child: IndexedStack(
-            index: _showGit ? 1 : 0,
+            index: _sidebar,
             children: [
               _solutionTree(),
               if (session.workspaceRoot != null && session.workspaceHasGit)
@@ -533,7 +546,7 @@ class _IdeShellState extends ConsumerState<IdeShell> {
                   key: ValueKey('git-panel-${session.workspaceRoot}'),
                   session: session,
                   embedded: true,
-                  visible: _showGit,
+                  visible: _sidebar == 1,
                 )
               else
                 const Center(
@@ -544,6 +557,10 @@ class _IdeShellState extends ConsumerState<IdeShell> {
                     ),
                   ),
                 ),
+              RequestsPanel(
+                key: ValueKey('requests-panel-${session.workspaceRoot}'),
+                session: session,
+              ),
             ],
           ),
         ),

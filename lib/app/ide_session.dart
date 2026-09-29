@@ -89,9 +89,13 @@ class IdeSession {
       if (await git.isRepository(root)) {
         try {
           for (final entry in await git.statusEntries(root)) {
+            final sharedRequestFile =
+                entry.path == '.tamtoot/environment.json' ||
+                entry.path.startsWith('.tamtoot/requests/');
             if (entry.isChanged &&
-                entry.path != '.tamtoot' &&
-                !entry.path.startsWith('.tamtoot/')) {
+                (sharedRequestFile ||
+                    (entry.path != '.tamtoot' &&
+                        !entry.path.startsWith('.tamtoot/')))) {
               status[entry.path] = entry;
             }
           }
