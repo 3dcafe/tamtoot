@@ -53,8 +53,8 @@ class ProjectCompletionIndex {
   final _files = <String, ({String hash, List<CompletionSymbol> symbols})>{};
   DateTime _checkedAt = DateTime.fromMillisecondsSinceEpoch(0);
   Future<void>? _refreshing;
-  bool _loaded = false;
-  String _activeHash = '', _activeLanguage = '';
+  Future<void>? _loading;
+  String _activeSource = '', _activeLanguage = '';
   List<CompletionSymbol> _activeSymbols = const [];
 
   bool get refreshing => _refreshing != null;
@@ -75,36 +75,35 @@ class ProjectCompletionIndex {
     required String language,
     int limit = 12,
   }) {
-    unawaited(refreshIfStale().catchError((_) {}));
     final before = source.substring(0, offset.clamp(0, source.length));
     final access = RegExp(
       r'([A-Za-z_$][\w$]*)\.([A-Za-z_$][\w$]*)?$',
     ).firstMatch(before);
     if (access == null) return const [];
+    unawaited(refreshIfStale().catchError((_) {}));
     final receiver = access.group(1)!, prefix = access.group(2) ?? '';
     final owner = _receiverType(before, receiver, language);
-    final activeHash = sha1.convert(utf8.encode(source)).toString();
-    if (_activeHash != activeHash || _activeLanguage != language) {
-      _activeHash = activeHash;
+    if (_activeSource != source || _activeLanguage != language) {
+      _activeSource = source;
       _activeLanguage = language;
       _activeSymbols = _parse('<current>', source, language);
     }
+    final lowerPrefix = prefix.toLowerCase();
     final all =
         [..._files.values.expand((file) => file.symbols), ..._activeSymbols]
             .where((symbol) => symbol.language == language)
             .where(
               (symbol) =>
                   prefix.isEmpty ||
-                  symbol.name.toLowerCase().startsWith(prefix.toLowerCase()),
+                  symbol.name.toLowerCase().startsWith(lowerPrefix),
             )
             .toList();
     all.sort((a, b) {
       final aOwner = owner.isNotEmpty && a.owner == owner ? 0 : 1;
       final bOwner = owner.isNotEmpty && b.owner == owner ? 0 : 1;
       if (aOwner != bOwner) return aOwner.compareTo(bOwner);
-      final docs = b.documentation.isNotEmpty.toString().compareTo(
-        a.documentation.isNotEmpty.toString(),
-      );
+      final docs =
+          (a.documentation.isEmpty ? 1 : 0) - (b.documentation.isEmpty ? 1 : 0);
       return docs != 0 ? docs : a.name.compareTo(b.name);
     });
     final unique = <String>{};
@@ -131,11 +130,31 @@ class ProjectCompletionIndex {
     final paths = (await store.listFiles(''))
         .where((path) => _language(path) != null)
         .where((path) => !path.startsWith('.tamtoot/'))
+        .where(
+          (path) => !path
+              .split('/')
+              .any(
+                {
+                  'node_modules',
+                  'build',
+                  '.dart_tool',
+                  '.git',
+                  'obj',
+                }.contains,
+              ),
+        )
         .toSet();
     var changed = _files.keys.any((path) => !paths.contains(path));
     _files.removeWhere((path, _) => !paths.contains(path));
     for (final path in paths) {
-      final source = await store.readText(path);
+      String source;
+      try {
+        source = await store.readText(path);
+      } catch (_) {
+        // A removed or unreadable file must not prevent indexing its siblings.
+        changed = _files.remove(path) != null || changed;
+        continue;
+      }
       final hash = sha1.convert(utf8.encode(source)).toString();
       if (_files[path]?.hash == hash) continue;
       _files[path] = (
@@ -147,9 +166,9 @@ class ProjectCompletionIndex {
     if (changed) await _saveCache();
   }
 
-  Future<void> _loadCache() async {
-    if (_loaded) return;
-    _loaded = true;
+  Future<void> _loadCache() => _loading ??= _readCache();
+
+  Future<void> _readCache() async {
     if (!await store.exists(cachePath)) return;
     try {
       final json = jsonDecode(await store.readText(cachePath));
@@ -251,7 +270,10 @@ class ProjectCompletionIndex {
       }
       if (line.isNotEmpty) comments.clear();
       depth += '{'.allMatches(raw).length - '}'.allMatches(raw).length;
-      if (owner.isNotEmpty && depth <= ownerDepth) {
+      if (owner.isNotEmpty &&
+          depth <= ownerDepth &&
+          type == null &&
+          line == '}') {
         owner = '';
         ownerDepth = -1;
       }
@@ -264,7 +286,8 @@ class ProjectCompletionIndex {
     final typed = RegExp(
       r'([A-Za-z_$][\w$<>.?]*)\s+' + escaped + r'\b',
     ).allMatches(source).lastOrNull;
-    if (typed != null) {
+    if (typed != null &&
+        !{'var', 'final', 'const', 'let', 'return'}.contains(typed.group(1))) {
       return typed.group(1)!.replaceAll(RegExp(r'[<>?].*$'), '');
     }
     final created = RegExp(

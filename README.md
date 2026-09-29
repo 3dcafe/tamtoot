@@ -91,7 +91,7 @@ This is syntax coloring, not semantic analysis. Interpolated expressions inside 
 
 For Dart, C# and JavaScript files, typing `.` after a variable opens project-aware method suggestions. Each item shows its signature and the nearest preceding line or block comment, so API documentation remains visible while calling a method. Tamtoot prioritizes methods whose declaring type matches a local variable declaration or constructor expression. This lightweight index is lexical rather than a full compiler or LSP, so type inference is intentionally limited.
 
-The project index runs asynchronously and reparses only files whose SHA-1 content hash changed. Its share-independent cache is stored in `.tamtoot/cache/completions-v1.json` and ignored by Git. Tamtoot checks for changes at most once every ten seconds while completion is used, while the current unsaved document is indexed directly in memory.
+The project index runs asynchronously and reparses only files whose SHA-1 content hash changed. Its local cache is stored in `.tamtoot/cache/completions-v1.json` and ignored by Git. Tamtoot checks for changes at most once every ten seconds when a member completion is requested, while the current unsaved document is indexed directly in memory without content hashing. Dependency and generated directories (`node_modules`, `build`, `.dart_tool`, `.git`, `obj`) are excluded from indexing. File enumeration still traverses the project, and eligible source files are read during a refresh to compare hashes; this is not a filesystem watcher.
 
 ## Commit and push from the IDE
 

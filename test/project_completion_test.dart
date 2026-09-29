@@ -12,6 +12,49 @@ class _CompletionMemory extends RepositoryMemory {
 
 void main() {
   test(
+    'constructor inference prioritizes matching owner with Allman braces',
+    () async {
+      final store = _CompletionMemory();
+      await store.writeText('services.cs', '''
+class Other
+{
+  public void AFirst() {}
+}
+class PaymentService
+{
+  public void ZPayment() {}
+}
+''');
+      final index = ProjectCompletionIndex(store);
+      await index.initialize();
+      const source = 'var service = new PaymentService(); service.';
+      final items = index.suggest(
+        source: source,
+        offset: source.length,
+        language: 'csharp',
+      );
+      expect(items.first.name, 'ZPayment');
+      expect(items.first.owner, 'PaymentService');
+    },
+  );
+
+  test('does not suggest generated or dependency methods', () async {
+    final store = _CompletionMemory();
+    for (final folder in ['node_modules', 'build', '.dart_tool', 'obj']) {
+      await store.writeText('$folder/file.dart', 'void generatedMethod() {}');
+    }
+    await store.writeText('lib/file.dart', 'void userMethod() {}');
+    final index = ProjectCompletionIndex(store);
+    await index.initialize();
+    final items = index.suggest(
+      source: 'service.',
+      offset: 8,
+      language: 'dart',
+    );
+    expect(items.map((item) => item.name), ['userMethod']);
+  });
+
+  test(
     'indexes C# methods, receiver types and documentation comments',
     () async {
       final store = _CompletionMemory();
