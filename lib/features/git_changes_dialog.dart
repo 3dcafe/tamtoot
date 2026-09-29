@@ -198,14 +198,7 @@ class _GitChangesDialogState extends State<GitChangesDialog> {
     try {
       final result = await git.push(
         root,
-        credentials: token.text.isEmpty
-            ? null
-            : GitCredentials(
-                username: username.text.trim().isEmpty
-                    ? 'git'
-                    : username.text.trim(),
-                token: token.text,
-              ),
+        credentials: _credentials,
         setUpstream: true,
       );
       result.ensureOk();
@@ -220,7 +213,16 @@ class _GitChangesDialogState extends State<GitChangesDialog> {
     }
   }
 
-  Future<void> _pull() async {
+  GitCredentials? get _credentials => token.text.isEmpty
+      ? null
+      : GitCredentials(
+          username: username.text.trim().isEmpty
+              ? 'git'
+              : username.text.trim(),
+          token: token.text,
+        );
+
+  Future<void> _pull({bool pushAfter = false}) async {
     if (widget.session.gitBusy) return;
     if (widget.session.documents.documents.any(
       (document) =>
@@ -242,16 +244,10 @@ class _GitChangesDialogState extends State<GitChangesDialog> {
     try {
       final result = await git.pull(
         root,
-        credentials: token.text.isEmpty
-            ? null
-            : GitCredentials(
-                username: username.text.trim().isEmpty
-                    ? 'git'
-                    : username.text.trim(),
-                token: token.text,
-              ),
+        credentials: _credentials,
       );
       result.ensureOk();
+      var resultText = result.stdout.trim();
       for (final document in widget.session.documents.documents.toList()) {
         final uri = document.uri;
         if (uri == null || !uri.toString().startsWith(root.toString())) {
@@ -265,7 +261,16 @@ class _GitChangesDialogState extends State<GitChangesDialog> {
           await widget.session.documents.close(document);
         }
       }
-      feedback = result.stdout.trim();
+      if (pushAfter) {
+        final pushed = await git.push(
+          root,
+          credentials: _credentials,
+          setUpstream: true,
+        );
+        pushed.ensureOk();
+        resultText = '$resultText\n${pushed.stdout.trim()}'.trim();
+      }
+      feedback = resultText;
       await widget.session.refreshExplorer();
       await widget.session.persistNow();
       await _load();
@@ -410,14 +415,23 @@ class _GitChangesDialogState extends State<GitChangesDialog> {
               runSpacing: 8,
               children: [
                 FilledButton.tonalIcon(
-                  onPressed: busy || !ready || remote.isEmpty ? null : _pull,
-                  icon: const Icon(Icons.sync),
+                  onPressed: busy || !ready || remote.isEmpty
+                      ? null
+                      : () => _pull(),
+                  icon: const Icon(Icons.cloud_download_outlined),
                   label: const Text('Pull changes'),
                 ),
                 FilledButton.icon(
                   onPressed: busy || !ready || remote.isEmpty ? null : _push,
                   icon: const Icon(Icons.cloud_upload_outlined),
                   label: const Text('Push commits'),
+                ),
+                FilledButton.tonalIcon(
+                  onPressed: busy || !ready || remote.isEmpty
+                      ? null
+                      : () => _pull(pushAfter: true),
+                  icon: const Icon(Icons.sync_alt),
+                  label: const Text('Sync'),
                 ),
               ],
             ),

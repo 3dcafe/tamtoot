@@ -491,15 +491,10 @@ class _IdeShellState extends ConsumerState<IdeShell> {
                   scrollDirection: Axis.horizontal,
                   child: Row(
                     children: [
-                      TextButton.icon(
+                      TextButton(
                         key: const ValueKey('sidebar-solution'),
                         onPressed: () => setState(() => _sidebar = 0),
-                        icon: Icon(
-                          Icons.folder_open_outlined,
-                          size: 16,
-                          color: color(_sidebar == 0 ? 'accent' : 'muted'),
-                        ),
-                        label: Text(
+                        child: Text(
                           'Solution',
                           style: TextStyle(
                             color: color(_sidebar == 0 ? 'accent' : 'muted'),
@@ -507,15 +502,10 @@ class _IdeShellState extends ConsumerState<IdeShell> {
                           ),
                         ),
                       ),
-                      TextButton.icon(
+                      TextButton(
                         key: const ValueKey('sidebar-git'),
                         onPressed: () => setState(() => _sidebar = 1),
-                        icon: Icon(
-                          Icons.account_tree,
-                          size: 16,
-                          color: color(_sidebar == 1 ? 'accent' : 'muted'),
-                        ),
-                        label: Text(
+                        child: Text(
                           'Git',
                           style: TextStyle(
                             color: color(_sidebar == 1 ? 'accent' : 'muted'),
@@ -523,15 +513,10 @@ class _IdeShellState extends ConsumerState<IdeShell> {
                           ),
                         ),
                       ),
-                      TextButton.icon(
+                      TextButton(
                         key: const ValueKey('sidebar-requests'),
                         onPressed: () => setState(() => _sidebar = 2),
-                        icon: Icon(
-                          Icons.http_outlined,
-                          size: 17,
-                          color: color(_sidebar == 2 ? 'accent' : 'muted'),
-                        ),
-                        label: Text(
+                        child: Text(
                           'Requests',
                           style: TextStyle(
                             color: color(_sidebar == 2 ? 'accent' : 'muted'),
