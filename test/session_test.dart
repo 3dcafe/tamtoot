@@ -28,6 +28,7 @@ void main() {
       a.documents.active!.editor.replaceSelection('unsaved');
       a.settings.set('fontSize', 20.0);
       a.settings.set('theme', 'day');
+      a.settings.set('readOnly', true);
       a.layout = a.layout.resize('horizontal', .31).toggle('terminal');
       await a.persistNow();
       final b = await testSession(store: store);
@@ -36,6 +37,7 @@ void main() {
       expect(b.settings.fontSize, 20);
       expect(b.layout.encode(), a.layout.encode());
       expect(b.settings.theme, 'day');
+      expect(b.documents.active!.editor.readOnly, false);
       await a.dispose();
       await b.dispose();
     },

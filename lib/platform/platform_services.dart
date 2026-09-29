@@ -30,11 +30,13 @@ class PlatformFiles implements FileSystemProvider, FileDialogs {
   bool get supportsDirectories =>
       !kIsWeb && !_isAndroid && defaultTargetPlatform != TargetPlatform.iOS;
   @override
-  bool canWrite(Uri uri) =>
-      !kIsWeb &&
-      !_isAndroid &&
-      defaultTargetPlatform != TargetPlatform.iOS &&
-      uri.scheme == 'file';
+  bool canWrite(Uri uri) {
+    if (WorkspaceRoots.contains(uri)) return true;
+    if (kIsWeb || uri.scheme != 'file') return false;
+    final mobile = _isAndroid || defaultTargetPlatform == TargetPlatform.iOS;
+    return !mobile || !_opened.containsKey(uri);
+  }
+
   @override
   Future<FileEntry?> open() async {
     final file = await openFile();
@@ -55,7 +57,11 @@ class PlatformFiles implements FileSystemProvider, FileDialogs {
   }
 
   @override
-  Future<void> write(Uri uri, String text) => writeLocal(uri, text);
+  Future<void> write(Uri uri, String text) async {
+    if (await WorkspaceRoots.writeText(uri, text)) return;
+    await writeLocal(uri, text);
+  }
+
   @override
   Future<List<FileEntry>> list(Uri directory) async {
     if (WorkspaceRoots.contains(directory)) {

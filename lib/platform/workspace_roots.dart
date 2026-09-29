@@ -70,6 +70,18 @@ final class WorkspaceRoots {
     }
     return null;
   }
+
+  static Future<bool> writeText(Uri fileUri, String text) async {
+    for (final entry in _stores.entries) {
+      final root = Uri.parse(entry.key);
+      if (!_isUnder(root, fileUri)) continue;
+      final relative = _relative(root, fileUri);
+      if (relative == null || relative.isEmpty) continue;
+      await entry.value.writeText(Uri.decodeComponent(relative), text);
+      return true;
+    }
+    return false;
+  }
 }
 
 bool _isUnder(Uri root, Uri child) {

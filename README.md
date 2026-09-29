@@ -15,7 +15,7 @@ Tamtoot is a **free code and plain-text editor** and an extensible Flutter IDE f
 - Git clone/fetch/pull/push and local repository operations through the existing pure-Dart Smart HTTP client.
 - Versioned Dart, C#, HTML and JavaScript language packages and an interface for installing declarative language definitions.
 - Midnight Ink and Porcelain themes. The active theme is saved immediately as an **IDE-wide preference**, including when selected in **Tools → Settings**.
-- A command registry, editable keybindings, font settings, tab preferences, and read-only mode.
+- A command registry, editable keybindings, font settings, and tab preferences.
 
 Git indicators refresh on project open, after saving, when the app resumes, every 30 seconds while a project is open, and through the Explorer refresh button. They never fetch or push automatically. The upstream information reflects the last clone/fetch/push: if there is no upstream or the current Git provider cannot read its history, Explorer shows a status note instead of guessing.
 
@@ -59,7 +59,7 @@ The existing Windows workflows remain available separately.
 - **File**: new/open/save/save as/save all, open project, clone repository.
 - **Edit**: undo/redo, clipboard, find and replace.
 - **View**: show/hide panels, switch theme, reset layout, command palette.
-- **Tools → Settings**: theme, font, size, tabs, read-only mode, and keybindings.
+- **Tools → Settings**: theme, font, size, tabs, and keybindings.
 - **Tools → Install language package**: install versioned `language.json`, `syntax.json`, and optional `snippets.json` without rebuilding the IDE. The bundled languages and their extensions are documented below instead of being enumerated in the application UI.
 
 Drag panel dividers to resize. Click folders to expand or collapse them, and files to open them. Tap in the editor to position the cursor; long-press and drag to select text. Ordinary touch dragging scrolls the document.

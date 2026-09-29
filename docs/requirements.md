@@ -44,7 +44,7 @@
 | Efficient edits / replaceable storage | O(n) edits, indexed reads; TextBuffer replaceable; 100k-line viewport test |
 | Multiple cursors architecture | Список selections и batch transactions; MVP UI один cursor |
 | Decorations/diagnostics/folding/brackets | Domain records, painter decoration support, revision-aware provider seam, bounded bracket hook |
-| Fonts/tab preferences/read-only | Настройки и persistence; bundled JetBrains Mono |
+| Fonts/tab preferences | Настройки и persistence; bundled JetBrains Mono. Глобальный UI read-only удалён, чтобы открытые файлы проекта всегда оставались редактируемыми |
 | Plugin-contributed panels | Публичный PanelRegistry/descriptor; executable-host ещё нет |
 | Terminal/LSP/SCM/debug/process boundaries | Публичные capability interfaces; отдельно реализованы внутренние Git и bounded agent process adapters |
 | Future desktop compilation | Scaffolds всех платформ, conditional IO; проверяемые сборки перечислены отдельно |

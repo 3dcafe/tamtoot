@@ -257,11 +257,6 @@ class _SettingsDialogState extends State<SettingsDialog> {
                 value: settings.get('insertSpaces') as bool,
                 onChanged: (v) => set('insertSpaces', v),
               ),
-              SwitchListTile(
-                title: const Text('Read-only editor'),
-                value: settings.get('readOnly') as bool,
-                onChanged: (v) => set('readOnly', v),
-              ),
               Row(
                 children: [
                   const Text('Tab size'),

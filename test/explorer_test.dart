@@ -130,6 +130,8 @@ void main() {
     final entries = await WorkspaceRoots.listEntries(root.resolve('lib/'));
     expect(entries.map((e) => e.name), ['nested', 'space name.dart']);
     expect(await WorkspaceRoots.readText(entries.last.uri), 'ok');
+    expect(await WorkspaceRoots.writeText(entries.last.uri, 'changed'), true);
+    expect(await store.readText('lib/space name.dart'), 'changed');
     expect(WorkspaceRoots.contains(root.resolve('lib/')), true);
     expect(
       WorkspaceRoots.contains(Uri.parse('fsa://test/project-other/')),

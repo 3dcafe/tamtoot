@@ -259,7 +259,7 @@ class IdeSession {
   void configure(OpenDocument doc) {
     doc.editor.tabSize = settings.get('tabSize') as int;
     doc.editor.insertSpaces = settings.get('insertSpaces') as bool;
-    doc.editor.readOnly = settings.get('readOnly') as bool;
+    doc.editor.readOnly = false;
   }
 
   Future<void> run(String id, [Object? argument]) async {
