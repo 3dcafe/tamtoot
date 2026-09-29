@@ -258,6 +258,10 @@ class _GitDiffDialogState extends State<GitDiffDialog> {
                                 style: const TextStyle(
                                   fontFamily: 'JetBrainsMono',
                                   fontSize: 12,
+                                  fontFeatures: [
+                                    FontFeature.disable('liga'),
+                                    FontFeature.disable('calt'),
+                                  ],
                                 ),
                               ),
                             ),

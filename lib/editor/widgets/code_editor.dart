@@ -46,6 +46,10 @@ class _CodeEditorState extends State<CodeEditor> implements TextInputClient {
     fontFamily: widget.session.settings.get('fontFamily') as String,
     fontSize: _fontSize,
     height: 1.6,
+    fontFeatures: const [
+      FontFeature.disable('liga'),
+      FontFeature.disable('calt'),
+    ],
     color: Color(widget.session.theme.color('foreground')),
   );
   @override
