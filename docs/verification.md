@@ -140,3 +140,9 @@ The expanded test suite passes **57 tests**, including folder collapse/reopen, s
 - Output now timestamps entries, supports whole-log selection and has a Clear action. HTTP results record duration and open in a full Body/Headers viewer with formatted JSON.
 - Request folders persist through commit-ready `.keep` files, and requests can be duplicated from their context menu.
 - Double-click word selection, class/method folding and Tab completion are covered alongside storage, timing and unchanged Git-refresh regression tests. `flutter analyze`: no issues. Full suite: **141 tests passed**. No dependencies were added.
+
+## RuStore delivery workflow — 2026-09-30
+
+- Added a manual GitHub workflow that validates the source, builds a versioned signed AAB, retains it as an artifact, authorizes through the official RuStore JWE flow, creates a version draft and uploads the bundle.
+- Moderation submission is an explicit workflow input. Manual and automatic-after-approval publication modes are supported; secrets and temporary tokens are never committed.
+- YAML and every embedded Bash script were parsed locally. Application tests remain unchanged at **141 passing tests**.

@@ -144,6 +144,8 @@ Request documentation is ordinary Markdown beside its request. Use **New Documen
 
 The manual GitHub workflow [Build signed Android AAB](.github/workflows/build-android-aab.yml) creates a release App Bundle without committing signing credentials. Configure the four repository secrets described in [the Russian Android release guide](docs/ru/android-release.md), run the workflow from **Actions**, and download the `tamtoot-android-aab` artifact. A local key created for publishing must be backed up securely; losing it can prevent future updates of the installed application.
 
+The separate [Build and upload AAB to RuStore](.github/workflows/upload-rustore.yml) workflow builds the same signed bundle, creates a RuStore draft through the official API, uploads the AAB, and can optionally submit it for moderation. Its RuStore key ID, private key and developer email are read only from GitHub Secrets.
+
 ## Model profiles and prompts
 
 Open a project, then go to **Tools → Settings → Model profiles and prompts**.

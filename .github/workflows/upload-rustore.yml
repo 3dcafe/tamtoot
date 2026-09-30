@@ -1,0 +1,250 @@
+name: Build and upload AAB to RuStore
+
+on:
+  workflow_dispatch:
+    inputs:
+      version_name:
+        description: Version name shown to users
+        required: true
+        default: 0.1.0
+        type: string
+      version_code:
+        description: Android version code; leave empty to use the GitHub run number
+        required: false
+        type: string
+      whats_new:
+        description: Release notes shown in RuStore
+        required: true
+        type: string
+      publish_type:
+        description: Publish automatically after approval or wait for a manual release
+        required: true
+        default: MANUAL
+        type: choice
+        options:
+          - MANUAL
+          - INSTANTLY
+      submit_for_review:
+        description: Submit the uploaded draft for moderation
+        required: true
+        default: false
+        type: boolean
+      priority_update:
+        description: Update priority from 0 (normal) to 5 (highest)
+        required: true
+        default: "0"
+        type: choice
+        options:
+          - "0"
+          - "1"
+          - "2"
+          - "3"
+          - "4"
+          - "5"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rustore-release
+  cancel-in-progress: false
+
+jobs:
+  upload-rustore:
+    name: Build, sign and upload RuStore draft
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      PACKAGE_NAME: dev.tamtoot.tamtoot
+      RUSTORE_API: https://public-api.rustore.ru/public
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Restore release signing key
+        shell: bash
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          for value in "$KEYSTORE_BASE64" "$STORE_PASSWORD" "$KEY_ALIAS" "$KEY_PASSWORD"; do
+            test -n "$value"
+          done
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > android/app/upload-keystore.jks
+          {
+            echo "storeFile=app/upload-keystore.jks"
+            echo "storePassword=$STORE_PASSWORD"
+            echo "keyAlias=$KEY_ALIAS"
+            echo "keyPassword=$KEY_PASSWORD"
+          } > android/key.properties
+
+      - name: Install dependencies and verify source
+        run: |
+          flutter pub get
+          flutter analyze
+          flutter test --timeout 30s
+
+      - name: Build signed AAB
+        shell: bash
+        env:
+          INPUT_VERSION_CODE: ${{ inputs.version_code }}
+          INPUT_VERSION_NAME: ${{ inputs.version_name }}
+        run: |
+          set -euo pipefail
+          build_number="${INPUT_VERSION_CODE:-$GITHUB_RUN_NUMBER}"
+          if ! [[ "$build_number" =~ ^[1-9][0-9]*$ ]]; then
+            echo "version_code must be a positive integer" >&2
+            exit 1
+          fi
+          flutter build appbundle --release \
+            --build-name "$INPUT_VERSION_NAME" \
+            --build-number "$build_number"
+          test -f build/app/outputs/bundle/release/app-release.aab
+          echo "BUILD_NUMBER=$build_number" >> "$GITHUB_ENV"
+
+      - name: Keep AAB as a GitHub artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: tamtoot-rustore-${{ inputs.version_name }}-${{ github.run_number }}
+          path: build/app/outputs/bundle/release/app-release.aab
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Authorize in RuStore
+        shell: bash
+        env:
+          RUSTORE_KEY_ID: ${{ secrets.RUSTORE_KEY_ID }}
+          RUSTORE_PRIVATE_KEY: ${{ secrets.RUSTORE_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "$RUSTORE_KEY_ID"
+          test -n "$RUSTORE_PRIVATE_KEY"
+          private_der="$RUNNER_TEMP/rustore-private.der"
+          private_pem="$RUNNER_TEMP/rustore-private.pem"
+          printf '%s' "$RUSTORE_PRIVATE_KEY" | tr -d '[:space:]' | base64 --decode > "$private_der"
+          openssl pkey -inform DER -in "$private_der" -out "$private_pem"
+          timestamp="$(python3 -c 'import datetime; print(datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="milliseconds"))')"
+          signature="$(printf '%s' "$RUSTORE_KEY_ID$timestamp" | openssl dgst -sha512 -sign "$private_pem" | base64 -w 0)"
+          jq -n \
+            --arg keyId "$RUSTORE_KEY_ID" \
+            --arg timestamp "$timestamp" \
+            --arg signature "$signature" \
+            '{keyId: $keyId, timestamp: $timestamp, signature: $signature}' \
+            > "$RUNNER_TEMP/rustore-auth.json"
+          curl --fail-with-body --silent --show-error \
+            --request POST "$RUSTORE_API/auth" \
+            --header 'Content-Type: application/json' \
+            --data-binary "@$RUNNER_TEMP/rustore-auth.json" \
+            --output "$RUNNER_TEMP/rustore-auth-response.json"
+          if ! token="$(jq -er 'select(.code == "OK") | .body.jwe' "$RUNNER_TEMP/rustore-auth-response.json")"; then
+            jq -r '.message // "RuStore authorization failed"' "$RUNNER_TEMP/rustore-auth-response.json" >&2
+            exit 1
+          fi
+          echo "::add-mask::$token"
+          echo "PUBLIC_TOKEN=$token" >> "$GITHUB_ENV"
+          rm -f "$private_der" "$private_pem" "$RUNNER_TEMP/rustore-auth.json"
+
+      - name: Create RuStore version draft
+        id: rustore-draft
+        shell: bash
+        env:
+          DEVELOPER_EMAIL: ${{ secrets.RUSTORE_DEVELOPER_EMAIL }}
+          WHATS_NEW: ${{ inputs.whats_new }}
+          PUBLISH_TYPE: ${{ inputs.publish_type }}
+        run: |
+          set -euo pipefail
+          test -n "$DEVELOPER_EMAIL"
+          jq -n \
+            --arg whatsNew "$WHATS_NEW" \
+            --arg publishType "$PUBLISH_TYPE" \
+            --arg email "$DEVELOPER_EMAIL" \
+            '{
+              appType: "MAIN",
+              ageLegal: "3+",
+              whatsNew: $whatsNew,
+              publishType: $publishType,
+              minAndroidVersion: 7,
+              developerContacts: [{email: $email}]
+            }' > "$RUNNER_TEMP/rustore-draft.json"
+          curl --fail-with-body --silent --show-error \
+            --request POST "$RUSTORE_API/v1/application/$PACKAGE_NAME/version" \
+            --header "Public-Token: $PUBLIC_TOKEN" \
+            --header 'Content-Type: application/json' \
+            --data-binary "@$RUNNER_TEMP/rustore-draft.json" \
+            --output "$RUNNER_TEMP/rustore-draft-response.json"
+          if ! version_id="$(jq -er 'select(.code == "OK") | (.body // .content.versionId)' "$RUNNER_TEMP/rustore-draft-response.json")"; then
+            jq -r '.message // "RuStore draft creation failed"' "$RUNNER_TEMP/rustore-draft-response.json" >&2
+            exit 1
+          fi
+          echo "version_id=$version_id" >> "$GITHUB_OUTPUT"
+          echo "Created RuStore draft $version_id for Android build $BUILD_NUMBER"
+
+      - name: Upload AAB to RuStore draft
+        shell: bash
+        env:
+          VERSION_ID: ${{ steps.rustore-draft.outputs.version_id }}
+        run: |
+          set -euo pipefail
+          response="$RUNNER_TEMP/rustore-aab-response.json"
+          curl --fail-with-body --silent --show-error \
+            --request POST "$RUSTORE_API/v1/application/$PACKAGE_NAME/version/$VERSION_ID/aab" \
+            --header "Public-Token: $PUBLIC_TOKEN" \
+            --form 'file=@build/app/outputs/bundle/release/app-release.aab;type=application/octet-stream' \
+            --output "$response"
+          if ! jq -e 'select(.code == "OK")' "$response" >/dev/null; then
+            jq -r '.message // "RuStore AAB upload failed"' "$response" >&2
+            exit 1
+          fi
+          echo "Uploaded AAB to RuStore draft $VERSION_ID"
+
+      - name: Submit draft for moderation
+        if: ${{ inputs.submit_for_review }}
+        shell: bash
+        env:
+          VERSION_ID: ${{ steps.rustore-draft.outputs.version_id }}
+          PRIORITY_UPDATE: ${{ inputs.priority_update }}
+        run: |
+          set -euo pipefail
+          response="$RUNNER_TEMP/rustore-commit-response.json"
+          curl --fail-with-body --silent --show-error \
+            --request POST "$RUSTORE_API/v1/application/$PACKAGE_NAME/version/$VERSION_ID/commit?priorityUpdate=$PRIORITY_UPDATE" \
+            --header "Public-Token: $PUBLIC_TOKEN" \
+            --output "$response"
+          if ! jq -e 'select(.code == "OK")' "$response" >/dev/null; then
+            jq -r '.message // "RuStore moderation submission failed"' "$response" >&2
+            exit 1
+          fi
+          echo "Submitted RuStore draft $VERSION_ID for moderation"
+
+      - name: Write job summary
+        if: ${{ success() }}
+        shell: bash
+        env:
+          VERSION_ID: ${{ steps.rustore-draft.outputs.version_id }}
+          SUBMIT_FOR_REVIEW: ${{ inputs.submit_for_review }}
+        run: |
+          {
+            echo "## RuStore upload complete"
+            echo
+            echo "- Package: \`$PACKAGE_NAME\`"
+            echo "- Draft version ID: \`$VERSION_ID\`"
+            echo "- Android version: \`${{ inputs.version_name }} ($BUILD_NUMBER)\`"
+            echo "- Submitted for moderation: \`$SUBMIT_FOR_REVIEW\`"
+          } >> "$GITHUB_STEP_SUMMARY"
