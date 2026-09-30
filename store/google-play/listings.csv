@@ -1,0 +1,225 @@
+"locale","language","title","short_description","full_description"
+"en-US","English (United States)","Tamtoot: Code & Markdown IDE","Edit code, Markdown and API requests with Git and optional AI tools.","Tamtoot is a lightweight IDE and code editor for tablets and Android devices.
+
+Edit Dart, C#, JavaScript, HTML, Markdown and plain text. Open files, browse projects, search the entire workspace, fold code and use contextual completion.
+
+Work with Git: compare changes, commit, pull, push and sync. Keep shared HTTP request collections in the project, test APIs and inspect JSON, HTML, headers and timing. Connect optional local or cloud AI models and edit their prompts.
+
+Tamtoot has no ads, analytics or developer-operated data collection. Files stay on your device unless you explicitly send data to a Git host, API or model provider."
+"es-419","Spanish (Latin America)","Tamtoot: IDE y editor código","Edita código, Markdown y solicitudes API con Git y herramientas de IA.","Tamtoot es un IDE ligero y editor de código para tablets y dispositivos Android.
+
+Edita Dart, C#, JavaScript, HTML, Markdown y texto sin formato. Abre archivos, explora proyectos, busca en todo el espacio de trabajo, pliega código y usa sugerencias contextuales.
+
+Trabaja con Git: compara cambios, crea commits, descarga, envía y sincroniza. Guarda colecciones de solicitudes HTTP compartidas en el proyecto, prueba APIs y revisa JSON, HTML, encabezados y tiempos. Conecta modelos de IA locales o en la nube de forma opcional y edita sus prompts.
+
+Tamtoot no incluye anuncios ni analíticas y no recopila datos para el desarrollador. Los archivos permanecen en tu dispositivo, salvo que decidas enviar datos a un servidor Git, una API o un proveedor de modelos."
+"es-ES","Spanish (Spain)","Tamtoot: IDE y editor código","Edita código, Markdown y peticiones API con Git y herramientas de IA.","Tamtoot es un IDE ligero y editor de código para tablets y dispositivos Android.
+
+Edita Dart, C#, JavaScript, HTML, Markdown y texto sin formato. Abre archivos, explora proyectos, busca en todo el espacio de trabajo, pliega código y utiliza sugerencias contextuales.
+
+Trabaja con Git: compara cambios, crea commits, descarga, envía y sincroniza. Guarda colecciones compartidas de peticiones HTTP en el proyecto, prueba APIs y revisa JSON, HTML, cabeceras y tiempos. Conecta opcionalmente modelos de IA locales o en la nube y edita sus prompts.
+
+Tamtoot no contiene anuncios ni analíticas y no recopila datos para el desarrollador. Los archivos permanecen en tu dispositivo salvo que decidas enviar datos a un servidor Git, una API o un proveedor de modelos."
+"pt-BR","Portuguese (Brazil)","Tamtoot: IDE e editor código","Edite código, Markdown e APIs com Git e ferramentas opcionais de IA.","Tamtoot é uma IDE leve e um editor de código para tablets e dispositivos Android.
+
+Edite Dart, C#, JavaScript, HTML, Markdown e texto simples. Abra arquivos, navegue por projetos, pesquise em todo o workspace, recolha código e use sugestões contextuais.
+
+Trabalhe com Git: compare alterações, faça commits, pull, push e sincronização. Mantenha coleções compartilhadas de requisições HTTP no projeto, teste APIs e visualize JSON, HTML, cabeçalhos e tempos. Conecte opcionalmente modelos de IA locais ou na nuvem e edite seus prompts.
+
+Tamtoot não tem anúncios, análises nem coleta de dados pelo desenvolvedor. Os arquivos ficam no seu dispositivo, a menos que você envie dados explicitamente para um host Git, uma API ou um provedor de modelos."
+"fr-FR","French (France)","Tamtoot : IDE et éditeur code","Modifiez code, Markdown et requêtes API avec Git et des outils IA.","Tamtoot est un IDE léger et un éditeur de code pour tablettes et appareils Android.
+
+Modifiez du Dart, C#, JavaScript, HTML, Markdown et du texte brut. Ouvrez des fichiers, parcourez vos projets, recherchez dans tout l’espace de travail, repliez le code et utilisez les suggestions contextuelles.
+
+Travaillez avec Git : comparez les changements, créez des commits, faites pull, push et synchronisez. Conservez des collections de requêtes HTTP partagées dans le projet, testez des API et consultez JSON, HTML, les en-têtes et les durées. Connectez facultativement des modèles IA locaux ou cloud et modifiez leurs prompts.
+
+Tamtoot ne contient ni publicité, ni analyse d’usage, ni collecte de données par le développeur. Les fichiers restent sur votre appareil sauf si vous envoyez explicitement des données vers un hôte Git, une API ou un fournisseur de modèles."
+"de-DE","German (Germany)","Tamtoot: IDE und Code-Editor","Code, Markdown und API-Anfragen mit Git und optionaler KI bearbeiten.","Tamtoot ist eine schlanke IDE und ein Code-Editor für Tablets und Android-Geräte.
+
+Bearbeite Dart, C#, JavaScript, HTML, Markdown und Klartext. Öffne Dateien, durchsuche Projekte und den gesamten Workspace, klappe Code ein und nutze kontextbezogene Vorschläge.
+
+Arbeite mit Git: Änderungen vergleichen, committen, pullen, pushen und synchronisieren. Speichere gemeinsame HTTP-Anfragesammlungen im Projekt, teste APIs und prüfe JSON, HTML, Header und Laufzeiten. Verbinde optional lokale oder cloudbasierte KI-Modelle und bearbeite ihre Prompts.
+
+Tamtoot enthält keine Werbung oder Analysen und erhebt keine Daten für den Entwickler. Dateien bleiben auf deinem Gerät, sofern du sie nicht ausdrücklich an einen Git-Host, eine API oder einen Modellanbieter sendest."
+"it-IT","Italian (Italy)","Tamtoot: IDE ed editor codice","Modifica codice, Markdown e richieste API con Git e strumenti IA.","Tamtoot è un IDE leggero e un editor di codice per tablet e dispositivi Android.
+
+Modifica Dart, C#, JavaScript, HTML, Markdown e testo semplice. Apri file, esplora progetti, cerca nell’intero workspace, comprimi il codice e usa suggerimenti contestuali.
+
+Lavora con Git: confronta modifiche, crea commit, esegui pull, push e sincronizzazione. Conserva nel progetto raccolte condivise di richieste HTTP, prova API e visualizza JSON, HTML, intestazioni e tempi. Collega facoltativamente modelli IA locali o cloud e modifica i relativi prompt.
+
+Tamtoot non contiene pubblicità o strumenti di analisi e non raccoglie dati per lo sviluppatore. I file restano sul dispositivo a meno che tu non invii esplicitamente dati a un host Git, un’API o un fornitore di modelli."
+"ru-RU","Russian","Tamtoot: IDE и редактор кода","Редактор кода, Markdown и API-запросов с Git и опциональным ИИ.","Tamtoot — лёгкая IDE и редактор кода для планшетов и Android-устройств.
+
+Редактируйте Dart, C#, JavaScript, HTML, Markdown и обычный текст. Открывайте файлы, просматривайте проекты, ищите по всему рабочему пространству, сворачивайте код и используйте контекстные подсказки.
+
+Работайте с Git: сравнивайте изменения, создавайте коммиты, выполняйте pull, push и синхронизацию. Храните общие коллекции HTTP-запросов в проекте, тестируйте API и просматривайте JSON, HTML, заголовки и время выполнения. Подключайте при необходимости локальные или облачные модели ИИ и редактируйте их промты.
+
+В Tamtoot нет рекламы, аналитики и сбора данных разработчиком. Файлы остаются на устройстве, пока вы сами не отправите данные на Git-сервер, API или поставщику модели."
+"uk-UA","Ukrainian","Tamtoot: IDE та редактор коду","Редагуйте код, Markdown і API-запити з Git та додатковими ШІ-функціями.","Tamtoot — легка IDE та редактор коду для планшетів і пристроїв Android.
+
+Редагуйте Dart, C#, JavaScript, HTML, Markdown і звичайний текст. Відкривайте файли, переглядайте проєкти, шукайте в усьому робочому просторі, згортайте код і використовуйте контекстні підказки.
+
+Працюйте з Git: порівнюйте зміни, створюйте коміти, виконуйте pull, push і синхронізацію. Зберігайте спільні колекції HTTP-запитів у проєкті, тестуйте API та переглядайте JSON, HTML, заголовки й час виконання. За потреби підключайте локальні або хмарні моделі ШІ та редагуйте їхні промпти.
+
+У Tamtoot немає реклами, аналітики та збору даних розробником. Файли залишаються на пристрої, доки ви самі не надішлете дані на Git-сервер, API або постачальнику моделі."
+"pl-PL","Polish","Tamtoot: IDE i edytor kodu","Edytuj kod, Markdown i żądania API z Git oraz opcjonalnymi narzędziami AI.","Tamtoot to lekki IDE i edytor kodu na tablety oraz urządzenia z Androidem.
+
+Edytuj Dart, C#, JavaScript, HTML, Markdown i zwykły tekst. Otwieraj pliki, przeglądaj projekty, przeszukuj cały obszar roboczy, zwijaj kod i korzystaj z podpowiedzi kontekstowych.
+
+Pracuj z Git: porównuj zmiany, twórz commity, wykonuj pull, push i synchronizację. Przechowuj w projekcie wspólne kolekcje żądań HTTP, testuj API i przeglądaj JSON, HTML, nagłówki oraz czasy. Opcjonalnie podłącz lokalne lub chmurowe modele AI i edytuj ich prompty.
+
+Tamtoot nie zawiera reklam ani analityki i nie zbiera danych dla dewelopera. Pliki pozostają na urządzeniu, chyba że wyraźnie wyślesz dane do hosta Git, API lub dostawcy modelu."
+"nl-NL","Dutch","Tamtoot: IDE en code-editor","Bewerk code, Markdown en API-verzoeken met Git en optionele AI-tools.","Tamtoot is een lichte IDE en code-editor voor tablets en Android-apparaten.
+
+Bewerk Dart, C#, JavaScript, HTML, Markdown en platte tekst. Open bestanden, bekijk projecten, doorzoek de hele werkruimte, vouw code in en gebruik contextuele suggesties.
+
+Werk met Git: vergelijk wijzigingen, commit, pull, push en synchroniseer. Bewaar gedeelde verzamelingen HTTP-verzoeken in het project, test API’s en bekijk JSON, HTML, headers en timing. Verbind optioneel lokale of cloud-AI-modellen en bewerk hun prompts.
+
+Tamtoot bevat geen advertenties of analyses en verzamelt geen gegevens voor de ontwikkelaar. Bestanden blijven op je apparaat, tenzij je ze zelf naar een Git-host, API of modelprovider stuurt."
+"tr-TR","Turkish","Tamtoot: IDE ve kod editörü","Kod, Markdown ve API isteklerini Git ve isteğe bağlı yapay zekâ ile düzenle.","Tamtoot, tabletler ve Android cihazlar için hafif bir IDE ve kod düzenleyicidir.
+
+Dart, C#, JavaScript, HTML, Markdown ve düz metin düzenleyin. Dosyaları açın, projelere göz atın, tüm çalışma alanında arama yapın, kodu daraltın ve bağlamsal önerileri kullanın.
+
+Git ile çalışın: değişiklikleri karşılaştırın, commit oluşturun, pull, push ve eşitleme yapın. Paylaşılan HTTP istek koleksiyonlarını projede saklayın, API’leri test edin; JSON, HTML, başlıklar ve süreleri inceleyin. İsteğe bağlı yerel veya bulut yapay zekâ modellerini bağlayın ve istemlerini düzenleyin.
+
+Tamtoot reklam veya analiz içermez ve geliştirici adına veri toplamaz. Siz açıkça bir Git sunucusuna, API’ye ya da model sağlayıcısına göndermedikçe dosyalar cihazınızda kalır."
+"ar","Arabic","Tamtoot: محرر أكواد وبيئة IDE","حرّر الأكواد وMarkdown وطلبات API مع Git وأدوات ذكاء اصطناعي اختيارية.","Tamtoot بيئة تطوير خفيفة ومحرر أكواد للأجهزة اللوحية وأجهزة Android.
+
+حرّر Dart وC# وJavaScript وHTML وMarkdown والنص العادي. افتح الملفات وتصفح المشاريع وابحث في مساحة العمل كاملة واطوِ الأكواد واستخدم الاقتراحات السياقية.
+
+اعمل مع Git: قارن التغييرات وأنشئ الالتزامات ونفّذ pull وpush والمزامنة. احفظ مجموعات طلبات HTTP المشتركة داخل المشروع واختبر واجهات API واعرض JSON وHTML والرؤوس والوقت. يمكنك ربط نماذج ذكاء اصطناعي محلية أو سحابية وتعديل مطالباتها.
+
+لا يحتوي Tamtoot على إعلانات أو تحليلات ولا يجمع المطور البيانات. تبقى الملفات على جهازك ما لم ترسل البيانات صراحةً إلى مضيف Git أو واجهة API أو مزود نموذج."
+"he-IL","Hebrew","Tamtoot: סביבת IDE ועורך קוד","עריכת קוד, Markdown ובקשות API עם Git וכלי AI אופציונליים.","Tamtoot היא סביבת פיתוח קלה ועורך קוד לטאבלטים ולמכשירי Android.
+
+ערכו Dart, C#, JavaScript, HTML, Markdown וטקסט פשוט. פתחו קבצים, עיינו בפרויקטים, חפשו בכל סביבת העבודה, קפלו קוד והשתמשו בהצעות לפי הקשר.
+
+עבדו עם Git: השוו שינויים, צרו commits, בצעו pull, push וסנכרון. שמרו אוספים משותפים של בקשות HTTP בפרויקט, בדקו ממשקי API והציגו JSON, HTML, כותרות וזמני ביצוע. ניתן לחבר מודלי AI מקומיים או בענן ולערוך את ההנחיות שלהם.
+
+Tamtoot אינה כוללת פרסומות או ניתוח שימוש, והמפתח אינו אוסף נתונים. הקבצים נשארים במכשיר אלא אם בחרתם לשלוח נתונים לשרת Git, ל-API או לספק מודל."
+"fa","Persian","Tamtoot: IDE و ویرایشگر کد","ویرایش کد، Markdown و درخواست‌های API با Git و ابزارهای اختیاری هوش مصنوعی.","Tamtoot یک محیط توسعه سبک و ویرایشگر کد برای تبلت‌ها و دستگاه‌های Android است.
+
+Dart، C#، JavaScript، HTML، Markdown و متن ساده را ویرایش کنید. فایل‌ها را باز کنید، پروژه‌ها را مرور کنید، در کل فضای کاری جستجو کنید، کد را جمع کنید و از پیشنهادهای متنی استفاده کنید.
+
+با Git کار کنید: تغییرات را مقایسه کنید، commit بسازید و pull، push و همگام‌سازی انجام دهید. مجموعه‌های مشترک درخواست HTTP را در پروژه نگه دارید، APIها را آزمایش کنید و JSON، HTML، سرآیندها و زمان اجرا را ببینید. در صورت نیاز مدل‌های هوش مصنوعی محلی یا ابری را متصل و promptهای آن‌ها را ویرایش کنید.
+
+Tamtoot تبلیغات یا تحلیل‌گر ندارد و توسعه‌دهنده داده‌ای جمع‌آوری نمی‌کند. فایل‌ها روی دستگاه می‌مانند مگر اینکه خودتان داده‌ای را به میزبان Git، API یا ارائه‌دهنده مدل ارسال کنید."
+"hi-IN","Hindi","Tamtoot: IDE और कोड एडिटर","Git और वैकल्पिक AI टूल के साथ कोड, Markdown और API अनुरोध संपादित करें।","Tamtoot टैबलेट और Android डिवाइस के लिए हल्का IDE और कोड एडिटर है।
+
+Dart, C#, JavaScript, HTML, Markdown और सादा टेक्स्ट संपादित करें। फ़ाइलें खोलें, प्रोजेक्ट देखें, पूरे वर्कस्पेस में खोजें, कोड फोल्ड करें और संदर्भ के अनुसार सुझाव पाएँ।
+
+Git के साथ काम करें: बदलावों की तुलना करें, commit बनाएँ, pull, push और sync करें। साझा HTTP अनुरोध संग्रह प्रोजेक्ट में रखें, API जाँचें और JSON, HTML, हेडर व समय देखें। वैकल्पिक स्थानीय या क्लाउड AI मॉडल जोड़ें और उनके prompt संपादित करें।
+
+Tamtoot में विज्ञापन या analytics नहीं हैं और डेवलपर डेटा एकत्र नहीं करता। फ़ाइलें आपके डिवाइस पर रहती हैं, जब तक आप स्वयं उन्हें Git होस्ट, API या मॉडल प्रदाता को न भेजें।"
+"bn-BD","Bengali","Tamtoot: IDE ও কোড এডিটর","Git ও ঐচ্ছিক AI টুল দিয়ে কোড, Markdown এবং API অনুরোধ সম্পাদনা করুন।","Tamtoot ট্যাবলেট ও Android ডিভাইসের জন্য একটি হালকা IDE এবং কোড এডিটর।
+
+Dart, C#, JavaScript, HTML, Markdown ও সাধারণ টেক্সট সম্পাদনা করুন। ফাইল খুলুন, প্রজেক্ট দেখুন, পুরো workspace-এ খুঁজুন, কোড fold করুন এবং প্রসঙ্গভিত্তিক পরামর্শ ব্যবহার করুন।
+
+Git দিয়ে কাজ করুন: পরিবর্তন তুলনা করুন, commit তৈরি করুন, pull, push ও sync করুন। শেয়ার করা HTTP request collection প্রজেক্টে রাখুন, API পরীক্ষা করুন এবং JSON, HTML, header ও সময় দেখুন। চাইলে স্থানীয় বা cloud AI model যুক্ত করে তাদের prompt সম্পাদনা করুন।
+
+Tamtoot-এ বিজ্ঞাপন বা analytics নেই এবং ডেভেলপার কোনো তথ্য সংগ্রহ করেন না। আপনি নিজে Git host, API বা model provider-এ না পাঠালে ফাইল আপনার ডিভাইসেই থাকে।"
+"id-ID","Indonesian","Tamtoot: IDE dan editor kode","Edit kode, Markdown, dan permintaan API dengan Git serta alat AI opsional.","Tamtoot adalah IDE ringan dan editor kode untuk tablet serta perangkat Android.
+
+Edit Dart, C#, JavaScript, HTML, Markdown, dan teks biasa. Buka file, jelajahi proyek, cari di seluruh ruang kerja, lipat kode, dan gunakan saran kontekstual.
+
+Gunakan Git untuk membandingkan perubahan, membuat commit, pull, push, dan sinkronisasi. Simpan koleksi permintaan HTTP bersama di dalam proyek, uji API, serta lihat JSON, HTML, header, dan waktu. Hubungkan model AI lokal atau cloud secara opsional dan edit prompt-nya.
+
+Tamtoot tidak memiliki iklan atau analitik dan pengembang tidak mengumpulkan data. File tetap berada di perangkat kecuali Anda secara langsung mengirim data ke host Git, API, atau penyedia model."
+"ms-MY","Malay","Tamtoot: IDE dan editor kod","Edit kod, Markdown dan permintaan API dengan Git serta alat AI pilihan.","Tamtoot ialah IDE ringan dan editor kod untuk tablet serta peranti Android.
+
+Edit Dart, C#, JavaScript, HTML, Markdown dan teks biasa. Buka fail, semak imbas projek, cari di seluruh ruang kerja, lipat kod dan gunakan cadangan kontekstual.
+
+Gunakan Git untuk membandingkan perubahan, membuat commit, pull, push dan menyegerak. Simpan koleksi permintaan HTTP yang dikongsi dalam projek, uji API serta lihat JSON, HTML, pengepala dan masa. Sambungkan model AI tempatan atau awan secara pilihan dan edit promptnya.
+
+Tamtoot tidak mempunyai iklan atau analitik dan pembangun tidak mengumpul data. Fail kekal pada peranti melainkan anda sendiri menghantar data kepada hos Git, API atau penyedia model."
+"vi-VN","Vietnamese","Tamtoot: IDE và trình sửa mã","Sửa mã, Markdown và yêu cầu API với Git cùng công cụ AI tùy chọn.","Tamtoot là IDE nhẹ và trình chỉnh sửa mã cho máy tính bảng cùng thiết bị Android.
+
+Chỉnh sửa Dart, C#, JavaScript, HTML, Markdown và văn bản thuần. Mở tệp, duyệt dự án, tìm kiếm toàn bộ không gian làm việc, thu gọn mã và dùng gợi ý theo ngữ cảnh.
+
+Làm việc với Git: so sánh thay đổi, tạo commit, pull, push và đồng bộ. Lưu bộ sưu tập yêu cầu HTTP dùng chung trong dự án, kiểm thử API và xem JSON, HTML, header cùng thời gian. Có thể kết nối mô hình AI cục bộ hoặc đám mây và sửa prompt.
+
+Tamtoot không có quảng cáo, phân tích và nhà phát triển không thu thập dữ liệu. Tệp ở lại trên thiết bị trừ khi bạn chủ động gửi dữ liệu đến máy chủ Git, API hoặc nhà cung cấp mô hình."
+"th-TH","Thai","Tamtoot: IDE และตัวแก้ไขโค้ด","แก้ไขโค้ด Markdown และคำขอ API ด้วย Git และเครื่องมือ AI ที่เลือกใช้ได้","Tamtoot คือ IDE ขนาดเบาและตัวแก้ไขโค้ดสำหรับแท็บเล็ตและอุปกรณ์ Android
+
+แก้ไข Dart, C#, JavaScript, HTML, Markdown และข้อความธรรมดา เปิดไฟล์ เรียกดูโปรเจกต์ ค้นหาทั้ง workspace พับโค้ด และใช้คำแนะนำตามบริบท
+
+ทำงานกับ Git: เปรียบเทียบการเปลี่ยนแปลง สร้าง commit ทำ pull, push และ sync เก็บชุดคำขอ HTTP ที่ใช้ร่วมกันไว้ในโปรเจกต์ ทดสอบ API และดู JSON, HTML, header และเวลา เชื่อมต่อโมเดล AI ในเครื่องหรือบนคลาวด์และแก้ไข prompt ได้ตามต้องการ
+
+Tamtoot ไม่มีโฆษณาหรือ analytics และนักพัฒนาไม่เก็บข้อมูล ไฟล์จะอยู่ในอุปกรณ์จนกว่าคุณจะเลือกส่งข้อมูลไปยังโฮสต์ Git, API หรือผู้ให้บริการโมเดล"
+"fil-PH","Filipino","Tamtoot: IDE at code editor","Mag-edit ng code, Markdown at API request gamit ang Git at opsyonal na AI.","Ang Tamtoot ay magaan na IDE at code editor para sa mga tablet at Android device.
+
+Mag-edit ng Dart, C#, JavaScript, HTML, Markdown at plain text. Magbukas ng file, mag-browse ng proyekto, maghanap sa buong workspace, mag-fold ng code at gumamit ng contextual na mungkahi.
+
+Gamitin ang Git para ihambing ang pagbabago, gumawa ng commit, mag-pull, mag-push at mag-sync. Itago sa proyekto ang pinagsasaluhang HTTP request collections, subukan ang mga API at tingnan ang JSON, HTML, header at oras. Maaari ring magkonekta ng lokal o cloud AI model at i-edit ang mga prompt nito.
+
+Walang ads o analytics ang Tamtoot at hindi nangongolekta ng data ang developer. Nananatili sa device ang mga file maliban kung tahasan mong ipadala ang data sa Git host, API o model provider."
+"ja-JP","Japanese","Tamtoot：IDE・コードエディタ","Gitと任意のAI機能でコード、Markdown、APIリクエストを編集できます。","Tamtootは、タブレットとAndroid端末向けの軽量IDE・コードエディタです。
+
+Dart、C#、JavaScript、HTML、Markdown、プレーンテキストを編集できます。ファイルを開き、プロジェクトを参照し、ワークスペース全体を検索し、コードを折りたたみ、文脈に応じた候補を利用できます。
+
+Gitで変更の比較、コミット、pull、push、同期ができます。共有するHTTPリクエスト集をプロジェクトに保存し、APIをテストしてJSON、HTML、ヘッダー、実行時間を確認できます。任意でローカルまたはクラウドのAIモデルを接続し、プロンプトを編集できます。
+
+Tamtootには広告やアクセス解析がなく、開発者によるデータ収集もありません。Gitホスト、API、モデル提供元へ明示的に送信しない限り、ファイルは端末内に保持されます。"
+"ko-KR","Korean","Tamtoot: IDE 및 코드 편집기","Git과 선택적 AI 도구로 코드, Markdown, API 요청을 편집하세요.","Tamtoot은 태블릿과 Android 기기를 위한 가벼운 IDE 및 코드 편집기입니다.
+
+Dart, C#, JavaScript, HTML, Markdown과 일반 텍스트를 편집하세요. 파일을 열고, 프로젝트를 탐색하고, 전체 작업 공간을 검색하고, 코드를 접고, 문맥에 맞는 제안을 사용할 수 있습니다.
+
+Git으로 변경 사항 비교, commit, pull, push 및 동기화를 수행하세요. 공유 HTTP 요청 모음을 프로젝트에 저장하고 API를 테스트하며 JSON, HTML, 헤더와 실행 시간을 확인할 수 있습니다. 선택적으로 로컬 또는 클라우드 AI 모델을 연결하고 프롬프트를 편집하세요.
+
+Tamtoot에는 광고와 분석 기능이 없으며 개발자가 데이터를 수집하지 않습니다. Git 호스트, API 또는 모델 제공업체로 직접 전송하지 않는 한 파일은 기기에 보관됩니다."
+"zh-CN","Chinese (Simplified)","Tamtoot：IDE 与代码编辑器","使用 Git 和可选 AI 工具编辑代码、Markdown 与 API 请求。","Tamtoot 是一款适用于平板电脑和 Android 设备的轻量 IDE 与代码编辑器。
+
+编辑 Dart、C#、JavaScript、HTML、Markdown 和纯文本。打开文件、浏览项目、搜索整个工作区、折叠代码，并使用上下文补全。
+
+使用 Git 比较更改、提交、拉取、推送和同步。将共享的 HTTP 请求集合保存在项目中，测试 API，并查看 JSON、HTML、标头和耗时。还可连接本地或云端 AI 模型并编辑提示词。
+
+Tamtoot 不含广告和分析功能，开发者不会收集数据。除非你明确将数据发送到 Git 主机、API 或模型提供商，否则文件始终保存在设备上。"
+"zh-TW","Chinese (Traditional)","Tamtoot：IDE 與程式碼編輯器","使用 Git 與選用 AI 工具編輯程式碼、Markdown 和 API 請求。","Tamtoot 是適用於平板電腦與 Android 裝置的輕量 IDE 和程式碼編輯器。
+
+編輯 Dart、C#、JavaScript、HTML、Markdown 和純文字。開啟檔案、瀏覽專案、搜尋整個工作區、摺疊程式碼，並使用情境建議。
+
+使用 Git 比較變更、提交、拉取、推送和同步。將共用的 HTTP 請求集合儲存在專案中，測試 API，並查看 JSON、HTML、標頭和執行時間。也可連接本機或雲端 AI 模型並編輯提示詞。
+
+Tamtoot 不含廣告和分析功能，開發者不會收集資料。除非你明確將資料傳送到 Git 主機、API 或模型供應商，否則檔案會保留在裝置上。"
+"cs-CZ","Czech","Tamtoot: IDE a editor kódu","Upravujte kód, Markdown a API požadavky s Git a volitelnými nástroji AI.","Tamtoot je odlehčené IDE a editor kódu pro tablety a zařízení Android.
+
+Upravujte Dart, C#, JavaScript, HTML, Markdown a prostý text. Otevírejte soubory, procházejte projekty, hledejte v celém pracovním prostoru, skládejte kód a používejte kontextové návrhy.
+
+Pracujte s Git: porovnávejte změny, vytvářejte commity, provádějte pull, push a synchronizaci. Ukládejte sdílené kolekce HTTP požadavků do projektu, testujte API a zobrazujte JSON, HTML, hlavičky i dobu běhu. Volitelně připojte místní nebo cloudové modely AI a upravujte jejich prompty.
+
+Tamtoot neobsahuje reklamy ani analytiku a vývojář neshromažďuje data. Soubory zůstávají v zařízení, dokud je výslovně neodešlete na Git host, API nebo poskytovateli modelu."
+"hu-HU","Hungarian","Tamtoot: IDE és kódszerkesztő","Kód, Markdown és API-kérések szerkesztése Gittel és opcionális MI-vel.","A Tamtoot egy könnyű IDE és kódszerkesztő táblagépekhez és Android-eszközökhöz.
+
+Szerkessz Dart, C#, JavaScript, HTML, Markdown és egyszerű szöveges fájlokat. Nyiss meg fájlokat, böngéssz projektekben, keress a teljes munkaterületen, hajtsd össze a kódot és használj környezetfüggő javaslatokat.
+
+Dolgozz Gittel: hasonlítsd össze a változásokat, készíts commitot, pullt, pusht és szinkronizálást. Tarts megosztott HTTP-kérésgyűjteményeket a projektben, tesztelj API-kat, és nézd meg a JSON-, HTML-, fejléc- és időadatokat. Opcionálisan helyi vagy felhős MI-modelleket is csatlakoztathatsz, és szerkesztheted a promptjaikat.
+
+A Tamtoot nem tartalmaz hirdetést vagy analitikát, és a fejlesztő nem gyűjt adatokat. A fájlok az eszközön maradnak, hacsak kifejezetten el nem küldöd őket egy Git-szolgáltatónak, API-nak vagy modellszolgáltatónak."
+"ro-RO","Romanian","Tamtoot: IDE și editor de cod","Editează cod, Markdown și cereri API cu Git și instrumente AI opționale.","Tamtoot este un IDE ușor și un editor de cod pentru tablete și dispozitive Android.
+
+Editează Dart, C#, JavaScript, HTML, Markdown și text simplu. Deschide fișiere, explorează proiecte, caută în întregul spațiu de lucru, pliază codul și folosește sugestii contextuale.
+
+Lucrează cu Git: compară modificări, creează commituri, execută pull, push și sincronizare. Păstrează în proiect colecții comune de cereri HTTP, testează API-uri și consultă JSON, HTML, antete și timpi. Conectează opțional modele AI locale sau cloud și editează prompturile lor.
+
+Tamtoot nu conține reclame sau instrumente de analiză, iar dezvoltatorul nu colectează date. Fișierele rămân pe dispozitiv dacă nu trimiți în mod explicit date către o gazdă Git, un API sau un furnizor de modele."
+"el-GR","Greek","Tamtoot: IDE και κώδικας","Επεξεργασία κώδικα, Markdown και API με Git και προαιρετικά εργαλεία AI.","Το Tamtoot είναι ένα ελαφρύ IDE και πρόγραμμα επεξεργασίας κώδικα για tablet και συσκευές Android.
+
+Επεξεργαστείτε Dart, C#, JavaScript, HTML, Markdown και απλό κείμενο. Ανοίξτε αρχεία, περιηγηθείτε σε έργα, αναζητήστε σε όλο τον χώρο εργασίας, αναδιπλώστε κώδικα και χρησιμοποιήστε προτάσεις βάσει περιεχομένου.
+
+Εργαστείτε με Git: συγκρίνετε αλλαγές, δημιουργήστε commits, κάντε pull, push και συγχρονισμό. Αποθηκεύστε κοινόχρηστες συλλογές αιτημάτων HTTP στο έργο, δοκιμάστε API και δείτε JSON, HTML, κεφαλίδες και χρόνους. Συνδέστε προαιρετικά τοπικά ή cloud μοντέλα AI και επεξεργαστείτε τα prompts τους.
+
+Το Tamtoot δεν έχει διαφημίσεις ή analytics και ο προγραμματιστής δεν συλλέγει δεδομένα. Τα αρχεία παραμένουν στη συσκευή, εκτός αν στείλετε ρητά δεδομένα σε υπηρεσία Git, API ή πάροχο μοντέλου."
+"sv-SE","Swedish","Tamtoot: IDE och kodredigerare","Redigera kod, Markdown och API-anrop med Git och valfria AI-verktyg.","Tamtoot är en lätt IDE och kodredigerare för surfplattor och Android-enheter.
+
+Redigera Dart, C#, JavaScript, HTML, Markdown och vanlig text. Öppna filer, bläddra i projekt, sök i hela arbetsytan, fäll ihop kod och använd sammanhangsbaserade förslag.
+
+Arbeta med Git: jämför ändringar, skapa commits, använd pull, push och synkronisering. Spara delade samlingar med HTTP-anrop i projektet, testa API:er och visa JSON, HTML, headers och tider. Anslut valfria lokala eller molnbaserade AI-modeller och redigera deras promptar.
+
+Tamtoot innehåller ingen reklam eller analys och utvecklaren samlar inte in data. Filerna stannar på enheten om du inte uttryckligen skickar data till en Git-värd, ett API eller en modellleverantör."
+"fi-FI","Finnish","Tamtoot: IDE ja koodieditori","Muokkaa koodia, Markdownia ja API-pyyntöjä Gitillä ja valinnaisella AI:lla.","Tamtoot on kevyt IDE ja koodieditori tableteille ja Android-laitteille.
+
+Muokkaa Dart-, C#-, JavaScript-, HTML- ja Markdown-koodia sekä tekstitiedostoja. Avaa tiedostoja, selaa projekteja, hae koko työtilasta, taita koodia ja käytä kontekstiehdotuksia.
+
+Käytä Gitiä: vertaa muutoksia, luo committeja, tee pull, push ja synkronointi. Säilytä jaetut HTTP-pyyntökokoelmat projektissa, testaa rajapintoja ja tarkastele JSONia, HTML:ää, otsakkeita ja aikoja. Yhdistä halutessasi paikallisia tai pilvipohjaisia AI-malleja ja muokkaa niiden kehotteita.
+
+Tamtootissa ei ole mainoksia tai analytiikkaa, eikä kehittäjä kerää tietoja. Tiedostot pysyvät laitteellasi, ellet itse lähetä tietoja Git-palveluun, APIin tai mallipalveluun."
