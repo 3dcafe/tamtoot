@@ -109,6 +109,16 @@ void main() {
     );
     await tester.pump();
     expect(session.layout.encode(), isNot(oldLayout));
+    await tester.tap(find.text('Help'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Privacy Policy'));
+    await tester.pumpAndSettle();
+    expect(
+      find.textContaining('https://3dcafe.github.io/tamtoot/privacy/'),
+      findsOneWidget,
+    );
+    await tester.tap(find.text('Close'));
+    await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox());
     await tester.pumpAndSettle();

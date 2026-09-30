@@ -147,6 +147,7 @@ class _IdeShellState extends ConsumerState<IdeShell> {
                     'settings.open',
                     'extensions.manage',
                   ]),
+                  _menuItem('Help', ['help.privacy']),
                 ],
               ),
             ),

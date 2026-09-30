@@ -9,6 +9,7 @@ import 'http_requests_dialog.dart';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import '../app/ide_session.dart';
 import '../app/session_commands.dart';
@@ -63,6 +64,40 @@ class ShellActions implements PresentationActions {
   Future<void> showSettings() => showDialog<void>(
     context: context(),
     builder: (ctx) => SettingsDialog(session: session),
+  );
+  @override
+  Future<void> showPrivacyPolicy() => showDialog<void>(
+    context: context(),
+    builder: (ctx) {
+      const url = 'https://3dcafe.github.io/tamtoot/privacy/';
+      final android =
+          !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
+      return AlertDialog(
+        title: const Text('Privacy Policy'),
+        content: const SelectableText(
+          'Tamtoot does not use advertising, analytics, telemetry, or developer-operated servers to collect user data.\n\n$url',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Clipboard.setData(const ClipboardData(text: url)),
+            child: const Text('Copy link'),
+          ),
+          if (android)
+            FilledButton(
+              onPressed: () async {
+                await const MethodChannel(
+                  'dev.tamtoot/documents',
+                ).invokeMethod<bool>('openUrl', {'url': url});
+              },
+              child: const Text('Open in browser'),
+            ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Close'),
+          ),
+        ],
+      );
+    },
   );
   @override
   Future<void> showAgent() => showDialog<void>(

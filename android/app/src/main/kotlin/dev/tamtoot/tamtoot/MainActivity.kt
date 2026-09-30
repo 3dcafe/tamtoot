@@ -20,6 +20,15 @@ class MainActivity : FlutterActivity() {
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "dev.tamtoot/documents")
             .setMethodCallHandler { call, result ->
                 when (call.method) {
+                    "openUrl" -> {
+                        val url = call.argument<String>("url")
+                        if (url == null) {
+                            result.error("ARGUMENT", "url is required", null)
+                        } else {
+                            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
+                            result.success(true)
+                        }
+                    }
                     "openText" -> openText(result)
                     "readText" -> withDocument(call.argument<String>("uri"), result) { uri ->
                         val stream = contentResolver.openInputStream(uri)

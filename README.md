@@ -4,6 +4,8 @@ Tamtoot is a **free code and plain-text editor** and an extensible Flutter IDE f
 
 [Документация на русском языке](docs/ru/README.md)
 
+[Privacy Policy / Политика конфиденциальности](https://3dcafe.github.io/tamtoot/privacy/)
+
 ## Features
 
 - A custom Canvas-based editor with syntax highlighting, selection, code folding, undo/redo, search and replace, keyboard shortcuts, mouse selection, and touch input.

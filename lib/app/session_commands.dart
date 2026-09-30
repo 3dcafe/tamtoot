@@ -18,6 +18,7 @@ abstract interface class PresentationActions {
   Future<void> showOpenProject();
   Future<void> showAgent();
   Future<void> showKanban();
+  Future<void> showPrivacyPolicy();
 }
 
 void registerSessionCommands(IdeSession s, PresentationActions ui) {
@@ -235,6 +236,7 @@ void registerSessionCommands(IdeSession s, PresentationActions ui) {
   );
   add('view.commands', 'Command palette', (_) => ui.showCommands());
   add('settings.open', 'Settings & keybindings', (_) => ui.showSettings());
+  add('help.privacy', 'Privacy Policy', (_) => ui.showPrivacyPolicy());
   add(
     'extensions.manage',
     'Install language package',
