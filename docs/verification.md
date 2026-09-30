@@ -126,4 +126,4 @@ The expanded test suite passes **57 tests**, including folder collapse/reopen, s
 - Kept the platform text-input connection attached while switching document tabs, so ordinary typing continues to work alongside hardware-key commands such as Enter.
 - Completion now includes active-document variables and parameters plus project methods, fields, properties and constants. Value symbols insert without call parentheses; methods retain callable insertion and parameter placement.
 - The private completion cache was versioned to `.tamtoot/cache/completions-v2.json`. No dependencies were added.
-- Added regression coverage for text input after a tab switch and Dart local/member discovery. `flutter analyze`: no issues. Full suite: **135 tests passed**.
+- Added regression coverage for IME input after a tab switch, Windows physical-character input while completion is open, and Dart local/member discovery. `flutter analyze`: no issues. Full suite: **136 tests passed**.

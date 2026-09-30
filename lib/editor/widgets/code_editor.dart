@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:math' as math;
+import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -234,6 +235,21 @@ class _CodeEditorState extends State<CodeEditor> implements TextInputClient {
     final command = widget.session.keys.resolve(keyChord(event));
     if (command != null) {
       unawaited(widget.session.run(command));
+      return KeyEventResult.handled;
+    }
+    // On Windows a custom TextInputClient can lose the WM_CHAR redispatch
+    // after Flutter focus/overlay changes. Handle printable physical keys here;
+    // composed input continues through updateEditingValue.
+    final character = event.character;
+    final keyboard = HardwareKeyboard.instance;
+    if (defaultTargetPlatform == TargetPlatform.windows &&
+        !keyboard.isControlPressed &&
+        !keyboard.isMetaPressed &&
+        !keyboard.isAltPressed &&
+        character != null &&
+        character.isNotEmpty &&
+        !character.runes.any((rune) => rune < 0x20 || rune == 0x7f)) {
+      _editor.replaceSelection(character);
       return KeyEventResult.handled;
     }
     // Printable text is delivered only by IME (avoids duplicate text events).

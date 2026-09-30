@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -5,6 +6,9 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:tamtoot/app/app.dart';
 import 'package:tamtoot/app/providers.dart';
 import 'package:tamtoot/editor/widgets/code_editor.dart';
+import 'package:tamtoot/core/completion/project_completion.dart';
+import 'package:tamtoot/languages/language_registry.dart';
+import 'explorer_test.dart' show RepositoryMemory;
 import 'support.dart';
 import 'package:tamtoot/core/filesystem/filesystem.dart';
 
@@ -140,6 +144,69 @@ void main() {
     await tester.pumpAndSettle();
     await tester.runAsync(session.dispose);
   });
+  testWidgets(
+    'Windows physical characters type after a tab switch with completion open',
+    (tester) async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.windows;
+      addTearDown(() => debugDefaultTargetPlatformOverride = null);
+      final session = await testSession();
+      session.languages.register(
+        const LanguageDefinition(
+          id: 'dart',
+          name: 'Dart',
+          version: 'test',
+          extensions: ['.dart'],
+          rules: [],
+        ),
+      );
+      session.completionIndex = ProjectCompletionIndex(RepositoryMemory());
+      await session.completionIndex!.initialize();
+      session.observe(session.documents.create('first.dart', 'first'));
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [sessionProvider.overrideWithValue(session)],
+          child: const TamtootApp(),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.byType(CodeEditor));
+      await tester.pump(const Duration(milliseconds: 350));
+
+      const initial = 'Car car;\n';
+      final second = session.documents.create('second.dart', initial);
+      second.editor.select(initial.length, initial.length);
+      session.observe(second);
+      session.changed(persist: false);
+      await tester.pumpAndSettle();
+
+      expect(
+        await tester.sendKeyEvent(
+          LogicalKeyboardKey.keyC,
+          platform: 'windows',
+          character: 'c',
+        ),
+        isTrue,
+      );
+      await tester.pump(const Duration(milliseconds: 50));
+      expect(find.text('car: Car'), findsOneWidget);
+      for (final key in [LogicalKeyboardKey.keyA, LogicalKeyboardKey.keyR]) {
+        expect(
+          await tester.sendKeyEvent(
+            key,
+            platform: 'windows',
+            character: key.keyLabel.toLowerCase(),
+          ),
+          isTrue,
+        );
+      }
+      await tester.pump();
+      expect(second.editor.text, '${initial}car');
+      debugDefaultTargetPlatformOverride = null;
+      await tester.pumpWidget(const SizedBox());
+      await tester.pumpAndSettle();
+      await tester.runAsync(session.dispose);
+    },
+  );
   testWidgets('small tablet and large desktop layouts remain renderable', (
     tester,
   ) async {
