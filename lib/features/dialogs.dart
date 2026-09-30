@@ -20,6 +20,39 @@ class ShellActions implements PresentationActions {
   ShellActions(this.context, this.session);
   final BuildContext Function() context;
   final IdeSession session;
+
+  Future<bool> _ensureProject({bool requireGit = false}) async {
+    if (session.workspaceRoot != null &&
+        (!requireGit || session.workspaceHasGit)) {
+      return true;
+    }
+    final open = await showDialog<bool>(
+      context: context(),
+      builder: (ctx) => AlertDialog(
+        title: Text(requireGit ? 'Open a Git project' : 'Open a project'),
+        content: Text(
+          requireGit
+              ? 'This tool stores its data with the project and requires a Git repository.'
+              : 'This tool stores its data in the project folder. Open or clone a project first.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton.icon(
+            onPressed: () => Navigator.pop(ctx, true),
+            icon: const Icon(Icons.folder_open),
+            label: const Text('Open project'),
+          ),
+        ],
+      ),
+    );
+    if (open != true) return false;
+    await showOpenProject();
+    return session.workspaceRoot != null &&
+        (!requireGit || session.workspaceHasGit);
+  }
   @override
   Future<void> showProjectSearch() => showDialog<void>(
     context: context(),
@@ -100,17 +133,23 @@ class ShellActions implements PresentationActions {
     },
   );
   @override
-  Future<void> showAgent() => showDialog<void>(
-    context: context(),
-    barrierDismissible: false,
-    builder: (_) => AgentDialog(session: session),
-  );
+  Future<void> showAgent() async {
+    if (!await _ensureProject()) return;
+    await showDialog<void>(
+      context: context(),
+      barrierDismissible: false,
+      builder: (_) => AgentDialog(session: session),
+    );
+  }
   @override
-  Future<void> showKanban() => showDialog<void>(
-    context: context(),
-    barrierDismissible: false,
-    builder: (_) => KanbanDialog(session: session),
-  );
+  Future<void> showKanban() async {
+    if (!await _ensureProject(requireGit: true)) return;
+    await showDialog<void>(
+      context: context(),
+      barrierDismissible: false,
+      builder: (_) => KanbanDialog(session: session),
+    );
+  }
   @override
   Future<void> showLanguagePackageInstaller() => showDialog<void>(
     context: context(),
@@ -125,11 +164,14 @@ class ShellActions implements PresentationActions {
   );
 
   @override
-  Future<void> showHttpRequests() => showDialog<void>(
-    context: context(),
-    barrierDismissible: false,
-    builder: (_) => HttpRequestsDialog(session: session),
-  );
+  Future<void> showHttpRequests() async {
+    if (!await _ensureProject()) return;
+    await showDialog<void>(
+      context: context(),
+      barrierDismissible: false,
+      builder: (_) => HttpRequestsDialog(session: session),
+    );
+  }
 
   @override
   Future<void> showCloneRepository() => showDialog<void>(

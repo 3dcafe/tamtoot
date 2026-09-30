@@ -112,13 +112,11 @@ void registerSessionCommands(IdeSession s, PresentationActions ui) {
     'agent.open',
     'Agent…',
     (_) => ui.showAgent(),
-    enabled: () => s.workspaceRoot != null,
   );
   add(
     'agent.kanban',
     'Agent Kanban…',
     (_) => ui.showKanban(),
-    enabled: () => s.workspaceRoot != null && s.workspaceHasGit,
   );
   add(
     'git.clone',
@@ -138,7 +136,6 @@ void registerSessionCommands(IdeSession s, PresentationActions ui) {
     'requests.open',
     'HTTP Requests…',
     (_) => ui.showHttpRequests(),
-    enabled: () => s.workspaceRoot != null,
   );
   add('editor.undo', 'Undo', (_) {
     s.documents.active!.editor.undo();

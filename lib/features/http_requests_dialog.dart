@@ -312,7 +312,11 @@ class _HttpRequestsDialogState extends State<HttpRequestsDialog> {
   }
 
   Future<void> _save() async {
-    if (activePath == null || busy) return;
+    if (busy) return;
+    if (activePath == null) {
+      setState(() => feedback = 'Create or select a request first.');
+      return;
+    }
     setState(() => busy = true);
     try {
       var request = _draft();
@@ -435,7 +439,10 @@ class _HttpRequestsDialogState extends State<HttpRequestsDialog> {
   }
 
   Future<void> _rename() async {
-    if (activePath == null) return;
+    if (activePath == null) {
+      setState(() => feedback = 'Create or select a request first.');
+      return;
+    }
     final value = await _ask('Rename Request', initial: name.text);
     if (value == null || value.isEmpty) return;
     try {
@@ -448,7 +455,10 @@ class _HttpRequestsDialogState extends State<HttpRequestsDialog> {
   }
 
   Future<void> _move() async {
-    if (activePath == null) return;
+    if (activePath == null) {
+      setState(() => feedback = 'Create or select a request first.');
+      return;
+    }
     final value = await _ask('Move to folder', initial: '');
     if (value == null) return;
     try {
@@ -461,7 +471,10 @@ class _HttpRequestsDialogState extends State<HttpRequestsDialog> {
   }
 
   Future<void> _delete() async {
-    if (activePath == null) return;
+    if (activePath == null) {
+      setState(() => feedback = 'Create or select a request first.');
+      return;
+    }
     final yes =
         await showDialog<bool>(
           context: context,
@@ -507,7 +520,11 @@ class _HttpRequestsDialogState extends State<HttpRequestsDialog> {
   }
 
   Future<void> _run(List<String> paths) async {
-    if (paths.isEmpty || busy) return;
+    if (busy) return;
+    if (paths.isEmpty) {
+      setState(() => feedback = 'Select at least one request to run.');
+      return;
+    }
     setState(() {
       busy = true;
       results = const [];
@@ -1237,34 +1254,34 @@ class _HttpRequestsDialogState extends State<HttpRequestsDialog> {
                     label: const Text('New Folder'),
                   ),
                   TextButton(
-                    onPressed: activePath == null ? null : _rename,
+                    onPressed: busy ? null : _rename,
                     child: const Text('Rename'),
                   ),
                   TextButton(
-                    onPressed: activePath == null ? null : _move,
+                    onPressed: busy ? null : _move,
                     child: const Text('Move'),
                   ),
                   TextButton(
-                    onPressed: activePath == null ? null : _delete,
+                    onPressed: busy ? null : _delete,
                     child: const Text('Delete'),
                   ),
                   FilledButton.icon(
-                    onPressed: activePath == null || busy ? null : _save,
+                    onPressed: busy ? null : _save,
                     icon: const Icon(Icons.save_outlined),
                     label: const Text('Save'),
                   ),
                   FilledButton.tonalIcon(
-                    onPressed: selected.isEmpty || busy
+                    onPressed: busy
                         ? null
                         : () => _run(
                             entries
                                 .where(
-                                  (e) =>
-                                      selected.contains(e.path) &&
-                                      e.valid &&
-                                      !e.directory,
+                                  (entry) =>
+                                      selected.contains(entry.path) &&
+                                      entry.valid &&
+                                      !entry.directory,
                                 )
-                                .map((e) => e.path)
+                                .map((entry) => entry.path)
                                 .toList(),
                           ),
                     icon: const Icon(Icons.play_arrow),

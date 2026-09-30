@@ -36,21 +36,24 @@ void main() {
       ),
     );
     await tester.tap(find.text('Open'));
-    await tester.pumpAndSettle();
+    await tester.pump(const Duration(milliseconds: 500));
 
     expect(find.text('HTTP Requests'), findsOneWidget);
     expect(find.text('Select All'), findsOneWidget);
     expect(tester.takeException(), isNull);
 
     await tester.tap(find.text('New Request'));
-    await tester.pumpAndSettle();
+    await tester.pump(const Duration(milliseconds: 500));
     expect(find.text('New Request (folder/name)'), findsOneWidget);
     await tester.enterText(find.byType(TextFormField).last, 'health-check');
     await tester.tap(find.text('OK'));
-    await tester.pumpAndSettle();
+    await tester.pump(const Duration(milliseconds: 500));
 
     expect(find.text('health-check'), findsWidgets);
     expect(find.text('Requests'), findsOneWidget);
     expect(tester.takeException(), isNull);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump();
   });
 }
