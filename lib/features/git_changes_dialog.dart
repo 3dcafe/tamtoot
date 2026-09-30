@@ -525,6 +525,60 @@ class _GitChangesDialogState extends State<GitChangesDialog> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            if (!widget.embedded)
+              SizedBox(
+                height: 42,
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                  children: [
+                    IconButton(
+                      key: const ValueKey('git-dialog-pull'),
+                      tooltip: 'Pull',
+                      onPressed: busy || !ready || remote.isEmpty
+                          ? null
+                          : () => _pull(),
+                      icon: const Icon(Icons.arrow_downward, size: 20),
+                      visualDensity: VisualDensity.compact,
+                    ),
+                    IconButton(
+                      key: const ValueKey('git-dialog-push'),
+                      tooltip: 'Push',
+                      onPressed: busy || !ready || remote.isEmpty
+                          ? null
+                          : _push,
+                      icon: const Icon(Icons.arrow_upward, size: 20),
+                      visualDensity: VisualDensity.compact,
+                    ),
+                    IconButton(
+                      key: const ValueKey('git-dialog-sync'),
+                      tooltip: 'Sync',
+                      onPressed: busy || !ready || remote.isEmpty
+                          ? null
+                          : () => _pull(pushAfter: true),
+                      icon: const Icon(Icons.sync, size: 20),
+                      visualDensity: VisualDensity.compact,
+                    ),
+                    IconButton(
+                      tooltip: 'Commit history',
+                      onPressed: busy ? null : _history,
+                      icon: const Icon(Icons.history, size: 20),
+                      visualDensity: VisualDensity.compact,
+                    ),
+                    IconButton(
+                      tooltip: 'Git settings',
+                      onPressed: busy ? null : _settings,
+                      icon: const Icon(Icons.settings_outlined, size: 20),
+                      visualDensity: VisualDensity.compact,
+                    ),
+                    IconButton(
+                      tooltip: 'Refresh',
+                      onPressed: busy ? null : _load,
+                      icon: const Icon(Icons.refresh, size: 20),
+                      visualDensity: VisualDensity.compact,
+                    ),
+                  ],
+                ),
+              ),
             if (busy) const LinearProgressIndicator(),
             if (ready && entries.isEmpty)
               const Padding(
@@ -606,12 +660,14 @@ class _GitChangesDialogState extends State<GitChangesDialog> {
                     label: const Text('Commit'),
                   ),
                 ),
-                const SizedBox(width: 8),
-                IconButton(
-                  tooltip: 'Git settings',
-                  onPressed: busy ? null : _settings,
-                  icon: const Icon(Icons.settings_outlined),
-                ),
+                if (widget.embedded) ...[
+                  const SizedBox(width: 8),
+                  IconButton(
+                    tooltip: 'Git settings',
+                    onPressed: busy ? null : _settings,
+                    icon: const Icon(Icons.settings_outlined),
+                  ),
+                ],
               ],
             ),
             if (feedback.isNotEmpty)
@@ -690,32 +746,6 @@ class _GitChangesDialogState extends State<GitChangesDialog> {
         title: Text('Git · $branch'),
         content: content,
         actions: [
-          IconButton(
-            key: const ValueKey('git-dialog-pull'),
-            tooltip: 'Pull',
-            onPressed: busy || !ready || remote.isEmpty ? null : () => _pull(),
-            icon: const Icon(Icons.arrow_downward),
-          ),
-          IconButton(
-            key: const ValueKey('git-dialog-push'),
-            tooltip: 'Push',
-            onPressed: busy || !ready || remote.isEmpty ? null : _push,
-            icon: const Icon(Icons.arrow_upward),
-          ),
-          IconButton(
-            tooltip: 'Commit history',
-            onPressed: busy ? null : _history,
-            icon: const Icon(Icons.history),
-          ),
-          IconButton(
-            tooltip: 'Git settings',
-            onPressed: busy ? null : _settings,
-            icon: const Icon(Icons.settings_outlined),
-          ),
-          TextButton(
-            onPressed: busy ? null : _load,
-            child: const Text('Refresh'),
-          ),
           TextButton(
             onPressed: busy ? null : () => Navigator.pop(context),
             child: const Text('Close'),
