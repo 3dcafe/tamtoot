@@ -45,6 +45,14 @@ Workflow [Build Android APK](../../.gitverse/workflows/build-apk.yml) запус
 
 Текущая Android-сборка подписывается отладочным ключом и предназначена для тестирования. Для публикации в магазине нужен постоянный release-ключ, корректные версия и идентификатор приложения. Секреты подписи не должны храниться в репозитории.
 
+## Сборка Windows в GitHub Actions
+
+Workflow `.github/workflows/build-windows.yml` использует Windows runner GitHub и собирает каталог `build/windows/x64/runner/Release/` в артефакт **tamtoot-windows** со сроком хранения 14 дней. Он доступен для ручного запуска через **Actions → Build Windows exe → Run workflow**.
+
+При восстановлении workflow в пересозданном репозитории он один раз запускается от изменения самого файла workflow. Обычные изменения исходного кода не запускают Windows runner автоматически, чтобы не расходовать минуты сборки; для них используйте **Run workflow**.
+
+GitVerse Cloud предоставляет только Linux runner и не может собирать Windows-приложение. Для Windows на GitVerse нужен собственный Windows runner; готовый сценарий находится в `.gitverse/workflows/build-windows.yml`.
+
 ## Основные сочетания клавиш
 
 | Действие | Windows/Linux | macOS |
