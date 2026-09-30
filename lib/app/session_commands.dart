@@ -14,6 +14,7 @@ abstract interface class PresentationActions {
   Future<void> showCloneRepository();
   Future<void> showGitChanges();
   Future<void> showHttpRequests();
+  Future<void> showProjectSearch();
   Future<void> showOpenProject();
   Future<void> showAgent();
   Future<void> showKanban();
@@ -41,6 +42,12 @@ void registerSessionCommands(IdeSession s, PresentationActions ui) {
     ),
   );
   bool editor() => s.documents.active != null;
+  add(
+    'workspace.search',
+    'Find in project (Ctrl/⌘ Shift F)',
+    (_) => ui.showProjectSearch(),
+    enabled: () => s.workspaceRoot != null,
+  );
   add('file.new', 'New document', (_) {
     s.observe(s.documents.create('untitled.dart', ''));
   });

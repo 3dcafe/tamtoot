@@ -1,4 +1,5 @@
 import 'model_profiles_dialog.dart';
+import 'project_search_dialog.dart';
 import 'agent_dialog.dart';
 import 'mcp_dialog.dart';
 import 'kanban_dialog.dart';
@@ -18,6 +19,11 @@ class ShellActions implements PresentationActions {
   ShellActions(this.context, this.session);
   final BuildContext Function() context;
   final IdeSession session;
+  @override
+  Future<void> showProjectSearch() => showDialog<void>(
+    context: context(),
+    builder: (_) => ProjectSearchDialog(session: session),
+  );
   @override
   Future<String?> readClipboard() async =>
       (await Clipboard.getData(Clipboard.kTextPlain))?.text;

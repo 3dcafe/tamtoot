@@ -76,6 +76,8 @@ The application saves session data after a 450 ms idle period and when it moves 
 
 ## Language highlighting
 
+Use **Edit → Find in project** or **Ctrl+Shift+F** (**⌘Shift+F** on macOS) to search the open project. Results show file paths, line numbers and text previews; tap a result to open and select the occurrence. Search supports case matching and uses unsaved contents of open files. It skips dependency/build folders and `.tamtoot`, ignores binary or oversized text (over two million characters), and caps results at 500. Unreadable entries are counted as skipped. Search starts after a short typing delay and cancels when the query changes or the dialog closes. No additional dependencies are required.
+
 Bundled language packages are versioned independently (currently 0.2.0). File extensions are matched without case sensitivity:
 
 | Language | Extensions | Highlighting |

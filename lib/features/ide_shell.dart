@@ -157,6 +157,7 @@ class _IdeShellState extends ConsumerState<IdeShell> {
                     'editor.cut',
                     'editor.paste',
                     'editor.find',
+                    'workspace.search',
                     'editor.replace',
                   ]),
                   _menuItem('View', [

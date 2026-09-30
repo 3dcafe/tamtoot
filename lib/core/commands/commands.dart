@@ -79,6 +79,8 @@ class KeybindingRegistry {
     'ctrl+v': 'editor.paste',
     'meta+v': 'editor.paste',
     'ctrl+f': 'editor.find',
+    'ctrl+shift+f': 'workspace.search',
+    'meta+shift+f': 'workspace.search',
     'meta+f': 'editor.find',
     'ctrl+h': 'editor.replace',
     'meta+alt+f': 'editor.replace',
