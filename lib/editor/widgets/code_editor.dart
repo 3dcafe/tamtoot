@@ -36,6 +36,7 @@ class _CodeEditorState extends State<CodeEditor> implements TextInputClient {
   final _horizontal = ScrollController();
   StreamSubscription<void>? _subscription;
   TextInputConnection? _connection;
+  bool _attachScheduled = false;
   TextEditingValue _ime = TextEditingValue.empty;
   bool _receiving = false;
   double _height = 400;
@@ -75,9 +76,8 @@ class _CodeEditorState extends State<CodeEditor> implements TextInputClient {
     if (oldWidget.controller != _editor) {
       _subscription?.cancel();
       _subscription = _editor.changes.listen((_) => _onChange());
-      _connection?.close();
-      _connection = null;
       if (_scroll.hasClients) _scroll.jumpTo(0);
+      _completions = const [];
       if (_focus.hasFocus) _attach();
     }
     if (_editor.readOnly) {
@@ -112,6 +112,17 @@ class _CodeEditorState extends State<CodeEditor> implements TextInputClient {
     );
     _syncIme();
     _connection!.show();
+  }
+
+  void _scheduleAttach() {
+    if (_attachScheduled || !mounted || _editor.readOnly) return;
+    if (!_focus.hasFocus) return;
+    _attachScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _attachScheduled = false;
+      if (!mounted || _editor.readOnly) return;
+      if (_focus.hasFocus) _attach();
+    });
   }
 
   void _syncIme() {
@@ -167,14 +178,12 @@ class _CodeEditorState extends State<CodeEditor> implements TextInputClient {
     final before = _editor.text.substring(0, cursor);
     final prefix =
         RegExp(r'[A-Za-z_$][\w$]*$').firstMatch(before)?.group(0) ?? '';
-    widget.session.commands.execute('editor.select', [
-      cursor - prefix.length,
-      cursor,
-    ]);
-    widget.session.commands.execute('editor.insert', '${item.name}()');
-    if (item.signature != '${item.name}()') {
+    _editor.select(cursor - prefix.length, cursor);
+    final insertion = item.callable ? '${item.name}()' : item.name;
+    _editor.replaceSelection(insertion);
+    if (item.callable && item.signature != '${item.name}()') {
       final inside = cursor - prefix.length + item.name.length + 1;
-      widget.session.commands.execute('editor.select', [inside, inside]);
+      _editor.select(inside, inside);
     }
     setState(() => _completions = const []);
   }
@@ -486,7 +495,13 @@ class _CodeEditorState extends State<CodeEditor> implements TextInputClient {
               return ListTile(
                 dense: true,
                 selected: index == _completionSelection,
-                leading: const Icon(Icons.functions, size: 17),
+                leading: Icon(switch (item.kind) {
+                  CompletionKind.method => Icons.functions,
+                  CompletionKind.variable => Icons.data_object,
+                  CompletionKind.field => Icons.view_headline_outlined,
+                  CompletionKind.property => Icons.tune,
+                  CompletionKind.constant => Icons.lock_outline,
+                }, size: 17),
                 title: Text(item.signature, maxLines: 1),
                 subtitle: Text(
                   item.documentation.isEmpty
@@ -534,18 +549,15 @@ class _CodeEditorState extends State<CodeEditor> implements TextInputClient {
           a--;
           b--;
         }
-        // The IME edit enters the same command path as hardware/paste input.
-        widget.session.commands.execute('editor.select', [start, a]);
-        widget.session.commands.execute(
-          'editor.insert',
-          value.text.substring(start, b),
-        );
+        // Apply the platform edit to the controller owned by this editor.
+        _editor.select(start, a);
+        _editor.replaceSelection(value.text.substring(start, b));
       }
       if (value.selection.isValid) {
-        widget.session.commands.execute('editor.select', [
+        _editor.select(
           value.selection.baseOffset,
           value.selection.extentOffset,
-        ]);
+        );
       }
       _ime = value;
     } finally {
@@ -570,6 +582,7 @@ class _CodeEditorState extends State<CodeEditor> implements TextInputClient {
   @override
   void connectionClosed() {
     _connection = null;
+    _scheduleAttach();
   }
 
   @override

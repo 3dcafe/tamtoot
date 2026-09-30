@@ -12,6 +12,56 @@ class _CompletionMemory extends RepositoryMemory {
 
 void main() {
   test(
+    'suggests local variables, fields, properties, constants and methods',
+    () async {
+      final index = ProjectCompletionIndex(_CompletionMemory());
+      await index.initialize();
+      const source = '''
+class Car {
+  /// Human-readable model.
+  final String model;
+  static const int maxSpeed = 240;
+  int wheels = 4;
+  String get label => model;
+  void drive(int distance) {}
+
+  void run(int laps) {
+    Car car = Car();
+    car.
+    ca
+    dis
+  }
+}
+''';
+      List<CompletionSymbol> at(String marker) => index.suggest(
+        source: source,
+        offset: source.indexOf(marker) + marker.length,
+        language: 'dart',
+        limit: 30,
+      );
+      final members = at('car.');
+      expect(
+        members.map((item) => item.name),
+        containsAll(['model', 'maxSpeed', 'wheels', 'label', 'drive']),
+      );
+      expect(
+        members.firstWhere((item) => item.name == 'model').documentation,
+        contains('Human-readable'),
+      );
+      expect(
+        members.firstWhere((item) => item.name == 'drive').callable,
+        isTrue,
+      );
+      expect(
+        members.firstWhere((item) => item.name == 'label').kind,
+        CompletionKind.property,
+      );
+      expect(at('\n    ca').map((item) => item.name), contains('car'));
+      expect(at('\n    dis').map((item) => item.name), contains('distance'));
+    },
+  );
+
+  test(
     'constructor inference prioritizes matching owner with Allman braces',
     () async {
       final store = _CompletionMemory();

@@ -108,6 +108,38 @@ void main() {
     await tester.runAsync(session.dispose);
     await tester.binding.setSurfaceSize(null);
   });
+  testWidgets('text input reconnects after switching editor tabs', (
+    tester,
+  ) async {
+    final session = await testSession();
+    session.observe(session.documents.create('first.dart', 'first'));
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [sessionProvider.overrideWithValue(session)],
+        child: const TamtootApp(),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byType(CodeEditor));
+    await tester.pump(const Duration(milliseconds: 350));
+    expect(tester.testTextInput.hasAnyClients, isTrue);
+    final second = session.documents.create('second.dart', '');
+    session.observe(second);
+    session.changed(persist: false);
+    await tester.pumpAndSettle();
+    expect(tester.testTextInput.hasAnyClients, isTrue);
+    tester.testTextInput.updateEditingValue(
+      const TextEditingValue(
+        text: 'Car car = Car();',
+        selection: TextSelection.collapsed(offset: 16),
+      ),
+    );
+    await tester.pump();
+    expect(second.editor.text, 'Car car = Car();');
+    await tester.pumpWidget(const SizedBox());
+    await tester.pumpAndSettle();
+    await tester.runAsync(session.dispose);
+  });
   testWidgets('small tablet and large desktop layouts remain renderable', (
     tester,
   ) async {

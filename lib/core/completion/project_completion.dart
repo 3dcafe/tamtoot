@@ -5,22 +5,28 @@ import 'package:crypto/crypto.dart';
 
 import '../git/git_store.dart';
 
+enum CompletionKind { method, variable, field, property, constant }
+
 class CompletionSymbol {
   const CompletionSymbol({
     required this.name,
     required this.signature,
     required this.language,
+    this.kind = CompletionKind.method,
     this.owner = '',
     this.documentation = '',
     this.path = '',
   });
 
   final String name, signature, language, owner, documentation, path;
+  final CompletionKind kind;
+  bool get callable => kind == CompletionKind.method;
 
   Map<String, dynamic> toJson() => {
     'name': name,
     'signature': signature,
     'language': language,
+    'kind': kind.name,
     'owner': owner,
     'documentation': documentation,
     'path': path,
@@ -31,6 +37,11 @@ class CompletionSymbol {
         name: json['name'] as String,
         signature: json['signature'] as String,
         language: json['language'] as String,
+        kind:
+            CompletionKind.values
+                .where((kind) => kind.name == json['kind'])
+                .firstOrNull ??
+            CompletionKind.method,
         owner: json['owner'] as String? ?? '',
         documentation: json['documentation'] as String? ?? '',
         path: json['path'] as String? ?? '',
@@ -40,7 +51,7 @@ class CompletionSymbol {
 class ProjectCompletionIndex {
   ProjectCompletionIndex(this.store);
 
-  static const cachePath = '.tamtoot/cache/completions-v1.json';
+  static const cachePath = '.tamtoot/cache/completions-v2.json';
   static const _extensions = {
     '.dart': 'dart',
     '.cs': 'csharp',
@@ -79,17 +90,23 @@ class ProjectCompletionIndex {
     final access = RegExp(
       r'([A-Za-z_$][\w$]*)\.([A-Za-z_$][\w$]*)?$',
     ).firstMatch(before);
-    if (access == null) return const [];
+    final word = access == null
+        ? RegExp(r'([A-Za-z_$][\w$]*)$').firstMatch(before)
+        : null;
+    if (access == null && word == null) return const [];
     unawaited(refreshIfStale().catchError((_) {}));
-    final receiver = access.group(1)!, prefix = access.group(2) ?? '';
-    final owner = _receiverType(before, receiver, language);
+    final receiver = access?.group(1) ?? '';
+    final prefix = access == null ? word!.group(1)! : (access.group(2) ?? '');
+    final owner = receiver == 'this'
+        ? _enclosingType(before)
+        : _receiverType(before, receiver, language);
     if (_activeSource != source || _activeLanguage != language) {
       _activeSource = source;
       _activeLanguage = language;
       _activeSymbols = _parse('<current>', source, language);
     }
     final lowerPrefix = prefix.toLowerCase();
-    final all =
+    var all =
         [..._files.values.expand((file) => file.symbols), ..._activeSymbols]
             .where((symbol) => symbol.language == language)
             .where(
@@ -98,6 +115,23 @@ class ProjectCompletionIndex {
                   symbol.name.toLowerCase().startsWith(lowerPrefix),
             )
             .toList();
+    if (access != null) {
+      final members = all.where(
+        (symbol) => symbol.kind != CompletionKind.variable,
+      );
+      final owned = owner.isEmpty
+          ? const <CompletionSymbol>[]
+          : members.where((symbol) => symbol.owner == owner).toList();
+      all = owned.isNotEmpty ? owned : members.toList();
+    } else {
+      all = all
+          .where(
+            (symbol) =>
+                symbol.path == '<current>' ||
+                symbol.kind != CompletionKind.variable,
+          )
+          .toList();
+    }
     all.sort((a, b) {
       final aOwner = owner.isNotEmpty && a.owner == owner ? 0 : 1;
       final bOwner = owner.isNotEmpty && b.owner == owner ? 0 : 1;
@@ -108,7 +142,10 @@ class ProjectCompletionIndex {
     });
     final unique = <String>{};
     return all
-        .where((item) => unique.add('${item.owner}:${item.signature}'))
+        .where(
+          (item) =>
+              unique.add('${item.kind.name}:${item.owner}:${item.signature}'),
+        )
         .take(limit)
         .toList();
   }
@@ -134,13 +171,7 @@ class ProjectCompletionIndex {
           (path) => !path
               .split('/')
               .any(
-                {
-                  'node_modules',
-                  'build',
-                  '.dart_tool',
-                  '.git',
-                  'obj',
-                }.contains,
+                {'node_modules', 'build', '.dart_tool', '.git', 'obj'}.contains,
               ),
         )
         .toSet();
@@ -172,7 +203,7 @@ class ProjectCompletionIndex {
     if (!await store.exists(cachePath)) return;
     try {
       final json = jsonDecode(await store.readText(cachePath));
-      if (json is! Map || json['version'] != 1 || json['files'] is! Map) return;
+      if (json is! Map || json['version'] != 2 || json['files'] is! Map) return;
       for (final entry in (json['files'] as Map).entries) {
         final value = entry.value;
         if (value is! Map ||
@@ -199,7 +230,7 @@ class ProjectCompletionIndex {
     await store.writeText(
       cachePath,
       jsonEncode({
-        'version': 1,
+        'version': 2,
         'files': {
           for (final entry in _files.entries)
             entry.key: {
@@ -267,6 +298,58 @@ class ProjectCompletionIndex {
             path: path,
           ),
         );
+        if (path == '<current>') {
+          for (final parameter in _parameters(
+            match.group(2)!,
+            path,
+            language,
+          )) {
+            symbols.add(parameter);
+          }
+        }
+      } else if (type == null) {
+        final property = language == 'javascript'
+            ? null
+            : RegExp(
+                r'^(?:(?:public|private|protected|internal|static|virtual|override|abstract|required|late|final)\s+)*([\w<>,.?\[\]]+)\s+(?:get\s+)?([A-Za-z_$][\w$]*)\s*(?:\{[^}]*\b(?:get|set|init)\b|=>)',
+              ).firstMatch(line);
+        if (property != null) {
+          final name = property.group(2)!;
+          symbols.add(
+            CompletionSymbol(
+              name: name,
+              signature: '$name: ${property.group(1)!}',
+              language: language,
+              kind: CompletionKind.property,
+              owner: owner,
+              documentation: comments.join(' '),
+              path: path,
+            ),
+          );
+        } else {
+          final declaration = _declaration(line, language);
+          if (declaration != null) {
+            final directMember = owner.isNotEmpty && depth == ownerDepth + 1;
+            final kind = declaration.constant
+                ? CompletionKind.constant
+                : directMember
+                ? CompletionKind.field
+                : CompletionKind.variable;
+            symbols.add(
+              CompletionSymbol(
+                name: declaration.name,
+                signature: declaration.type.isEmpty
+                    ? declaration.name
+                    : '${declaration.name}: ${declaration.type}',
+                language: language,
+                kind: kind,
+                owner: directMember ? owner : '',
+                documentation: comments.join(' '),
+                path: path,
+              ),
+            );
+          }
+        }
       }
       if (line.isNotEmpty) comments.clear();
       depth += '{'.allMatches(raw).length - '}'.allMatches(raw).length;
@@ -279,6 +362,91 @@ class ProjectCompletionIndex {
       }
     }
     return symbols;
+  }
+
+  ({String name, String type, bool constant})? _declaration(
+    String line,
+    String language,
+  ) {
+    if (language == 'javascript') {
+      final match = RegExp(
+        r'^(const|let|var)\s+([A-Za-z_$][\w$]*)\s*(?:=|;)',
+      ).firstMatch(line);
+      if (match == null) return null;
+      return (
+        name: match.group(2)!,
+        type: '',
+        constant: match.group(1) == 'const',
+      );
+    }
+    final inferred = RegExp(
+      r'^(?:(?:public|private|protected|internal|static|late)\s+)*(final|const|var)\s+(?:([\w<>,.?\[\]]+)\s+)?([A-Za-z_$][\w$]*)\s*(?:=|;)',
+    ).firstMatch(line);
+    if (inferred != null) {
+      return (
+        name: inferred.group(3)!,
+        type: inferred.group(2) ?? '',
+        constant: inferred.group(1) == 'const',
+      );
+    }
+    final typed = RegExp(
+      r'^(?:(?:public|private|protected|internal|static|late|required|readonly)\s+)*([\w<>,.?\[\]]+)\s+([A-Za-z_$][\w$]*)\s*(?:=|;)',
+    ).firstMatch(line);
+    if (typed == null || {'return', 'throw', 'new'}.contains(typed.group(1))) {
+      return null;
+    }
+    return (
+      name: typed.group(2)!,
+      type: typed.group(1)!,
+      constant: RegExp(r'\b(?:const|readonly)\b').hasMatch(line),
+    );
+  }
+
+  List<CompletionSymbol> _parameters(
+    String source,
+    String path,
+    String language,
+  ) {
+    final result = <CompletionSymbol>[];
+    for (final raw in source.split(',')) {
+      final parameter = raw
+          .split('=')
+          .first
+          .trim()
+          .replaceFirst(RegExp(r'^(?:required|final|ref|out|in|this)\s+'), '');
+      final parts = parameter.split(RegExp(r'\s+'));
+      if (parts.isEmpty || parts.last.isEmpty) continue;
+      final name = parts.last.replaceAll(RegExp(r'[^A-Za-z0-9_$]'), '');
+      if (!RegExp(r'^[A-Za-z_$][\w$]*$').hasMatch(name)) continue;
+      result.add(
+        CompletionSymbol(
+          name: name,
+          signature: parts.length > 1
+              ? '$name: ${parts.sublist(0, parts.length - 1).join(' ')}'
+              : name,
+          language: language,
+          kind: CompletionKind.variable,
+          path: path,
+        ),
+      );
+    }
+    return result;
+  }
+
+  String _enclosingType(String source) {
+    var owner = '', depth = 0, ownerDepth = -1;
+    for (final raw in const LineSplitter().convert(source)) {
+      final match = RegExp(
+        r'\b(?:class|interface|extension)\s+([A-Za-z_$][\w$]*)',
+      ).firstMatch(raw);
+      if (match != null) {
+        owner = match.group(1)!;
+        ownerDepth = depth;
+      }
+      depth += '{'.allMatches(raw).length - '}'.allMatches(raw).length;
+      if (owner.isNotEmpty && depth <= ownerDepth && match == null) owner = '';
+    }
+    return owner;
   }
 
   String _receiverType(String source, String receiver, String language) {

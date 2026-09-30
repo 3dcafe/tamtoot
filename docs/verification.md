@@ -120,3 +120,10 @@ The expanded test suite passes **57 tests**, including folder collapse/reopen, s
 - Removed product branding from the top menu and reduced the Git sidebar to changed files, diffs and the commit message.
 - Added compact Pull, Push, Sync and local history controls. Remote URL, author identity and in-memory HTTPS credentials now live behind the Git settings gear.
 - Pull writes its progress and each added, modified or deleted file to Output. History and pull-detail regression tests bring the full suite to **133 passing tests**; the analyzer is clean.
+
+## Editor input and local completion — 2026-09-30
+
+- Kept the platform text-input connection attached while switching document tabs, so ordinary typing continues to work alongside hardware-key commands such as Enter.
+- Completion now includes active-document variables and parameters plus project methods, fields, properties and constants. Value symbols insert without call parentheses; methods retain callable insertion and parameter placement.
+- The private completion cache was versioned to `.tamtoot/cache/completions-v2.json`. No dependencies were added.
+- Added regression coverage for text input after a tab switch and Dart local/member discovery. `flutter analyze`: no issues. Full suite: **135 tests passed**.
