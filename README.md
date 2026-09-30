@@ -2,6 +2,8 @@
 
 Tamtoot is a **free code and plain-text editor** and an extensible Flutter IDE for tablets and desktop windows. It includes an original editor engine, resizable tool panels, language packages, Git integration, and light and dark themes. Markdown (`.md`) files can be edited as plain text; a rendered Markdown preview is not implemented yet.
 
+[Документация на русском языке](docs/ru/README.md)
+
 ## Features
 
 - A custom Canvas-based editor with syntax highlighting, selection, undo/redo, search and replace, keyboard shortcuts, mouse selection, and touch input.
@@ -239,6 +241,7 @@ The editor, command system, layout model, schemas and language definitions are i
 - [Models, Agent, hooks, MCP and Kanban](docs/agents.md)
 - [Public extension API](docs/extension-api.md)
 - [Foundation verification](docs/verification.md)
+- [Russian documentation](docs/ru/README.md)
 
 Some development documentation is currently in Russian.
 
