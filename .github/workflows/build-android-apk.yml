@@ -2,6 +2,13 @@ name: Build Android APK
 
 on:
   workflow_dispatch:
+  # Register and run the workflow after it is restored in a recreated repo.
+  # Normal source pushes remain manual to avoid unnecessary runner usage.
+  push:
+    branches:
+      - master
+    paths:
+      - .github/workflows/build-android-apk.yml
 
 jobs:
   build-apk:

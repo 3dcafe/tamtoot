@@ -53,6 +53,10 @@ Workflow `.github/workflows/build-windows.yml` использует Windows runn
 
 GitVerse Cloud предоставляет только Linux runner и не может собирать Windows-приложение. Для Windows на GitVerse нужен собственный Windows runner; готовый сценарий находится в `.gitverse/workflows/build-windows.yml`.
 
+## Сборка Android в GitHub Actions
+
+Workflow `.github/workflows/build-android-apk.yml` создаёт артефакт **tamtoot-apk** и доступен через **Actions → Build Android APK → Run workflow**. После пересоздания репозитория изменение самого workflow запускает его один раз, чтобы GitHub снова зарегистрировал действие. Обычные изменения кода запускаются вручную.
+
 ## Основные сочетания клавиш
 
 | Действие | Windows/Linux | macOS |
