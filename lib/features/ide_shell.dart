@@ -96,42 +96,11 @@ class _IdeShellState extends ConsumerState<IdeShell> {
   }
 
   Widget _menu() {
-    final landscape =
-        MediaQuery.orientationOf(context) == Orientation.landscape;
     return SizedBox(
       height: 42,
       child: Row(
         children: [
-          SizedBox(width: landscape ? 8 : 12),
-          Container(
-            width: 23,
-            height: 23,
-            alignment: Alignment.center,
-            decoration: BoxDecoration(
-              color: color('accent'),
-              borderRadius: BorderRadius.circular(5),
-            ),
-            child: Text(
-              't',
-              style: TextStyle(
-                fontWeight: FontWeight.w900,
-                fontSize: 19,
-                color: color('editor'),
-              ),
-            ),
-          ),
-          if (!landscape) ...[
-            const SizedBox(width: 10),
-            const Text(
-              'TAMTOOT',
-              style: TextStyle(
-                fontWeight: FontWeight.w700,
-                fontSize: 12,
-                letterSpacing: 1.8,
-              ),
-            ),
-          ],
-          SizedBox(width: landscape ? 8 : 14),
+          const SizedBox(width: 8),
           Expanded(
             child: SingleChildScrollView(
               scrollDirection: Axis.horizontal,

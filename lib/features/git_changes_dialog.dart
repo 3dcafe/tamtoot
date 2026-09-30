@@ -170,11 +170,16 @@ class _GitChangesDialogState extends State<GitChangesDialog> {
       result.ensureOk();
       feedback =
           'Commit created: ${result.stdout.trim()}\nYou can now push it.';
+      widget.session.log('[Git] Commit created: ${result.stdout.trim()}');
       message.clear();
       selected.clear();
       await widget.session.refreshGitIndicators();
       await _load();
     } catch (error) {
+      widget.session.log(
+        '[Git] Commit failed: ${safeError(error)}',
+        error: true,
+      );
       if (mounted) {
         setState(() {
           feedback = safeError(error);
@@ -195,6 +200,7 @@ class _GitChangesDialogState extends State<GitChangesDialog> {
       busy = true;
       feedback = '';
     });
+    widget.session.log('[Git] Push started: origin/$branch');
     try {
       final result = await git.push(
         root,
@@ -203,9 +209,11 @@ class _GitChangesDialogState extends State<GitChangesDialog> {
       );
       result.ensureOk();
       feedback = result.stdout.trim();
+      widget.session.log('[Git] Push completed:\n${result.stdout.trim()}');
       await widget.session.refreshGitIndicators();
     } catch (error) {
       feedback = safeError(error);
+      widget.session.log('[Git] Push failed: $feedback', error: true);
     } finally {
       widget.session.gitBusy = false;
       widget.session.changed(persist: false);
@@ -216,9 +224,7 @@ class _GitChangesDialogState extends State<GitChangesDialog> {
   GitCredentials? get _credentials => token.text.isEmpty
       ? null
       : GitCredentials(
-          username: username.text.trim().isEmpty
-              ? 'git'
-              : username.text.trim(),
+          username: username.text.trim().isEmpty ? 'git' : username.text.trim(),
           token: token.text,
         );
 
@@ -231,7 +237,8 @@ class _GitChangesDialogState extends State<GitChangesDialog> {
           document.uri!.toString().startsWith(root.toString()),
     )) {
       setState(() {
-        feedback = 'Save, commit or discard open editor changes before pulling.';
+        feedback =
+            'Save, commit or discard open editor changes before pulling.';
       });
       return;
     }
@@ -241,11 +248,11 @@ class _GitChangesDialogState extends State<GitChangesDialog> {
       busy = true;
       feedback = '';
     });
+    widget.session.log(
+      '[Git] ${pushAfter ? "Sync" : "Pull"} started: origin/$branch',
+    );
     try {
-      final result = await git.pull(
-        root,
-        credentials: _credentials,
-      );
+      final result = await git.pull(root, credentials: _credentials);
       result.ensureOk();
       var resultText = result.stdout.trim();
       for (final document in widget.session.documents.documents.toList()) {
@@ -271,16 +278,207 @@ class _GitChangesDialogState extends State<GitChangesDialog> {
         resultText = '$resultText\n${pushed.stdout.trim()}'.trim();
       }
       feedback = resultText;
+      widget.session.log(
+        '[Git] ${pushAfter ? "Sync" : "Pull"} completed:\n$resultText',
+      );
       await widget.session.refreshExplorer();
       await widget.session.persistNow();
       await _load();
     } catch (error) {
       feedback = safeError(error);
+      widget.session.log(
+        '[Git] ${pushAfter ? "Sync" : "Pull"} failed: $feedback',
+        error: true,
+      );
     } finally {
       widget.session.gitBusy = false;
       widget.session.changed(persist: false);
       if (mounted) setState(() => busy = false);
     }
+  }
+
+  Future<void> _settings() async {
+    final remoteController = TextEditingController(text: remote);
+    final nameController = TextEditingController(text: name.text);
+    final emailController = TextEditingController(text: email.text);
+    final usernameController = TextEditingController(text: username.text);
+    final tokenController = TextEditingController(text: token.text);
+    var obscure = true;
+    final saved = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, update) => AlertDialog(
+          title: const Text('Git settings'),
+          content: SizedBox(
+            width: 520,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextField(
+                    controller: remoteController,
+                    decoration: const InputDecoration(
+                      labelText: 'Remote URL (origin)',
+                    ),
+                  ),
+                  TextField(
+                    controller: nameController,
+                    decoration: const InputDecoration(labelText: 'Author name'),
+                  ),
+                  TextField(
+                    controller: emailController,
+                    keyboardType: TextInputType.emailAddress,
+                    decoration: const InputDecoration(
+                      labelText: 'Author email',
+                    ),
+                  ),
+                  TextField(
+                    controller: usernameController,
+                    autocorrect: false,
+                    decoration: const InputDecoration(
+                      labelText: 'HTTPS username',
+                    ),
+                  ),
+                  TextField(
+                    controller: tokenController,
+                    obscureText: obscure,
+                    autocorrect: false,
+                    enableSuggestions: false,
+                    decoration: InputDecoration(
+                      labelText: 'Access token / password',
+                      helperText: 'Kept only while this Git view is open.',
+                      suffixIcon: IconButton(
+                        tooltip: obscure ? 'Show token' : 'Hide token',
+                        onPressed: () => update(() => obscure = !obscure),
+                        icon: Icon(
+                          obscure
+                              ? Icons.visibility_outlined
+                              : Icons.visibility_off_outlined,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(dialogContext, true),
+              child: const Text('Save'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (saved == true) {
+      try {
+        final remoteUri = Uri.parse(remoteController.text.trim());
+        if (remoteUri.scheme != 'https' || remoteUri.userInfo.isNotEmpty) {
+          throw const FormatException(
+            'Remote must be an HTTPS URL without embedded credentials.',
+          );
+        }
+        if (nameController.text.trim().isEmpty ||
+            emailController.text.trim().isEmpty ||
+            RegExp(r'[\r\n<>\x00#;"\\]').hasMatch(
+              '${nameController.text}${emailController.text}',
+            )) {
+          throw const FormatException('Enter a valid author name and email.');
+        }
+        (await git.setRemoteUrl(root, remoteUri)).ensureOk();
+        final identity = git;
+        if (identity is GitIdentityProvider) {
+          await (identity as GitIdentityProvider).setIdentity(
+            root,
+            nameController.text,
+            emailController.text,
+          );
+        }
+        name.text = nameController.text;
+        email.text = emailController.text;
+        username.text = usernameController.text;
+        token.text = tokenController.text;
+        await _load();
+        widget.session.log('[Git] Settings updated for origin/$branch');
+      } catch (error) {
+        if (mounted) setState(() => feedback = safeError(error));
+      }
+    }
+    // AlertDialog remains in the overlay during its closing animation.
+    await Future<void>.delayed(kThemeAnimationDuration);
+    for (final controller in [
+      remoteController,
+      nameController,
+      emailController,
+      usernameController,
+      tokenController,
+    ]) {
+      controller.dispose();
+    }
+  }
+
+  Future<void> _history() async {
+    final provider = git;
+    if (provider is! GitHistoryProvider) return;
+    await showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Commit history · $branch'),
+        content: SizedBox(
+          width: 620,
+          height: 480,
+          child: FutureBuilder<List<GitCommitSummary>>(
+            future: (provider as GitHistoryProvider).history(root),
+            builder: (context, snapshot) {
+              if (snapshot.hasError) {
+                return SelectableText(safeError(snapshot.error!));
+              }
+              if (!snapshot.hasData) {
+                return const Center(child: CircularProgressIndicator());
+              }
+              if (snapshot.data!.isEmpty) {
+                return const Center(child: Text('No commits yet.'));
+              }
+              return ListView.separated(
+                itemCount: snapshot.data!.length,
+                separatorBuilder: (_, _) => const Divider(height: 1),
+                itemBuilder: (_, index) {
+                  final commit = snapshot.data![index];
+                  final date = commit.committedAt?.toLocal();
+                  final dateText = date == null
+                      ? ''
+                      : '${date.year.toString().padLeft(4, "0")}-${date.month.toString().padLeft(2, "0")}-${date.day.toString().padLeft(2, "0")} '
+                            '${date.hour.toString().padLeft(2, "0")}:${date.minute.toString().padLeft(2, "0")}';
+                  return ListTile(
+                    dense: true,
+                    leading: const Icon(Icons.commit, size: 18),
+                    title: Text(
+                      commit.message.split('\n').first,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    subtitle: Text(
+                      '${commit.hash.substring(0, 7)} · ${commit.author}${dateText.isEmpty ? "" : " · $dateText"}',
+                    ),
+                  );
+                },
+              );
+            },
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
@@ -292,13 +490,6 @@ class _GitChangesDialogState extends State<GitChangesDialog> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              'Branch: $branch\nRemote (origin): ${remote.isEmpty ? "Not configured" : remote}',
-            ),
-            const SizedBox(height: 12),
-            const Text(
-              'Select files to commit. Selected editor changes will be saved first. New files are never selected automatically; check them against .gitignore.',
-            ),
             if (busy) const LinearProgressIndicator(),
             if (ready && entries.isEmpty)
               const Padding(
@@ -362,17 +553,7 @@ class _GitChangesDialogState extends State<GitChangesDialog> {
                         }),
                 ),
               ),
-            TextField(
-              controller: name,
-              enabled: !busy,
-              decoration: const InputDecoration(labelText: 'Author name'),
-            ),
-            TextField(
-              controller: email,
-              enabled: !busy,
-              keyboardType: TextInputType.emailAddress,
-              decoration: const InputDecoration(labelText: 'Author email'),
-            ),
+            const Divider(height: 20),
             TextField(
               controller: message,
               enabled: !busy,
@@ -380,58 +561,21 @@ class _GitChangesDialogState extends State<GitChangesDialog> {
               maxLines: 4,
               decoration: const InputDecoration(labelText: 'Commit message'),
             ),
-            const SizedBox(height: 12),
-            FilledButton.icon(
-              onPressed: busy || !ready ? null : _commit,
-              icon: const Icon(Icons.commit),
-              label: const Text('Commit selected'),
-            ),
-            const Divider(height: 28),
-            TextField(
-              controller: username,
-              enabled: !busy,
-              autocorrect: false,
-              decoration: const InputDecoration(labelText: 'HTTPS username'),
-            ),
-            TextField(
-              controller: token,
-              enabled: !busy,
-              obscureText: true,
-              autocorrect: false,
-              enableSuggestions: false,
-              decoration: const InputDecoration(
-                labelText: 'Access token / password',
-                helperText: 'Kept only while this Git view is open.',
-                helperMaxLines: 3,
-              ),
-            ),
-            const SizedBox(height: 12),
-            const Text(
-              'Push sends existing local commits on this branch. Uncommitted files are not sent.',
-            ),
             const SizedBox(height: 8),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
+            Row(
               children: [
-                FilledButton.tonalIcon(
-                  onPressed: busy || !ready || remote.isEmpty
-                      ? null
-                      : () => _pull(),
-                  icon: const Icon(Icons.cloud_download_outlined),
-                  label: const Text('Pull changes'),
+                Expanded(
+                  child: FilledButton.icon(
+                    onPressed: busy || !ready ? null : _commit,
+                    icon: const Icon(Icons.commit, size: 18),
+                    label: const Text('Commit'),
+                  ),
                 ),
-                FilledButton.icon(
-                  onPressed: busy || !ready || remote.isEmpty ? null : _push,
-                  icon: const Icon(Icons.cloud_upload_outlined),
-                  label: const Text('Push commits'),
-                ),
-                FilledButton.tonalIcon(
-                  onPressed: busy || !ready || remote.isEmpty
-                      ? null
-                      : () => _pull(pushAfter: true),
-                  icon: const Icon(Icons.sync_alt),
-                  label: const Text('Sync'),
+                const SizedBox(width: 8),
+                IconButton(
+                  tooltip: 'Git settings',
+                  onPressed: busy ? null : _settings,
+                  icon: const Icon(Icons.settings_outlined),
                 ),
               ],
             ),
@@ -449,12 +593,50 @@ class _GitChangesDialogState extends State<GitChangesDialog> {
         color: Color(widget.session.theme.color('panel')),
         child: Column(
           children: [
-            Align(
-              alignment: Alignment.centerRight,
-              child: IconButton(
-                tooltip: 'Refresh Git changes',
-                onPressed: busy ? null : _load,
-                icon: const Icon(Icons.refresh, size: 18),
+            SizedBox(
+              height: 42,
+              child: Row(
+                children: [
+                  IconButton(
+                    key: const ValueKey('git-pull'),
+                    tooltip: 'Pull',
+                    onPressed: busy || !ready || remote.isEmpty
+                        ? null
+                        : () => _pull(),
+                    icon: const Icon(Icons.arrow_downward, size: 18),
+                    visualDensity: VisualDensity.compact,
+                  ),
+                  IconButton(
+                    key: const ValueKey('git-push'),
+                    tooltip: 'Push',
+                    onPressed: busy || !ready || remote.isEmpty ? null : _push,
+                    icon: const Icon(Icons.arrow_upward, size: 18),
+                    visualDensity: VisualDensity.compact,
+                  ),
+                  IconButton(
+                    key: const ValueKey('git-sync'),
+                    tooltip: 'Sync (pull, then push)',
+                    onPressed: busy || !ready || remote.isEmpty
+                        ? null
+                        : () => _pull(pushAfter: true),
+                    icon: const Icon(Icons.sync, size: 18),
+                    visualDensity: VisualDensity.compact,
+                  ),
+                  const SizedBox(width: 4),
+                  Text(
+                    branch,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontSize: 12),
+                  ),
+                  const Spacer(),
+                  IconButton(
+                    key: const ValueKey('git-history'),
+                    tooltip: 'Commit history',
+                    onPressed: busy ? null : _history,
+                    icon: const Icon(Icons.history, size: 18),
+                    visualDensity: VisualDensity.compact,
+                  ),
+                ],
               ),
             ),
             Expanded(
@@ -470,9 +652,31 @@ class _GitChangesDialogState extends State<GitChangesDialog> {
     return PopScope(
       canPop: !busy,
       child: AlertDialog(
-        title: const Text('Commit and push'),
+        title: Text('Git · $branch'),
         content: content,
         actions: [
+          IconButton(
+            key: const ValueKey('git-dialog-pull'),
+            tooltip: 'Pull',
+            onPressed: busy || !ready || remote.isEmpty ? null : () => _pull(),
+            icon: const Icon(Icons.arrow_downward),
+          ),
+          IconButton(
+            key: const ValueKey('git-dialog-push'),
+            tooltip: 'Push',
+            onPressed: busy || !ready || remote.isEmpty ? null : _push,
+            icon: const Icon(Icons.arrow_upward),
+          ),
+          IconButton(
+            tooltip: 'Commit history',
+            onPressed: busy ? null : _history,
+            icon: const Icon(Icons.history),
+          ),
+          IconButton(
+            tooltip: 'Git settings',
+            onPressed: busy ? null : _settings,
+            icon: const Icon(Icons.settings_outlined),
+          ),
           TextButton(
             onPressed: busy ? null : _load,
             child: const Text('Refresh'),

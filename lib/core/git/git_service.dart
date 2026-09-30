@@ -189,6 +189,22 @@ abstract interface class GitIdentityProvider {
   Future<void> setIdentity(Uri directory, String name, String email);
 }
 
+class GitCommitSummary {
+  const GitCommitSummary({
+    required this.hash,
+    required this.message,
+    required this.author,
+    required this.committedAt,
+  });
+  final String hash, message, author;
+  final DateTime? committedAt;
+}
+
+/// Optional local history capability. It never contacts the remote.
+abstract interface class GitHistoryProvider {
+  Future<List<GitCommitSummary>> history(Uri directory, {int limit = 50});
+}
+
 /// Snapshot used for review and optimistic concurrency checks when discarding.
 class GitFileSnapshot {
   const GitFileSnapshot({

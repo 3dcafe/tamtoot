@@ -17,6 +17,7 @@ class HttpGitService
         GitService,
         GitPublicationProvider,
         GitIdentityProvider,
+        GitHistoryProvider,
         GitFileChangesProvider {
   HttpGitService({
     required this.transport,
@@ -185,10 +186,9 @@ class HttpGitService
   }) async {
     final changes = await statusEntries(directory);
     if (changes.isNotEmpty) {
-      return _fail(
-        'Commit or discard local changes before pulling',
-        const ['pull'],
-      );
+      return _fail('Commit or discard local changes before pulling', const [
+        'pull',
+      ]);
     }
     final initialStore = openStore(directory);
     final initialDb = GitObjectDatabase(initialStore, inflateAt, deflate);
@@ -231,12 +231,8 @@ class HttpGitService
         const ['pull'],
       );
     }
-    await _checkout(
-      db,
-      store,
-      remoteHash,
-      previousCommitHash: localHash,
-    );
+    final localEntries = await _headEntries(db, localHash);
+    await _checkout(db, store, remoteHash, previousCommitHash: localHash);
     final remoteEntries = await _headEntries(db, remoteHash);
     await store.writeBytes(
       '.git/index',
@@ -244,7 +240,26 @@ class HttpGitService
     );
     await db.writeRef(branchRef, remoteHash);
     _staged.remove(directory);
-    return _ok('Fast-forward to $remoteHash', const ['pull']);
+    final details = <String>[];
+    final paths = {...localEntries.keys, ...remoteEntries.keys}.toList()
+      ..sort();
+    for (final path in paths) {
+      final before = localEntries[path], after = remoteEntries[path];
+      if (before == null) {
+        details.add('A  $path');
+      } else if (after == null) {
+        details.add('D  $path');
+      } else if (before.hash != after.hash || before.mode != after.mode) {
+        details.add('M  $path');
+      }
+    }
+    return _ok(
+      [
+        'Fast-forward ${localHash?.substring(0, 7) ?? "(empty)"} → ${remoteHash.substring(0, 7)}',
+        if (details.isEmpty) 'No file changes' else ...details,
+      ].join('\n'),
+      const ['pull'],
+    );
   }
 
   @override
@@ -505,6 +520,38 @@ class HttpGitService
   }
 
   @override
+  Future<List<GitCommitSummary>> history(
+    Uri directory, {
+    int limit = 50,
+  }) async {
+    final db = GitObjectDatabase(openStore(directory), inflateAt, deflate);
+    final result = <GitCommitSummary>[];
+    final seen = <String>{};
+    var hash = await db.readHead();
+    while (hash != null && seen.add(hash) && result.length < limit) {
+      final info = parseCommit((await db.read(hash)).content);
+      final ident = RegExp(
+        r'^(.*?)(?:\s+<[^>]*>)?\s+(\d+)\s+[+-]\d{4}$',
+      ).firstMatch(info.author);
+      result.add(
+        GitCommitSummary(
+          hash: hash,
+          message: info.message.trim(),
+          author: ident?.group(1)?.trim() ?? info.author,
+          committedAt: ident == null
+              ? null
+              : DateTime.fromMillisecondsSinceEpoch(
+                  int.parse(ident.group(2)!) * 1000,
+                  isUtc: true,
+                ),
+        ),
+      );
+      hash = info.parents.firstOrNull;
+    }
+    return result;
+  }
+
+  @override
   Future<GitResult> remoteUrl(Uri directory, {String name = 'origin'}) async {
     final db = GitObjectDatabase(openStore(directory), inflateAt, deflate);
     final url = await db.remoteUrl(name: name);
@@ -563,8 +610,7 @@ class HttpGitService
     GitRepositoryStore store,
     String commitHash, {
     String? previousCommitHash,
-  }
-  ) async {
+  }) async {
     final commit = parseCommit((await db.read(commitHash)).content);
     final files = <String, String>{};
     await _walkTree(db, commit.tree, '', files);

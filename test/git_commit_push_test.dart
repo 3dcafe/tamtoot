@@ -109,6 +109,21 @@ void main() {
     };
   }
 
+  test('returns local commit history newest first', () async {
+    await store.writeText('a', 'one');
+    await commit('First commit', ['a']);
+    await store.writeText('a', 'two');
+    final latest = await commit('Second commit\n\nDetails', ['a']);
+    final history = await git.history(root);
+    expect(history.map((item) => item.message), [
+      'Second commit\n\nDetails',
+      'First commit',
+    ]);
+    expect(history.first.hash, latest);
+    expect(history.first.author, 'Test Author');
+    expect(history.first.committedAt, isNotNull);
+  });
+
   test(
     'commits selected snapshots, leaves unselected files and excludes metadata',
     () async {
@@ -275,13 +290,13 @@ void main() {
       find.widgetWithText(TextField, 'Commit message'),
       'Unsaved edit',
     );
-    await tester.ensureVisible(find.text('Commit selected'));
-    await tester.tap(find.text('Commit selected'));
+    await tester.ensureVisible(find.text('Commit'));
+    await tester.tap(find.text('Commit'));
     await tester.pumpAndSettle();
     expect(await db.readHead(), oldHead);
     expect(find.textContaining('Save failed'), findsOneWidget);
     files.cancelSave = false;
-    await tester.tap(find.text('Commit selected'));
+    await tester.tap(find.text('Commit'));
     await tester.pumpAndSettle();
     expect(await db.readHead(), isNot(oldHead));
     expect(await store.readText('a.txt'), 'edited');
@@ -309,12 +324,11 @@ void main() {
       find.widgetWithText(TextField, 'Commit message'),
       'From UI',
     );
-    await tester.tap(find.text('Commit selected'));
+    await tester.tap(find.text('Commit'));
     await tester.pumpAndSettle();
     expect(find.textContaining('Commit created:'), findsOneWidget);
     expect(await db.readHead(), isNotNull);
-    await tester.ensureVisible(find.text('Push commits'));
-    await tester.tap(find.text('Push commits'));
+    await tester.tap(find.byKey(const ValueKey('git-dialog-push')));
     await tester.pumpAndSettle();
     expect(find.textContaining('Pushed refs/heads/main'), findsOneWidget);
     expect(tester.takeException(), isNull);

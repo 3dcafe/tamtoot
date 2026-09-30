@@ -100,10 +100,11 @@ The project index runs asynchronously and reparses only files whose SHA-1 conten
 Open a cloned project and select the **Git** tab beside **Solution** in the sidebar. The same controls are available through **Git → Commit and push…** and the command palette.
 
 1. Use the checkboxes to select the files to include, including additions or deletions. Selected unsaved editor changes are saved before committing. Files not selected remain outside the commit.
-2. Enter your author name, author email and commit message, then click **Commit selected**. Author details are stored in that repository's Git configuration.
-3. Enter your HTTPS username and access token (or password accepted by your host), then click **Push commits**. This sends local commits to `origin` on the current branch. Credentials stay in memory while that Git view is open (switching sidebar tabs keeps the view open); they are never saved in settings or repository files.
+2. Enter a commit message and click **Commit**. The main panel stays focused on changed files and their diffs.
+3. Open the gear menu to configure the remote URL, author name, author email, HTTPS username and access token. The identity and remote are stored in the repository Git configuration. Credentials stay in memory while this Git view is open and are never written to settings or repository files.
+4. Use the compact Pull, Push and Sync buttons at the top. The history button shows the latest local commits with their authors, dates and hashes.
 
-Use **Pull changes** to fetch the current branch from `origin` and fast-forward the local project. Pull requires a clean working tree and no unsaved project editors, so it cannot overwrite local work. It refreshes open files and Solution after checkout, removes files deleted upstream and preserves a clean local branch that is already ahead. Divergent histories are reported for manual resolution because the embedded client does not create merge commits.
+Use **Pull** to fetch the current branch from `origin` and fast-forward the local project. Pull requires a clean working tree and no unsaved project editors, so it cannot overwrite local work. It refreshes open files and Solution after checkout, removes files deleted upstream and preserves a clean local branch that is already ahead. Start, completion, failure and every added, modified or deleted file are written to Output. Divergent histories are reported for manual resolution because the embedded client does not create merge commits.
 
 The Git panel provides separate directional actions: **Pull changes** uses a download icon, **Push commits** uses an upload icon, and **Sync** uses a bidirectional icon. Sync performs the same safe pull first and pushes local commits only after pull succeeds.
 

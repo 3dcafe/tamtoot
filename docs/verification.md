@@ -114,3 +114,9 @@ The expanded test suite passes **57 tests**, including folder collapse/reopen, s
 - Added dot-triggered method completion for Dart, C# and JavaScript, including signatures, declaring types and documentation extracted from adjacent line or block comments.
 - The project index refreshes asynchronously, hashes files to parse only changes, includes unsaved editor contents and stores its private cache under `.tamtoot/cache/`.
 - Added tests for C# and Dart parsing, documentation, type-based ordering, incremental refresh and unsaved source completion. Full suite: **129 tests passed**. No dependencies added.
+
+## Focused Git panel — 2026-09-30
+
+- Removed product branding from the top menu and reduced the Git sidebar to changed files, diffs and the commit message.
+- Added compact Pull, Push, Sync and local history controls. Remote URL, author identity and in-memory HTTPS credentials now live behind the Git settings gear.
+- Pull writes its progress and each added, modified or deleted file to Output. History and pull-detail regression tests bring the full suite to **133 passing tests**; the analyzer is clean.

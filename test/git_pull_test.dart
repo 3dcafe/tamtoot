@@ -126,6 +126,9 @@ void main() {
 
     final result = await git.pull(Uri.parse(root));
     expect(result.ok, isTrue);
+    expect(result.stdout, contains('M  kept.txt'));
+    expect(result.stdout, contains('A  new.txt'));
+    expect(result.stdout, contains('D  old.txt'));
     expect(await database.readHead(), remote.hash);
     expect(await database.readRef('refs/remotes/origin/main'), remote.hash);
     expect(await store.readText('kept.txt'), 'after');

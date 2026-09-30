@@ -258,6 +258,43 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('sidebar-git')));
     await tester.pumpAndSettle();
     expect(find.byType(AlertDialog), findsNothing);
+    expect(find.textContaining('https://example.com'), findsNothing);
+    await tester.tap(find.byTooltip('Git settings'));
+    await tester.pumpAndSettle();
+    expect(find.widgetWithText(TextField, 'Remote URL (origin)'), findsOneWidget);
+    expect(find.text('https://example.com/repo.git'), findsOneWidget);
+    expect(find.widgetWithText(TextField, 'Author name'), findsOneWidget);
+    expect(
+      find.widgetWithText(TextField, 'Access token / password'),
+      findsOneWidget,
+    );
+    await tester.enterText(
+      find.widgetWithText(TextField, 'Remote URL (origin)'),
+      'https://example.com/updated.git',
+    );
+    await tester.enterText(
+      find.widgetWithText(TextField, 'Author name'),
+      'Updated Author',
+    );
+    await tester.enterText(
+      find.widgetWithText(TextField, 'Author email'),
+      'updated@example.com',
+    );
+    await tester.enterText(
+      find.widgetWithText(TextField, 'Access token / password'),
+      'temporary-secret',
+    );
+    await tester.tap(find.text('Save'));
+    await tester.pumpAndSettle();
+    expect((await git.identity(root)).name, 'Updated Author');
+    expect((await git.remoteUrl(root)).stdout, 'https://example.com/updated.git');
+    expect(await store.readText('.git/config'), isNot(contains('temporary-secret')));
+    await tester.tap(find.byKey(const ValueKey('git-history')));
+    await tester.pumpAndSettle();
+    expect(find.text('Commit history · main'), findsOneWidget);
+    expect(find.text('Initial'), findsOneWidget);
+    await tester.tap(find.text('Close'));
+    await tester.pumpAndSettle();
     await tester.tap(find.byType(Checkbox));
     await tester.ensureVisible(
       find.widgetWithText(TextField, 'Commit message'),
@@ -266,8 +303,8 @@ void main() {
       find.widgetWithText(TextField, 'Commit message'),
       'Sidebar commit',
     );
-    await tester.ensureVisible(find.text('Commit selected'));
-    await tester.tap(find.text('Commit selected'));
+    await tester.ensureVisible(find.text('Commit'));
+    await tester.tap(find.text('Commit'));
     await tester.pumpAndSettle();
     expect(await db.readHead(), isNot(previous));
     expect(session.gitBusy, isFalse);
