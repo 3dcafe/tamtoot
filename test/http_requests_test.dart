@@ -60,118 +60,219 @@ class _ConcurrencyTransport implements RequestHttpTransport {
 }
 
 void main() {
-  test('request files, Markdown, folders and environments round-trip', () async {
-    final directory = await Directory.systemTemp.createTemp('tamtoot-requests-');
-    addTearDown(() => directory.delete(recursive: true));
-    final storage = RequestStorage(FileGitRepositoryStore(directory));
-    const request = HttpRequestFile(
-      name: 'Create user',
-      method: 'POST',
-      url: '{{baseUrl}}/users',
-      headers: [RequestKeyValue(key: 'X-Team', value: '{{team}}')],
-      body: RequestBody(type: 'json', value: {'name': 'Sam'}),
-      auth: RequestAuth(mode: 'inherit'),
-      attachments: [
-        RequestAttachment(type: 'markdown', path: 'README.md'),
-      ],
-    );
+  test(
+    'request files, Markdown, folders and environments round-trip',
+    () async {
+      final directory = await Directory.systemTemp.createTemp(
+        'tamtoot-requests-',
+      );
+      addTearDown(() => directory.delete(recursive: true));
+      final storage = RequestStorage(FileGitRepositoryStore(directory));
+      const request = HttpRequestFile(
+        name: 'Create user',
+        method: 'POST',
+        url: '{{baseUrl}}/users',
+        headers: [RequestKeyValue(key: 'X-Team', value: '{{team}}')],
+        body: RequestBody(type: 'json', value: {'name': 'Sam'}),
+        auth: RequestAuth(mode: 'inherit'),
+        attachments: [RequestAttachment(type: 'markdown', path: 'README.md')],
+      );
 
-    final created = await storage.create('users/admin', request);
-    expect(created.path, 'users/admin/create-user.json');
-    expect((await storage.read(created.path)).method, 'POST');
-    expect((await storage.list()).single.name, 'Create user');
+      final created = await storage.create('users/admin', request);
+      expect(created.path, 'users/admin/create-user.json');
+      expect((await storage.read(created.path)).method, 'POST');
+      final initialEntries = await storage.list();
+      expect(
+        initialEntries.where((entry) => !entry.directory).single.name,
+        'Create user',
+      );
+      expect(
+        initialEntries
+            .where((entry) => entry.directory)
+            .map((entry) => entry.path),
+        containsAll(['users/', 'users/admin/']),
+      );
 
-    await storage.saveMarkdown(created.path, 'README.md', '# Create user');
-    expect(await storage.readMarkdown(created.path, 'README.md'), '# Create user');
-    await expectLater(
-      storage.saveMarkdown(created.path, '../secret.md', 'bad'),
-      throwsFormatException,
-    );
+      await storage.saveMarkdown(created.path, 'README.md', '# Create user');
+      expect(
+        await storage.readMarkdown(created.path, 'README.md'),
+        '# Create user',
+      );
+      await expectLater(
+        storage.saveMarkdown(created.path, '../secret.md', 'bad'),
+        throwsFormatException,
+      );
 
-    await storage.saveProjectEnvironment(
-      const RequestEnvironment(
-        variables: {'baseUrl': 'https://api.example.com'},
-        authType: 'bearer',
-        authToken: '{{token}}',
-      ),
-    );
-    await storage.saveLocalEnvironment(
-      const RequestEnvironment(variables: {'token': 'secret'}),
-    );
-    final environment = await storage.loadEnvironment();
-    expect(environment.project.authToken, '{{token}}');
-    expect(environment.local.variables['token'], 'secret');
+      await storage.saveProjectEnvironment(
+        const RequestEnvironment(
+          variables: {'baseUrl': 'https://api.example.com'},
+          authType: 'bearer',
+          authToken: '{{token}}',
+        ),
+      );
+      await storage.saveLocalEnvironment(
+        const RequestEnvironment(variables: {'token': 'secret'}),
+      );
+      final environment = await storage.loadEnvironment();
+      expect(environment.project.authToken, '{{token}}');
+      expect(environment.local.variables['token'], 'secret');
 
-    final moved = await storage.move(created.path, 'shared');
-    expect(moved.path, 'shared/create-user.json');
-    expect(
-      await storage.readMarkdown(moved.path, 'README.md'),
-      '# Create user',
-    );
-    final renamed = await storage.rename(moved.path, 'Create account');
-    expect(renamed.path, 'shared/create-account.json');
-    await storage.delete(renamed.path);
-    expect(await storage.list(), isEmpty);
-  });
+      final moved = await storage.move(created.path, 'shared');
+      expect(moved.path, 'shared/create-user.json');
+      expect(
+        await storage.readMarkdown(moved.path, 'README.md'),
+        '# Create user',
+      );
+      final renamed = await storage.rename(moved.path, 'Create account');
+      expect(renamed.path, 'shared/create-account.json');
+      await storage.delete(renamed.path);
+      expect(
+        (await storage.list()).where((entry) => !entry.directory),
+        isEmpty,
+      );
+    },
+  );
 
-  test('variables, authorization, body and query resolve before sending', () async {
-    final transport = _Transport();
-    final executor = RequestExecutor(transport: transport);
-    const request = HttpRequestFile(
-      name: 'Lookup',
-      method: 'POST',
-      url: '{{baseUrl}}/items',
-      query: [RequestKeyValue(key: 'q', value: '{{term}}')],
-      headers: [RequestKeyValue(key: 'X-Project', value: '{{project}}')],
-      body: RequestBody(type: 'json', value: {'term': '{{term}}'}),
-    );
-    const context = RequestExecutionContext(
-      projectVariables: {
-        'baseUrl': 'https://example.com',
-        'project': 'tamtoot',
-        'token': 'shared-placeholder',
-      },
-      secretVariables: {'token': 'local-token'},
-      runtimeVariables: {'term': 'dart'},
-      projectAuth: RequestEnvironment(
-        authType: 'bearer',
-        authToken: '{{token}}',
-      ),
-    );
+  test(
+    'empty request folders persist and requests duplicate beside source',
+    () async {
+      final directory = await Directory.systemTemp.createTemp(
+        'tamtoot-folders-',
+      );
+      addTearDown(() => directory.delete(recursive: true));
+      final storage = RequestStorage(FileGitRepositoryStore(directory));
 
-    final result = await executor.execute('lookup', request, context);
-    expect(result.success, isTrue);
-    final sent = transport.sent.single;
-    expect(sent.uri.queryParameters['q'], 'dart');
-    expect(sent.headers['Authorization'], 'Bearer local-token');
-    expect(sent.headers['X-Project'], 'tamtoot');
-    expect(jsonDecode(utf8.decode(sent.body)), {'term': 'dart'});
-  });
+      await storage.createFolder('team/payments');
+      expect(
+        File(
+          '${directory.path}/.tamtoot/requests/team/payments/.keep',
+        ).existsSync(),
+        isTrue,
+      );
+      expect(
+        (await storage.list())
+            .where((entry) => entry.directory)
+            .map((entry) => entry.path),
+        containsAll(['team/', 'team/payments/']),
+      );
 
-  test('batch preserves order, limits concurrency mode and stops sequentially', () async {
-    final transport = _Transport();
-    final executor = RequestExecutor(transport: transport);
-    final requests = [
-      (id: 'one', request: const HttpRequestFile(name: 'One', url: 'https://example.com/one')),
-      (id: 'fail', request: const HttpRequestFile(name: 'Fail', url: 'https://example.com/fail')),
-      (id: 'three', request: const HttpRequestFile(name: 'Three', url: 'https://example.com/three')),
-    ];
-    final stopped = await executor.executeMany(
-      requests,
-      const RequestExecutionContext(),
-      const BatchExecutionOptions(stopOnError: true),
-    );
-    expect(stopped.results.map((item) => item.id), ['one', 'fail']);
+      final original = await storage.create(
+        'team/payments',
+        const HttpRequestFile(
+          name: 'Create payment',
+          method: 'POST',
+          url: 'https://example.com/payments',
+          headers: [RequestKeyValue(key: 'X-Team', value: 'mobile')],
+        ),
+      );
+      final first = await storage.duplicate(original.path);
+      final second = await storage.duplicate(original.path);
+      expect(first.path, 'team/payments/create-payment-copy.json');
+      expect(second.path, 'team/payments/create-payment-copy-2.json');
+      expect(
+        (await storage.read(first.path)).url,
+        'https://example.com/payments',
+      );
+      expect((await storage.read(first.path)).headers.single.value, 'mobile');
+    },
+  );
 
-    transport.sent.clear();
-    final parallel = await executor.executeMany(
-      requests,
-      const RequestExecutionContext(),
-      const BatchExecutionOptions(parallel: true, maxConcurrency: 5),
-    );
-    expect(parallel.results.map((item) => item.id), ['one', 'fail', 'three']);
-    expect((await executor.executeMany([], const RequestExecutionContext())).results, isEmpty);
-  });
+  test(
+    'variables, authorization, body and query resolve before sending',
+    () async {
+      final transport = _Transport();
+      final executor = RequestExecutor(transport: transport);
+      const request = HttpRequestFile(
+        name: 'Lookup',
+        method: 'POST',
+        url: '{{baseUrl}}/items',
+        query: [RequestKeyValue(key: 'q', value: '{{term}}')],
+        headers: [RequestKeyValue(key: 'X-Project', value: '{{project}}')],
+        body: RequestBody(type: 'json', value: {'term': '{{term}}'}),
+      );
+      const context = RequestExecutionContext(
+        projectVariables: {
+          'baseUrl': 'https://example.com',
+          'project': 'tamtoot',
+          'token': 'shared-placeholder',
+        },
+        secretVariables: {'token': 'local-token'},
+        runtimeVariables: {'term': 'dart'},
+        projectAuth: RequestEnvironment(
+          authType: 'bearer',
+          authToken: '{{token}}',
+        ),
+      );
+
+      final result = await executor.execute('lookup', request, context);
+      expect(result.success, isTrue);
+      expect(result.startedAt, isNotNull);
+      expect(
+        result.startedAt!.isAfter(
+          DateTime.now().subtract(const Duration(seconds: 5)),
+        ),
+        isTrue,
+      );
+      expect(result.duration, isA<Duration>());
+      final sent = transport.sent.single;
+      expect(sent.uri.queryParameters['q'], 'dart');
+      expect(sent.headers['Authorization'], 'Bearer local-token');
+      expect(sent.headers['X-Project'], 'tamtoot');
+      expect(jsonDecode(utf8.decode(sent.body)), {'term': 'dart'});
+    },
+  );
+
+  test(
+    'batch preserves order, limits concurrency mode and stops sequentially',
+    () async {
+      final transport = _Transport();
+      final executor = RequestExecutor(transport: transport);
+      final requests = [
+        (
+          id: 'one',
+          request: const HttpRequestFile(
+            name: 'One',
+            url: 'https://example.com/one',
+          ),
+        ),
+        (
+          id: 'fail',
+          request: const HttpRequestFile(
+            name: 'Fail',
+            url: 'https://example.com/fail',
+          ),
+        ),
+        (
+          id: 'three',
+          request: const HttpRequestFile(
+            name: 'Three',
+            url: 'https://example.com/three',
+          ),
+        ),
+      ];
+      final stopped = await executor.executeMany(
+        requests,
+        const RequestExecutionContext(),
+        const BatchExecutionOptions(stopOnError: true),
+      );
+      expect(stopped.results.map((item) => item.id), ['one', 'fail']);
+
+      transport.sent.clear();
+      final parallel = await executor.executeMany(
+        requests,
+        const RequestExecutionContext(),
+        const BatchExecutionOptions(parallel: true, maxConcurrency: 5),
+      );
+      expect(parallel.results.map((item) => item.id), ['one', 'fail', 'three']);
+      expect(
+        (await executor.executeMany(
+          [],
+          const RequestExecutionContext(),
+        )).results,
+        isEmpty,
+      );
+    },
+  );
 
   test('parallel execution never exceeds the hard concurrency limit', () async {
     final transport = _ConcurrencyTransport();
@@ -220,115 +321,121 @@ void main() {
     );
     expect(utf8.decode(form.body), 'space=a+b&symbol=a%26b');
     expect(form.headers, isNot(contains('Authorization')));
-    expect(
-      form.headers['Content-Type'],
-      'application/x-www-form-urlencoded',
-    );
+    expect(form.headers['Content-Type'], 'application/x-www-form-urlencoded');
 
     final explicit = executor.resolve(
       'explicit',
       const HttpRequestFile(
         name: 'Explicit',
         url: 'https://example.com',
-        headers: [
-          RequestKeyValue(key: 'Authorization', value: 'Custom value'),
-        ],
+        headers: [RequestKeyValue(key: 'Authorization', value: 'Custom value')],
       ),
       context,
     );
     expect(explicit.headers['Authorization'], 'Custom value');
   });
 
-  test('streaming transport stops before retaining an oversized response', () async {
-    final client = _StreamingClient([
-      Uint8List(3 * 1024 * 1024),
-      Uint8List(2 * 1024 * 1024),
-    ]);
-    final transport = PackageRequestHttpTransport(client: client);
-    await expectLater(
-      transport.send(
-        ResolvedHttpRequest(
-          id: 'large',
-          name: 'Large',
-          method: 'GET',
-          uri: Uri.parse('https://example.com'),
-          headers: const {},
-          body: const [],
+  test(
+    'streaming transport stops before retaining an oversized response',
+    () async {
+      final client = _StreamingClient([
+        Uint8List(3 * 1024 * 1024),
+        Uint8List(2 * 1024 * 1024),
+      ]);
+      final transport = PackageRequestHttpTransport(client: client);
+      await expectLater(
+        transport.send(
+          ResolvedHttpRequest(
+            id: 'large',
+            name: 'Large',
+            method: 'GET',
+            uri: Uri.parse('https://example.com'),
+            headers: const {},
+            body: const [],
+          ),
         ),
-      ),
-      throwsStateError,
-    );
-    transport.close();
-  });
+        throwsStateError,
+      );
+      transport.close();
+    },
+  );
 
-  test('malformed files are isolated and move conflicts preserve sources', () async {
-    final directory = await Directory.systemTemp.createTemp('tamtoot-broken-');
-    addTearDown(() => directory.delete(recursive: true));
-    final store = FileGitRepositoryStore(directory);
-    final storage = RequestStorage(store);
-    await store.writeText('.tamtoot/requests/broken.json', '{broken');
-    await storage.create(
-      'source',
-      const HttpRequestFile(
-        name: 'Health',
-        url: 'https://example.com/health',
-        attachments: [
-          RequestAttachment(type: 'markdown', path: 'health.md'),
-        ],
-      ),
-    );
-    await storage.saveMarkdown('source/health.json', 'health.md', '# Health');
-    await storage.create(
-      'target',
-      const HttpRequestFile(name: 'Existing', url: 'https://example.com'),
-    );
-    await storage.saveMarkdown(
-      'target/existing.json',
-      'health.md',
-      '# Existing',
-    );
+  test(
+    'malformed files are isolated and move conflicts preserve sources',
+    () async {
+      final directory = await Directory.systemTemp.createTemp(
+        'tamtoot-broken-',
+      );
+      addTearDown(() => directory.delete(recursive: true));
+      final store = FileGitRepositoryStore(directory);
+      final storage = RequestStorage(store);
+      await store.writeText('.tamtoot/requests/broken.json', '{broken');
+      await storage.create(
+        'source',
+        const HttpRequestFile(
+          name: 'Health',
+          url: 'https://example.com/health',
+          attachments: [RequestAttachment(type: 'markdown', path: 'health.md')],
+        ),
+      );
+      await storage.saveMarkdown('source/health.json', 'health.md', '# Health');
+      await storage.create(
+        'target',
+        const HttpRequestFile(name: 'Existing', url: 'https://example.com'),
+      );
+      await storage.saveMarkdown(
+        'target/existing.json',
+        'health.md',
+        '# Existing',
+      );
 
-    final entries = await storage.list();
-    expect(entries.where((entry) => !entry.valid).single.path, 'broken.json');
-    await expectLater(
-      storage.move('source/health.json', 'target'),
-      throwsStateError,
-    );
-    expect((await storage.read('source/health.json')).name, 'Health');
-    expect(
-      await storage.readMarkdown('source/health.json', 'health.md'),
-      '# Health',
-    );
-  });
+      final entries = await storage.list();
+      expect(entries.where((entry) => !entry.valid).single.path, 'broken.json');
+      await expectLater(
+        storage.move('source/health.json', 'target'),
+        throwsStateError,
+      );
+      expect((await storage.read('source/health.json')).name, 'Health');
+      expect(
+        await storage.readMarkdown('source/health.json', 'health.md'),
+        '# Health',
+      );
+    },
+  );
 
-  test('native storage rejects a symlinked requests directory', () async {
-    final directory = await Directory.systemTemp.createTemp('tamtoot-links-');
-    addTearDown(() => directory.delete(recursive: true));
-    final outside = await Directory('${directory.path}/outside').create();
-    await Directory('${directory.path}/project/.tamtoot').create(recursive: true);
-    await Link('${directory.path}/project/.tamtoot/requests').create(outside.path);
-    final storage = RequestStorage(
-      FileGitRepositoryStore(Directory('${directory.path}/project')),
-    );
-    await expectLater(
-      storage.create(
-        '',
-        const HttpRequestFile(name: 'Escape'),
-      ),
-      throwsA(isA<Exception>()),
-    );
-    expect(await outside.list().toList(), isEmpty);
-  }, skip: Platform.isWindows);
+  test(
+    'native storage rejects a symlinked requests directory',
+    () async {
+      final directory = await Directory.systemTemp.createTemp('tamtoot-links-');
+      addTearDown(() => directory.delete(recursive: true));
+      final outside = await Directory('${directory.path}/outside').create();
+      await Directory(
+        '${directory.path}/project/.tamtoot',
+      ).create(recursive: true);
+      await Link(
+        '${directory.path}/project/.tamtoot/requests',
+      ).create(outside.path);
+      final storage = RequestStorage(
+        FileGitRepositoryStore(Directory('${directory.path}/project')),
+      );
+      await expectLater(
+        storage.create('', const HttpRequestFile(name: 'Escape')),
+        throwsA(isA<Exception>()),
+      );
+      expect(await outside.list().toList(), isEmpty);
+    },
+    skip: Platform.isWindows,
+  );
 
   test('invalid schema and unresolved variables produce safe errors', () async {
-    expect(
-      () => HttpRequestFile.parse('{"version":2}'),
-      throwsFormatException,
-    );
+    expect(() => HttpRequestFile.parse('{"version":2}'), throwsFormatException);
     final executor = RequestExecutor(transport: _Transport());
     final result = await executor.execute(
       'missing',
-      const HttpRequestFile(name: 'Missing', url: 'https://example.com/{{absent}}'),
+      const HttpRequestFile(
+        name: 'Missing',
+        url: 'https://example.com/{{absent}}',
+      ),
       const RequestExecutionContext(secretVariables: {'token': 'do-not-print'}),
     );
     expect(result.success, isFalse);

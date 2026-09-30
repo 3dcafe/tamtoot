@@ -23,6 +23,7 @@ class PreferenceStore implements PersistenceStore {
 
 class PlatformFiles implements FileSystemProvider, FileDialogs {
   final _opened = <Uri, XFile>{};
+  final _androidDocuments = <Uri>{};
   static const _android = MethodChannel('dev.tamtoot/documents');
   bool get _isAndroid =>
       !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
@@ -34,11 +35,21 @@ class PlatformFiles implements FileSystemProvider, FileDialogs {
     if (WorkspaceRoots.contains(uri)) return true;
     if (kIsWeb || uri.scheme != 'file') return false;
     final mobile = _isAndroid || defaultTargetPlatform == TargetPlatform.iOS;
+    if (_isAndroid && _androidDocuments.contains(uri)) return true;
     return !mobile || !_opened.containsKey(uri);
   }
 
   @override
   Future<FileEntry?> open() async {
+    if (_isAndroid) {
+      final result = await _android.invokeMapMethod<String, dynamic>(
+        'openText',
+      );
+      if (result == null) return null;
+      final uri = Uri.parse(result['uri']! as String);
+      _androidDocuments.add(uri);
+      return FileEntry(uri, result['name']! as String);
+    }
     final file = await openFile();
     if (file == null) return null;
     final uri = kIsWeb
@@ -50,6 +61,12 @@ class PlatformFiles implements FileSystemProvider, FileDialogs {
 
   @override
   Future<String> read(Uri uri) async {
+    if (_isAndroid && _androidDocuments.contains(uri)) {
+      return (await _android.invokeMethod<String>('readText', {
+            'uri': uri.toString(),
+          })) ??
+          '';
+    }
     if (_opened.containsKey(uri)) return _opened[uri]!.readAsString();
     final virtual = await WorkspaceRoots.readText(uri);
     if (virtual != null) return virtual;
@@ -58,6 +75,13 @@ class PlatformFiles implements FileSystemProvider, FileDialogs {
 
   @override
   Future<void> write(Uri uri, String text) async {
+    if (_isAndroid && _androidDocuments.contains(uri)) {
+      await _android.invokeMethod<bool>('writeText', {
+        'uri': uri.toString(),
+        'text': text,
+      });
+      return;
+    }
     if (await WorkspaceRoots.writeText(uri, text)) return;
     await writeLocal(uri, text);
   }
@@ -88,7 +112,10 @@ class PlatformFiles implements FileSystemProvider, FileDialogs {
         'name': name,
         'text': content,
       });
-      return uri == null ? null : Uri.parse(uri);
+      if (uri == null) return null;
+      final parsed = Uri.parse(uri);
+      _androidDocuments.add(parsed);
+      return parsed;
     }
     if (!kIsWeb && defaultTargetPlatform == TargetPlatform.iOS) {
       throw UnsupportedError(

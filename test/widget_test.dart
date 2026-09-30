@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -7,8 +9,9 @@ import 'package:tamtoot/app/app.dart';
 import 'package:tamtoot/app/providers.dart';
 import 'package:tamtoot/editor/widgets/code_editor.dart';
 import 'package:tamtoot/core/completion/project_completion.dart';
+import 'package:tamtoot/core/git/git_service.dart';
 import 'package:tamtoot/languages/language_registry.dart';
-import 'explorer_test.dart' show RepositoryMemory;
+import 'explorer_test.dart' show IndicatorGit, RepositoryMemory;
 import 'support.dart';
 import 'package:tamtoot/core/filesystem/filesystem.dart';
 
@@ -189,16 +192,10 @@ void main() {
       );
       await tester.pump(const Duration(milliseconds: 50));
       expect(find.text('car: Car'), findsOneWidget);
-      for (final key in [LogicalKeyboardKey.keyA, LogicalKeyboardKey.keyR]) {
-        expect(
-          await tester.sendKeyEvent(
-            key,
-            platform: 'windows',
-            character: key.keyLabel.toLowerCase(),
-          ),
-          isTrue,
-        );
-      }
+      expect(
+        await tester.sendKeyEvent(LogicalKeyboardKey.tab, platform: 'windows'),
+        isTrue,
+      );
       await tester.pump();
       expect(second.editor.text, '${initial}car');
       debugDefaultTargetPlatformOverride = null;
@@ -207,6 +204,52 @@ void main() {
       await tester.runAsync(session.dispose);
     },
   );
+  testWidgets('Git panel ignores unrelated updates and refreshes silently', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(1280, 900));
+    final git = IndicatorGit();
+    final session = await testSession(git: git);
+    final root = Uri.parse('memory:///project/');
+    session.workspaceRoot = root;
+    session.workspaceHasGit = true;
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [sessionProvider.overrideWithValue(session)],
+        child: const TamtootApp(),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('sidebar-git')));
+    await tester.pumpAndSettle();
+    final initialCalls = git.statusCalls;
+
+    session.log('Unrelated Output message');
+    await tester.pump(const Duration(milliseconds: 700));
+    expect(git.statusCalls, initialCalls);
+
+    final document = session.documents.create(
+      'a.dart',
+      'saved',
+      uri: root.resolve('a.dart'),
+      savedText: 'saved',
+    );
+    session.observe(document);
+    git.pendingStatus = Completer<List<GitStatusEntry>>();
+    document.editor.replaceSelection('changed');
+    await tester.pump(const Duration(milliseconds: 700));
+    expect(git.statusCalls, initialCalls + 1);
+    expect(find.byType(LinearProgressIndicator), findsNothing);
+
+    git.pendingStatus!.complete(git.entries);
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Unsaved —'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox());
+    await tester.pumpAndSettle();
+    await tester.runAsync(session.dispose);
+    await tester.binding.setSurfaceSize(null);
+  });
   testWidgets('small tablet and large desktop layouts remain renderable', (
     tester,
   ) async {
@@ -257,13 +300,41 @@ void main() {
       await session.run('editor.start');
       await tester.pump();
       final origin = tester.getTopLeft(find.byType(CodeEditor));
-      await tester.longPressAt(origin + const Offset(105, 11));
+      final wordPoint = origin + const Offset(105, 11);
+      await tester.tapAt(wordPoint);
+      await tester.pump(const Duration(milliseconds: 40));
+      await tester.tapAt(wordPoint);
       await tester.pump();
       expect(session.documents.active!.editor.selection.isCollapsed, false);
+      final selection = session.documents.active!.editor.selection;
+      final selected = session.documents.active!.editor.text.substring(
+        selection.start,
+        selection.end,
+      );
+      expect(selected, matches(RegExp(r'^\w+$')));
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox());
       await tester.pumpAndSettle();
       await tester.runAsync(session.dispose);
+    },
+  );
+
+  test(
+    'folding discovers class and method bodies but skips control blocks',
+    () {
+      final regions = foldingRegionsForLines(const [
+        'class Car {',
+        '  void drive() {',
+        '    if (ready) {',
+        '      print("go");',
+        '    }',
+        '  }',
+        '}',
+      ]);
+      expect(regions.map((region) => (region.startLine, region.endLine)), [
+        (0, 6),
+        (1, 5),
+      ]);
     },
   );
 }

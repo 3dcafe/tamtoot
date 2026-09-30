@@ -39,6 +39,8 @@ class RepositoryMemory extends GitRepositoryStore {
 }
 
 class IndicatorGit implements GitService, GitPublicationProvider {
+  int statusCalls = 0;
+  Completer<List<GitStatusEntry>>? pendingStatus;
   List<GitStatusEntry> entries = [
     const GitStatusEntry(' ', 'M', 'lib/a.dart'),
     const GitStatusEntry('?', '?', 'new.dart'),
@@ -48,7 +50,23 @@ class IndicatorGit implements GitService, GitPublicationProvider {
   @override
   Future<bool> isRepository(Uri directory) async => true;
   @override
-  Future<List<GitStatusEntry>> statusEntries(Uri directory) async => entries;
+  Future<List<GitStatusEntry>> statusEntries(Uri directory) async {
+    statusCalls++;
+    final pending = pendingStatus;
+    if (pending == null) return entries;
+    final result = await pending.future;
+    pendingStatus = null;
+    return result;
+  }
+
+  @override
+  Future<GitResult> remoteUrl(Uri directory, {String name = 'origin'}) async =>
+      const GitResult(
+        exitCode: 0,
+        stdout: 'https://example.com/project.git',
+        stderr: '',
+        arguments: [],
+      );
   @override
   Future<GitPublicationState> publicationState(Uri directory) async =>
       const GitPublicationState(
@@ -199,6 +217,40 @@ void main() {
       await gitSession.dispose();
     },
   );
+  test('unchanged periodic Git refresh does not rebuild the session', () async {
+    final git = IndicatorGit();
+    final session = await testSession(git: git);
+    session.workspaceRoot = Uri.parse('memory:///project/');
+    var events = 0;
+    final subscription = session.changes.listen((_) => events++);
+
+    await session.refreshGitIndicators();
+    expect(events, 1);
+    final revision = session.gitStatusRevision;
+    await session.refreshGitIndicators();
+    expect(git.statusCalls, 2);
+    expect(session.gitStatusRevision, revision);
+    expect(events, 1);
+
+    git.entries = [...git.entries, const GitStatusEntry(' ', 'M', 'b.dart')];
+    await session.refreshGitIndicators();
+    expect(session.gitStatusRevision, revision + 1);
+    expect(events, 2);
+
+    await subscription.cancel();
+    await session.dispose();
+  });
+  test('Output records wall-clock timestamps and can be cleared', () async {
+    final session = await testSession();
+    session.log('Request completed');
+    expect(
+      session.output.last,
+      matches(r'^\[\d{2}:\d{2}:\d{2}\] Request completed$'),
+    );
+    session.clearOutput();
+    expect(session.output, isEmpty);
+    await session.dispose();
+  });
   group('unpublished commit history', () {
     late RepositoryMemory store;
     late GitObjectDatabase db;

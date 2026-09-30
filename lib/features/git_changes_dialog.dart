@@ -27,21 +27,31 @@ class _GitChangesDialogState extends State<GitChangesDialog> {
   final selected = <String>{};
   final unsaved = <String>{};
   bool busy = true, ready = false, _identityLoaded = false;
+  bool _loading = false;
   StreamSubscription<int>? _changes;
   Timer? _refreshTimer;
+  late String _observedState;
   String branch = '', remote = '', feedback = '';
   GitService get git => widget.session.git;
 
   @override
   void initState() {
     super.initState();
+    _observedState = _stateFingerprint();
     _load();
     if (widget.embedded) {
       _changes = widget.session.changes.listen((_) {
+        final current = _stateFingerprint();
+        if (current == _observedState) return;
+        _observedState = current;
         _refreshTimer?.cancel();
         _refreshTimer = Timer(const Duration(milliseconds: 600), () {
-          if (mounted && widget.visible && !busy && !widget.session.gitBusy) {
-            _load();
+          if (mounted &&
+              widget.visible &&
+              !_loading &&
+              !busy &&
+              !widget.session.gitBusy) {
+            _load(background: true);
           }
         });
       });
@@ -51,7 +61,7 @@ class _GitChangesDialogState extends State<GitChangesDialog> {
   @override
   void didUpdateWidget(GitChangesDialog oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (!oldWidget.visible && widget.visible && !busy) _load();
+    if (!oldWidget.visible && widget.visible && !busy && !_loading) _load();
   }
 
   @override
@@ -70,12 +80,31 @@ class _GitChangesDialogState extends State<GitChangesDialog> {
     return text;
   }
 
-  Future<void> _load() async {
-    if (!mounted) return;
-    setState(() {
-      busy = true;
-      ready = false;
-    });
+  String _stateFingerprint() {
+    final documents =
+        widget.session.documents.documents
+            .where(
+              (document) =>
+                  document.uri?.toString().startsWith(root.toString()) ?? false,
+            )
+            .map(
+              (document) =>
+                  '${document.id}:${document.uri}:${document.dirty ? 1 : 0}',
+            )
+            .toList()
+          ..sort();
+    return '${widget.session.gitStatusRevision}|${documents.join('|')}';
+  }
+
+  Future<void> _load({bool background = false}) async {
+    if (!mounted || _loading) return;
+    _loading = true;
+    if (!background) {
+      setState(() {
+        busy = true;
+        ready = false;
+      });
+    }
     try {
       final identity = git;
       if (identity is GitIdentityProvider) {
@@ -123,7 +152,13 @@ class _GitChangesDialogState extends State<GitChangesDialog> {
     } catch (error) {
       feedback = safeError(error);
     } finally {
-      if (mounted) setState(() => busy = false);
+      _loading = false;
+      _observedState = _stateFingerprint();
+      if (mounted) {
+        setState(() {
+          if (!background) busy = false;
+        });
+      }
     }
   }
 
@@ -385,9 +420,9 @@ class _GitChangesDialogState extends State<GitChangesDialog> {
         }
         if (nameController.text.trim().isEmpty ||
             emailController.text.trim().isEmpty ||
-            RegExp(r'[\r\n<>\x00#;"\\]').hasMatch(
-              '${nameController.text}${emailController.text}',
-            )) {
+            RegExp(
+              r'[\r\n<>\x00#;"\\]',
+            ).hasMatch('${nameController.text}${emailController.text}')) {
           throw const FormatException('Enter a valid author name and email.');
         }
         (await git.setRemoteUrl(root, remoteUri)).ensureOk();

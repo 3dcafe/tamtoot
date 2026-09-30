@@ -2,9 +2,16 @@ import '../git/git_store.dart';
 import 'http_request.dart';
 
 class RequestEntry {
-  const RequestEntry({required this.path, required this.name, required this.method, this.error});
+  const RequestEntry({
+    required this.path,
+    required this.name,
+    required this.method,
+    this.error,
+    this.directory = false,
+  });
   final String path, name, method;
   final String? error;
+  final bool directory;
   bool get valid => error == null;
 }
 
@@ -16,25 +23,39 @@ class RequestStorage {
   static const localEnvironmentPath = '.tamtoot/environment.local.json';
 
   String _requestPath(String path, {String extension = '.json'}) {
-    final normalized = path.replaceAll('\\', '/').replaceAll(RegExp(r'^/+|/+$'), '');
+    final normalized = path
+        .replaceAll('\\', '/')
+        .replaceAll(RegExp(r'^/+|/+$'), '');
     final parts = normalized.split('/');
-    if (normalized.isEmpty || parts.any((part) => part.isEmpty || part == '.' || part == '..') || !normalized.toLowerCase().endsWith(extension)) {
+    if (normalized.isEmpty ||
+        parts.any((part) => part.isEmpty || part == '.' || part == '..') ||
+        !normalized.toLowerCase().endsWith(extension)) {
       throw const FormatException('Path must remain inside .tamtoot/requests.');
     }
     return '$root/$normalized';
   }
 
   String _folder(String folder) {
-    final normalized = folder.replaceAll('\\', '/').replaceAll(RegExp(r'^/+|/+$'), '');
+    final normalized = folder
+        .replaceAll('\\', '/')
+        .replaceAll(RegExp(r'^/+|/+$'), '');
     if (normalized.isEmpty) return root;
-    if (normalized.split('/').any((part) => part.isEmpty || part == '.' || part == '..')) {
-      throw const FormatException('Folder must remain inside .tamtoot/requests.');
+    if (normalized
+        .split('/')
+        .any((part) => part.isEmpty || part == '.' || part == '..')) {
+      throw const FormatException(
+        'Folder must remain inside .tamtoot/requests.',
+      );
     }
     return '$root/$normalized';
   }
 
   static String safeName(String value) {
-    final slug = value.toLowerCase().trim().replaceAll(RegExp(r'[^a-z0-9]+'), '-').replaceAll(RegExp(r'^-+|-+$'), '');
+    final slug = value
+        .toLowerCase()
+        .trim()
+        .replaceAll(RegExp(r'[^a-z0-9]+'), '-')
+        .replaceAll(RegExp(r'^-+|-+$'), '');
     if (slug.isEmpty) return 'request';
     return slug.length > 80 ? slug.substring(0, 80) : slug;
   }
@@ -75,30 +96,99 @@ class RequestStorage {
         }
       }
     }
+
     final workers = requestPaths.length.clamp(0, 8);
     await Future.wait(List.generate(workers, (_) => worker()));
-    final entries = loaded.whereType<RequestEntry>().toList();
-    entries.sort((a, b) => a.path.compareTo(b.path));
+    final folders = <String>{};
+    for (final fullPath in paths.where((path) => path.startsWith('$root/'))) {
+      final relative = fullPath.substring(root.length + 1);
+      final parts = relative.split('/');
+      for (var i = 1; i < parts.length; i++) {
+        folders.add('${parts.take(i).join('/')}/');
+      }
+    }
+    final entries = <RequestEntry>[
+      for (final folder in folders)
+        RequestEntry(
+          path: folder,
+          name: folder.substring(0, folder.length - 1).split('/').last,
+          method: '',
+          directory: true,
+        ),
+      ...loaded.whereType<RequestEntry>(),
+    ];
+    entries.sort((a, b) {
+      final path = a.path.compareTo(b.path);
+      if (path != 0) return path;
+      return a.directory == b.directory ? 0 : (a.directory ? -1 : 1);
+    });
     return entries;
   }
 
-  Future<HttpRequestFile> read(String path) async => HttpRequestFile.parse(await store.readText(_requestPath(path)));
+  Future<HttpRequestFile> read(String path) async =>
+      HttpRequestFile.parse(await store.readText(_requestPath(path)));
 
   Future<RequestEntry> create(String folder, HttpRequestFile request) async {
     request.validate();
-    final relative = [if (folder.trim().isNotEmpty) folder, '${safeName(request.name)}.json'].join('/');
+    final relative = [
+      if (folder.trim().isNotEmpty) folder,
+      '${safeName(request.name)}.json',
+    ].join('/');
     final path = _requestPath(relative);
-    if (await store.exists(path)) throw StateError('Request already exists: $relative');
+    if (await store.exists(path)) {
+      throw StateError('Request already exists: $relative');
+    }
     await store.validateRegularFilePath(path);
     await store.createDirectory(_folder(folder));
     await store.writeText(path, '${request.encode()}\n');
-    return RequestEntry(path: relative, name: request.name, method: request.method);
+    return RequestEntry(
+      path: relative,
+      name: request.name,
+      method: request.method,
+    );
   }
 
   Future<void> createFolder(String folder) async {
     final path = _folder(folder);
     await store.validateRegularFilePath(path);
     await store.createDirectory(path);
+    final marker = '$path/.keep';
+    await store.validateRegularFilePath(marker);
+    if (!await store.exists(marker)) await store.writeText(marker, '');
+  }
+
+  Future<RequestEntry> duplicate(String path) async {
+    final request = await read(path);
+    final slash = path.lastIndexOf('/');
+    final folder = slash < 0 ? '' : path.substring(0, slash);
+    final original = path.split('/').last.replaceFirst(RegExp(r'\.json$'), '');
+    var suffix = 1;
+    while (true) {
+      final label = suffix == 1 ? 'copy' : 'copy-$suffix';
+      final filename = '$original-$label.json';
+      final relative = [if (folder.isNotEmpty) folder, filename].join('/');
+      final target = _requestPath(relative);
+      if (!await store.exists(target)) {
+        final copy = HttpRequestFile(
+          name: '${request.name} Copy${suffix == 1 ? '' : ' $suffix'}',
+          method: request.method,
+          url: request.url,
+          headers: request.headers,
+          query: request.query,
+          body: request.body,
+          auth: request.auth,
+          attachments: const [],
+        );
+        await store.validateRegularFilePath(target);
+        await store.writeText(target, '${copy.encode()}\n');
+        return RequestEntry(
+          path: relative,
+          name: copy.name,
+          method: copy.method,
+        );
+      }
+      suffix++;
+    }
   }
 
   Future<void> save(String path, HttpRequestFile request) async {
@@ -112,22 +202,45 @@ class RequestStorage {
     final request = await read(path);
     final slash = path.lastIndexOf('/');
     final folder = slash < 0 ? '' : path.substring(0, slash);
-    final target = [if (folder.isNotEmpty) folder, '${safeName(newName)}.json'].join('/');
+    final target = [
+      if (folder.isNotEmpty) folder,
+      '${safeName(newName)}.json',
+    ].join('/');
     final targetPath = _requestPath(target);
-    if (await store.exists(targetPath)) throw StateError('Request already exists: $target');
+    if (await store.exists(targetPath)) {
+      throw StateError('Request already exists: $target');
+    }
     await store.validateRegularFilePath(targetPath);
-    final changed = HttpRequestFile(name: newName.trim(), method: request.method, url: request.url, headers: request.headers, query: request.query, body: request.body, auth: request.auth, attachments: request.attachments);
+    final changed = HttpRequestFile(
+      name: newName.trim(),
+      method: request.method,
+      url: request.url,
+      headers: request.headers,
+      query: request.query,
+      body: request.body,
+      auth: request.auth,
+      attachments: request.attachments,
+    );
     await store.writeText(targetPath, '${changed.encode()}\n');
     await store.delete(_requestPath(path));
-    return RequestEntry(path: target, name: changed.name, method: changed.method);
+    return RequestEntry(
+      path: target,
+      name: changed.name,
+      method: changed.method,
+    );
   }
 
   Future<RequestEntry> move(String path, String targetFolder) async {
     final request = await read(path);
     final filename = path.split('/').last;
-    final target = [if (targetFolder.trim().isNotEmpty) targetFolder, filename].join('/');
+    final target = [
+      if (targetFolder.trim().isNotEmpty) targetFolder,
+      filename,
+    ].join('/');
     final targetPath = _requestPath(target);
-    if (await store.exists(targetPath)) throw StateError('Request already exists: $target');
+    if (await store.exists(targetPath)) {
+      throw StateError('Request already exists: $target');
+    }
     await store.validateRegularFilePath(targetPath);
     final sourceFolder = _requestPath(path).split('/')..removeLast();
     final targetDirectory = _folder(targetFolder);
@@ -149,7 +262,11 @@ class RequestStorage {
       }
     }
     await store.delete(_requestPath(path));
-    return RequestEntry(path: target, name: request.name, method: request.method);
+    return RequestEntry(
+      path: target,
+      name: request.name,
+      method: request.method,
+    );
   }
 
   Future<void> delete(String path) => store.delete(_requestPath(path));
@@ -168,20 +285,38 @@ class RequestStorage {
 
   Future<String> readMarkdown(String requestPath, String attachmentPath) async {
     final path = _attachmentPath(requestPath, attachmentPath);
-    if (!await store.exists(path)) throw StateError('Documentation file not found.');
+    if (!await store.exists(path)) {
+      throw StateError('Documentation file not found.');
+    }
     return store.readText(path);
   }
 
-  Future<void> saveMarkdown(String requestPath, String attachmentPath, String content, {bool overwrite = true}) async {
+  Future<void> saveMarkdown(
+    String requestPath,
+    String attachmentPath,
+    String content, {
+    bool overwrite = true,
+  }) async {
     final path = _attachmentPath(requestPath, attachmentPath);
-    if (!overwrite && await store.exists(path)) throw StateError('Documentation already exists.');
+    if (!overwrite && await store.exists(path)) {
+      throw StateError('Documentation already exists.');
+    }
     await store.validateRegularFilePath(path);
     await store.writeText(path, content);
   }
 
-  Future<({RequestEnvironment project, RequestEnvironment local})> loadEnvironment() async => (
-    project: RequestEnvironment.parse(await store.exists(projectEnvironmentPath) ? await store.readText(projectEnvironmentPath) : null),
-    local: RequestEnvironment.parse(await store.exists(localEnvironmentPath) ? await store.readText(localEnvironmentPath) : null),
+  Future<({RequestEnvironment project, RequestEnvironment local})>
+  loadEnvironment() async => (
+    project: RequestEnvironment.parse(
+      await store.exists(projectEnvironmentPath)
+          ? await store.readText(projectEnvironmentPath)
+          : null,
+    ),
+    local: RequestEnvironment.parse(
+      await store.exists(localEnvironmentPath)
+          ? await store.readText(localEnvironmentPath)
+          : null,
+    ),
   );
 
   Future<void> saveProjectEnvironment(RequestEnvironment environment) async {

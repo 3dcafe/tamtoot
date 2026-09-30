@@ -6,7 +6,7 @@ Tamtoot is a **free code and plain-text editor** and an extensible Flutter IDE f
 
 ## Features
 
-- A custom Canvas-based editor with syntax highlighting, selection, undo/redo, search and replace, keyboard shortcuts, mouse selection, and touch input.
+- A custom Canvas-based editor with syntax highlighting, selection, code folding, undo/redo, search and replace, keyboard shortcuts, mouse selection, and touch input.
 - Multiple document tabs and recovery of unsaved documents between sessions.
 - A project tree that expands directories **in place**. Opening a child folder keeps the project root and sibling folders visible. Directory contents load on demand.
 - Subtle Explorer indicators, also aggregated onto parent folders:
@@ -58,13 +58,15 @@ The existing Windows workflows remain available separately.
 
 ## Everyday use
 
-- **File**: new/open/save/save as/save all, open project, clone repository.
+- **File**: new/open/save/save as/save all, open a file from the device, open project, clone repository. Android uses the system document picker and keeps permission to save later edits back to the selected file.
 - **Edit**: undo/redo, clipboard, find and replace.
 - **View**: show/hide panels, switch theme, reset layout, command palette.
 - **Tools → Settings**: theme, font, size, tabs, and keybindings.
 - **Tools → Install language package**: install versioned `language.json`, `syntax.json`, and optional `snippets.json` without rebuilding the IDE. The bundled languages and their extensions are documented below instead of being enumerated in the application UI.
 
-Drag panel dividers to resize. Click folders to expand or collapse them, and files to open them. Tap in the editor to position the cursor; long-press and drag to select text. Ordinary touch dragging scrolls the document.
+Drag panel dividers to resize. Click folders to expand or collapse them, and files to open them. Tap in the editor to position the cursor; double-click selects a complete word, and long-press and drag selects text on touch devices. Click the triangle beside a class or method line to collapse or expand its body. Ordinary touch dragging scrolls the document.
+
+Output uses one selectable text surface, so several log lines can be copied at once. Each entry includes its local completion time. Use **Clear** in the Output header to remove the current log.
 
 Common shortcuts: `Ctrl/⌘+S` saves, `Ctrl/⌘+Z` undoes, `Ctrl/⌘+Shift+Z` redoes, `Ctrl/⌘+F` finds, and `Ctrl/⌘+Shift+P` opens commands.
 
@@ -97,6 +99,8 @@ This is syntax coloring, not semantic analysis. Interpolated expressions inside 
 
 For Dart, C# and JavaScript files, typing an identifier or `.` after a variable opens lightweight project-aware suggestions. The list includes local variables, parameters, methods, fields, properties and constants. Each item shows its signature or type and the nearest preceding line or block comment, so API documentation remains visible while writing code. Tamtoot prioritizes members whose declaring type matches a local variable declaration or constructor expression. This index is lexical rather than a full compiler or LSP, so scope and type inference are intentionally limited.
 
+Press `Tab` or `Enter` to accept the highlighted completion. `Escape` closes the list and the arrow keys change the selected item.
+
 The project index runs asynchronously and reparses only files whose SHA-1 content hash changed. Its local cache is stored in `.tamtoot/cache/completions-v2.json` and ignored by Git. Tamtoot checks for changes at most once every ten seconds when completion is requested, while the current unsaved document is indexed directly in memory without content hashing. Dependency and generated directories (`node_modules`, `build`, `.dart_tool`, `.git`, `obj`) are excluded from indexing. File enumeration still traverses the project, and eligible source files are read during a refresh to compare hashes; this is not a filesystem watcher.
 
 ## Commit and push from the IDE
@@ -126,13 +130,19 @@ Text comparison supports UTF-8 files up to a combined 2 MiB preview limit. Binar
 
 ## HTTP Requests
 
-Open **Requests** beside Solution and Git, or choose **Tools → HTTP Requests…**. Requests can be organized in nested folders, edited, renamed, moved, deleted and run individually or as a selected batch. Batch execution can run sequentially or in parallel with a maximum of five concurrent requests, with an optional stop-on-error mode. Each result shows status, duration and a response preview.
+Open **Requests** beside Solution and Git, or choose **Tools → HTTP Requests…**. Requests can be organized in nested folders, edited, renamed, moved, deleted and run individually or as a selected batch. Empty folders contain a `.keep` marker, so they appear immediately and can be committed. Right-click or long-press a request to duplicate it beside the original. Batch execution can run sequentially or in parallel with a maximum of five concurrent requests, with an optional stop-on-error mode.
+
+Each run writes its local completion time, status and duration to Output. A result row shows a short preview; open it for a large selectable response viewer with separate Body and Headers tabs. JSON bodies are formatted automatically, while HTML and other text remain available without truncating the detailed view.
 
 Requests support GET, POST, PUT, PATCH, DELETE, HEAD and OPTIONS; query parameters and headers can be enabled independently. Bodies support JSON, text and URL-encoded forms. Project authorization can be inherited, disabled or overridden with a bearer token. `{{variable}}` placeholders are resolved in URLs, query parameters, headers, bodies and tokens. Runtime values override local secrets, which override shared project variables.
 
 Project request files live under `.tamtoot/requests/**` and shared variables live in `.tamtoot/environment.json`. These files appear in Tamtoot's Git view so a team can commit and exchange them with the rest of the project. Secrets belong in `.tamtoot/environment.local.json`; this file is excluded from Tamtoot Git operations and from the repository `.gitignore`. If a literal project or request bearer token is entered, Tamtoot moves it into the local environment and stores only a `{{variable}}` reference in the shared file.
 
 Request documentation is ordinary Markdown beside its request. Use **New Documentation** to create it or **Attach Markdown** to link an existing neighboring `.md` file. Request and environment files use version 1 JSON and reject unsupported versions or paths outside their project folders.
+
+## Signed Android App Bundle
+
+The manual GitHub workflow [Build signed Android AAB](.github/workflows/build-android-aab.yml) creates a release App Bundle without committing signing credentials. Configure the four repository secrets described in [the Russian Android release guide](docs/ru/android-release.md), run the workflow from **Actions**, and download the `tamtoot-android-aab` artifact. A local key created for publishing must be backed up securely; losing it can prevent future updates of the installed application.
 
 ## Model profiles and prompts
 

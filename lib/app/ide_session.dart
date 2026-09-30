@@ -45,8 +45,47 @@ class IdeSession {
   Map<String, GitStatusEntry> _gitEntries = {};
   Set<String> _unpublished = {};
   String? gitStatusNote;
+  int _gitStatusRevision = 0;
+  int get gitStatusRevision => _gitStatusRevision;
   bool _refreshingGit = false;
   Timer? _gitTimer;
+
+  bool _sameGitEntry(GitStatusEntry a, GitStatusEntry b) =>
+      a.index == b.index &&
+      a.workTree == b.workTree &&
+      a.path == b.path &&
+      a.renameFrom == b.renameFrom;
+
+  bool _sameGitState(
+    Map<String, GitStatusEntry> status,
+    Set<String> unpublished,
+    String? note,
+  ) {
+    if (gitStatusNote != note ||
+        _gitEntries.length != status.length ||
+        _unpublished.length != unpublished.length ||
+        !_unpublished.every(unpublished.contains)) {
+      return false;
+    }
+    for (final entry in status.entries) {
+      final current = _gitEntries[entry.key];
+      if (current == null || !_sameGitEntry(current, entry.value)) return false;
+    }
+    return true;
+  }
+
+  void _setGitState(
+    Map<String, GitStatusEntry> status,
+    Set<String> unpublished,
+    String? note,
+  ) {
+    if (_sameGitState(status, unpublished, note)) return;
+    _gitEntries = status;
+    _unpublished = unpublished;
+    gitStatusNote = note;
+    _gitStatusRevision++;
+    changed(persist: false);
+  }
 
   FileIndicators indicators(
     Uri? uri, {
@@ -118,16 +157,10 @@ class IdeSession {
         }
       }
       if (workspaceRoot != root || _disposed) return;
-      _gitEntries = status;
-      _unpublished = unpublished;
-      gitStatusNote = note;
-      changed(persist: false);
+      _setGitState(status, unpublished, note);
     } catch (error) {
       if (workspaceRoot == root && !_disposed) {
-        gitStatusNote = 'Git status unavailable: $error';
-        _gitEntries = {};
-        _unpublished = {};
-        changed(persist: false);
+        _setGitState({}, {}, 'Git status unavailable: $error');
       }
     } finally {
       _refreshingGit = false;
@@ -175,9 +208,21 @@ class IdeSession {
 
   void log(String value, {bool error = false}) {
     message = value;
-    output.add(value);
+    final now = DateTime.now().toLocal();
+    final time = [
+      now.hour,
+      now.minute,
+      now.second,
+    ].map((part) => part.toString().padLeft(2, '0')).join(':');
+    output.add('[$time] $value');
     if (output.length > 500) output.removeAt(0);
     if (error) errors.add(value);
+    changed(persist: false);
+  }
+
+  void clearOutput() {
+    if (output.isEmpty) return;
+    output.clear();
     changed(persist: false);
   }
 

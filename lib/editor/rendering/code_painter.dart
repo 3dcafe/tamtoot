@@ -20,6 +20,9 @@ class CodePainter extends CustomPainter {
     required this.lineHeight,
     required this.focused,
     required this.composing,
+    required this.visibleLines,
+    required this.foldRegions,
+    required this.collapsedFolds,
   });
   final EditorController editor;
   final DocumentSyntax syntax;
@@ -29,6 +32,9 @@ class CodePainter extends CustomPainter {
   final double scrollY, scrollX, lineHeight;
   final bool focused;
   final TextRange composing;
+  final List<int> visibleLines;
+  final List<FoldingRegion> foldRegions;
+  final Set<int> collapsedFolds;
   @override
   void paint(Canvas canvas, Size size) {
     canvas.save();
@@ -41,11 +47,12 @@ class CodePainter extends CustomPainter {
     final current = editor.buffer.positionAt(editor.selection.extent);
     final paint = Paint();
     for (
-      var line = viewport.firstLine(editor.buffer.lineCount);
-      line < viewport.endLine(editor.buffer.lineCount);
-      line++
+      var displayLine = viewport.firstLine(visibleLines.length);
+      displayLine < viewport.endLine(visibleLines.length);
+      displayLine++
     ) {
-      final y = line * lineHeight - scrollY;
+      final line = visibleLines[displayLine];
+      final y = displayLine * lineHeight - scrollY;
       if (line == current.line) {
         canvas.drawRect(
           Rect.fromLTWH(0, y, size.width, lineHeight),
@@ -174,6 +181,23 @@ class CodePainter extends CustomPainter {
       )..layout();
       number.paint(canvas, Offset(47 - number.width, y));
       number.dispose();
+      if (foldRegions.any((region) => region.startLine == line)) {
+        final collapsed = collapsedFolds.contains(line);
+        final marker = Path();
+        if (collapsed) {
+          marker
+            ..moveTo(50, y + 5)
+            ..lineTo(55, y + lineHeight / 2)
+            ..lineTo(50, y + lineHeight - 5);
+        } else {
+          marker
+            ..moveTo(48, y + 7)
+            ..lineTo(55, y + 7)
+            ..lineTo(51.5, y + lineHeight - 5);
+        }
+        marker.close();
+        canvas.drawPath(marker, paint..color = Color(theme.color('muted')));
+      }
     }
     canvas.drawLine(
       const Offset(56, 0),

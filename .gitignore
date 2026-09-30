@@ -39,6 +39,10 @@ migrate_working_dir/
 .tamtoot/mcp.json
 .tamtoot/worktrees/
 .tamtoot/cache/
+android/key.properties
+android/app/*.jks
+android/app/*.keystore
+android/signing/
 
 # Symbolication related
 app.*.symbols

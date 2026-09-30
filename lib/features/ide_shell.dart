@@ -401,8 +401,53 @@ class _IdeShellState extends ConsumerState<IdeShell> {
   );
   Widget _panel(String id) {
     if (id == 'explorer') return _explorer();
+    if (id == 'output') {
+      return ColoredBox(
+        color: color('panel'),
+        child: Column(
+          children: [
+            SizedBox(
+              height: 34,
+              child: Row(
+                children: [
+                  const SizedBox(width: 12),
+                  const Text('Output', style: TextStyle(fontSize: 12)),
+                  const Spacer(),
+                  IconButton(
+                    key: const ValueKey('output-clear'),
+                    tooltip: 'Clear Output',
+                    onPressed: session.output.isEmpty
+                        ? null
+                        : session.clearOutput,
+                    icon: const Icon(Icons.delete_sweep_outlined, size: 18),
+                    visualDensity: VisualDensity.compact,
+                  ),
+                ],
+              ),
+            ),
+            const Divider(height: 1),
+            Expanded(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.all(12),
+                child: SizedBox(
+                  width: double.infinity,
+                  child: SelectableText(
+                    session.output.join('\n'),
+                    key: const ValueKey('output-text'),
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontFamily: 'monospace',
+                      color: color('muted'),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
     final lines = switch (id) {
-      'output' => session.output,
       'problems' =>
         session.errors.isEmpty
             ? [

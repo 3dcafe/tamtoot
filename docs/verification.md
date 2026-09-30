@@ -127,3 +127,16 @@ The expanded test suite passes **57 tests**, including folder collapse/reopen, s
 - Completion now includes active-document variables and parameters plus project methods, fields, properties and constants. Value symbols insert without call parentheses; methods retain callable insertion and parameter placement.
 - The private completion cache was versioned to `.tamtoot/cache/completions-v2.json`. No dependencies were added.
 - Added regression coverage for IME input after a tab switch, Windows physical-character input while completion is open, and Dart local/member discovery. `flutter analyze`: no issues. Full suite: **136 tests passed**.
+
+## Stable background Git refresh — 2026-09-30
+
+- Periodic Git polling now publishes a session update only when status entries, unpublished paths or the status note actually change.
+- The embedded Git panel filters unrelated session events and refreshes changed data in the background without inserting a progress bar or shifting its contents.
+- Regression tests cover unchanged polls, real status changes, unrelated Output events and a pending background refresh. Full suite: **138 tests passed**; analyzer clean.
+
+## Device files, request results and editor interaction — 2026-09-30
+
+- Added Android system-document opening with persistent read/write access, so Save updates the selected document instead of exporting another copy.
+- Output now timestamps entries, supports whole-log selection and has a Clear action. HTTP results record duration and open in a full Body/Headers viewer with formatted JSON.
+- Request folders persist through commit-ready `.keep` files, and requests can be duplicated from their context menu.
+- Double-click word selection, class/method folding and Tab completion are covered alongside storage, timing and unchanged Git-refresh regression tests. `flutter analyze`: no issues. Full suite: **141 tests passed**. No dependencies were added.

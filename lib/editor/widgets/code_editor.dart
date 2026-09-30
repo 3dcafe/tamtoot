@@ -15,6 +15,57 @@ import '../input/keyboard_mapping.dart';
 import '../rendering/code_painter.dart';
 import '../rendering/expanded_line.dart';
 
+bool _foldableDeclaration(String line) {
+  final trimmed = line.trim();
+  if (RegExp(
+    r'\b(?:class|enum|interface|mixin|extension|struct|record|namespace)\b',
+  ).hasMatch(trimmed)) {
+    return true;
+  }
+  if ({'if', 'for', 'while', 'switch', 'catch', 'try', 'else', 'do'}.any(
+    (keyword) =>
+        trimmed.startsWith('$keyword ') || trimmed.startsWith('$keyword('),
+  )) {
+    return false;
+  }
+  return RegExp(
+    r'[A-Za-z_$][\w$<>?,.\[\] ]*\([^;]*\)\s*(?:async\s*)?\{?$',
+  ).hasMatch(trimmed);
+}
+
+@visibleForTesting
+List<FoldingRegion> foldingRegionsForLines(List<String> lines) {
+  final stack = <({int startLine, bool foldable})>[];
+  final regions = <FoldingRegion>[];
+  var previousContent = 0;
+  for (var line = 0; line < lines.length; line++) {
+    final raw = lines[line];
+    final trimmed = raw.trim();
+    var startLine = line;
+    var declaration = raw;
+    if (trimmed == '{' && line > 0) {
+      startLine = previousContent;
+      declaration = lines[previousContent];
+    }
+    for (final unit in raw.codeUnits) {
+      if (unit == 0x7b) {
+        stack.add((
+          startLine: startLine,
+          foldable: _foldableDeclaration(declaration),
+        ));
+      } else if (unit == 0x7d && stack.isNotEmpty) {
+        final opened = stack.removeLast();
+        if (opened.foldable && line > opened.startLine) {
+          regions.add(FoldingRegion(opened.startLine, line));
+        }
+      }
+    }
+    if (trimmed.isNotEmpty && trimmed != '{') previousContent = line;
+  }
+  regions.sort((a, b) => a.startLine.compareTo(b.startLine));
+  return regions;
+}
+
 /// Custom text surface; TextInputClient integrates platform IME without TextField.
 class CodeEditor extends StatefulWidget {
   const CodeEditor({
@@ -43,6 +94,7 @@ class _CodeEditorState extends State<CodeEditor> implements TextInputClient {
   double _height = 400;
   int? _dragAnchor;
   Timer? _completionTimer;
+  final Set<int> _collapsedFolds = {};
   List<CompletionSymbol> _completions = const [];
   int _completionSelection = 0;
   double get _fontSize => widget.session.settings.fontSize;
@@ -192,7 +244,9 @@ class _CodeEditorState extends State<CodeEditor> implements TextInputClient {
   void _ensureVisible() {
     if (!_scroll.hasClients) return;
     final point = _editor.buffer.positionAt(_editor.selection.extent);
-    final y = point.line * _lineHeight;
+    final regions = _foldRegions();
+    final visible = _visibleLines(regions);
+    final y = _displayLine(point.line, visible, regions) * _lineHeight;
     final offset = _scroll.offset;
     if (y < offset) {
       _scroll.jumpTo(y.clamp(0, _scroll.position.maxScrollExtent));
@@ -201,6 +255,69 @@ class _CodeEditorState extends State<CodeEditor> implements TextInputClient {
         (y + _lineHeight - _height).clamp(0, _scroll.position.maxScrollExtent),
       );
     }
+  }
+
+  List<FoldingRegion> _foldRegions() => foldingRegionsForLines([
+    for (var line = 0; line < _editor.buffer.lineCount; line++)
+      _editor.buffer.getLine(line),
+  ]);
+
+  List<int> _visibleLines(List<FoldingRegion> regions) {
+    final collapsed = {
+      for (final region in regions)
+        if (_collapsedFolds.contains(region.startLine))
+          region.startLine: region,
+    };
+    final lines = <int>[];
+    for (var line = 0; line < _editor.buffer.lineCount;) {
+      lines.add(line);
+      final region = collapsed[line];
+      line = region == null ? line + 1 : region.endLine + 1;
+    }
+    return lines;
+  }
+
+  int _displayLine(
+    int sourceLine,
+    List<int> visible,
+    List<FoldingRegion> regions,
+  ) {
+    final exact = visible.indexOf(sourceLine);
+    if (exact >= 0) return exact;
+    for (final region in regions) {
+      if (_collapsedFolds.contains(region.startLine) &&
+          sourceLine > region.startLine &&
+          sourceLine <= region.endLine) {
+        return visible.indexOf(region.startLine).clamp(0, visible.length - 1);
+      }
+    }
+    return 0;
+  }
+
+  void _toggleFold(Offset point) {
+    final regions = _foldRegions();
+    final visible = _visibleLines(regions);
+    final display =
+        ((point.dy + (_scroll.hasClients ? _scroll.offset : 0)) / _lineHeight)
+            .floor()
+            .clamp(0, visible.length - 1);
+    final line = visible[display];
+    final region = regions.where((item) => item.startLine == line).firstOrNull;
+    if (region == null) return;
+    setState(() {
+      if (!_collapsedFolds.add(line)) _collapsedFolds.remove(line);
+      if (_collapsedFolds.contains(line)) {
+        final current = _editor.buffer
+            .positionAt(_editor.selection.extent)
+            .line;
+        if (current > line && current <= region.endLine) {
+          final offset = _editor.buffer.offsetAt(
+            TextPoint(line, _editor.buffer.getLine(line).length),
+          );
+          _editor.select(offset, offset);
+        }
+      }
+    });
   }
 
   KeyEventResult _key(FocusNode node, KeyEvent event) {
@@ -257,10 +374,13 @@ class _CodeEditorState extends State<CodeEditor> implements TextInputClient {
   }
 
   int _offsetAt(Offset point) {
-    final line =
+    final regions = _foldRegions();
+    final visible = _visibleLines(regions);
+    final displayLine =
         ((point.dy + (_scroll.hasClients ? _scroll.offset : 0)) / _lineHeight)
             .floor()
-            .clamp(0, _editor.buffer.lineCount - 1);
+            .clamp(0, visible.length - 1);
+    final line = visible[displayLine];
     final raw = _editor.buffer.getLine(line);
     final expanded = ExpandedLine(raw, _editor.tabSize);
     final painter = TextPainter(
@@ -284,11 +404,14 @@ class _CodeEditorState extends State<CodeEditor> implements TextInputClient {
     );
   }
 
-  void _select(int start, int end) =>
-      unawaited(widget.session.run('editor.select', [start, end]));
+  void _select(int start, int end) => _editor.select(start, end);
   void _tap(Offset position) {
     _focus.requestFocus();
     _attach();
+    if (position.dx < 60) {
+      _toggleFold(position);
+      return;
+    }
     final offset = _offsetAt(position);
     _select(
       HardwareKeyboard.instance.isShiftPressed
@@ -342,9 +465,14 @@ class _CodeEditorState extends State<CodeEditor> implements TextInputClient {
     return LayoutBuilder(
       builder: (context, constraints) {
         _height = constraints.maxHeight;
+        final foldRegions = _foldRegions();
+        _collapsedFolds.retainAll(
+          foldRegions.map((region) => region.startLine),
+        );
+        final visibleLines = _visibleLines(foldRegions);
         final totalHeight = math.max(
           _height,
-          _editor.buffer.lineCount * _lineHeight + 32,
+          visibleLines.length * _lineHeight + 32,
         );
         // Width is measured from visible lines only, with a useful horizontal runway.
         final viewport = EditorViewport(
@@ -354,14 +482,15 @@ class _CodeEditorState extends State<CodeEditor> implements TextInputClient {
         );
         var width = constraints.maxWidth;
         for (
-          var i = viewport.firstLine(_editor.buffer.lineCount);
-          i < viewport.endLine(_editor.buffer.lineCount);
+          var i = viewport.firstLine(visibleLines.length);
+          i < viewport.endLine(visibleLines.length);
           i++
         ) {
+          final line = visibleLines[i];
           width = math.max(
             width,
             ExpandedLine(
-                      _editor.buffer.getLine(i),
+                      _editor.buffer.getLine(line),
                       _editor.tabSize,
                     ).text.length *
                     _fontSize +
@@ -382,6 +511,10 @@ class _CodeEditorState extends State<CodeEditor> implements TextInputClient {
                   if (e.kind == PointerDeviceKind.mouse &&
                       e.buttons == kPrimaryMouseButton) {
                     _focus.requestFocus();
+                    if (e.localPosition.dx < 60) {
+                      _dragAnchor = null;
+                      return;
+                    }
                     _dragAnchor = _offsetAt(e.localPosition);
                     _select(
                       HardwareKeyboard.instance.isShiftPressed
@@ -458,6 +591,9 @@ class _CodeEditorState extends State<CodeEditor> implements TextInputClient {
                                 lineHeight: _lineHeight,
                                 focused: _focus.hasFocus,
                                 composing: _ime.composing,
+                                visibleLines: visibleLines,
+                                foldRegions: foldRegions,
+                                collapsedFolds: _collapsedFolds,
                               ),
                             ),
                           ),
@@ -478,6 +614,8 @@ class _CodeEditorState extends State<CodeEditor> implements TextInputClient {
 
   Widget _completionPopup(double maxWidth) {
     final point = _editor.buffer.positionAt(_editor.selection.extent);
+    final regions = _foldRegions();
+    final visible = _visibleLines(regions);
     final left =
         (64 +
                 point.column * _fontSize * 0.62 -
@@ -485,7 +623,7 @@ class _CodeEditorState extends State<CodeEditor> implements TextInputClient {
             .clamp(8.0, math.max(8.0, maxWidth - 330))
             .toDouble();
     final top =
-        ((point.line + 1) * _lineHeight -
+        ((_displayLine(point.line, visible, regions) + 1) * _lineHeight -
                 (_scroll.hasClients ? _scroll.offset : 0))
             .clamp(4.0, math.max(4.0, _height - 260))
             .toDouble();

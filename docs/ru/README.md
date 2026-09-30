@@ -5,6 +5,7 @@ Tamtoot — бесплатный редактор кода и обычного �
 ## Разделы
 
 - [Установка и первый запуск](getting-started.md) — требования, запуск, сборка и Android-артефакты в GitVerse.
+- [Подписанный AAB для RuStore](android-release.md) — локальный ключ, секреты GitHub и получение артефакта.
 - [Редактор, проекты и Git](editor-and-git.md) — навигация, подсказки, поиск, сохранение, сравнение, коммиты, Pull, Push и Sync.
 - [HTTP-запросы](http-requests.md) — коллекции запросов, переменные, авторизация и совместная работа через `.tamtoot`.
 - [Модели и агенты](models-and-agents.md) — Ollama, LM Studio, LocalAI, OpenAI, Anthropic, промты, Agent, YOLO, MCP, хуки и Kanban.
