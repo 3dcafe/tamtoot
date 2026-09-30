@@ -548,41 +548,20 @@ class _IdeShellState extends ConsumerState<IdeShell> {
           child: ListView(
             padding: const EdgeInsets.symmetric(vertical: 8),
             children: [
-              Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 8,
-                ),
-                child: Text(
-                  'OPEN DOCUMENTS',
-                  style: TextStyle(
-                    color: color('muted'),
-                    fontSize: 10,
-                    letterSpacing: 1,
+              Tooltip(
+                message: _workspaceDescription,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 8,
                   ),
-                ),
-              ),
-              for (final d in session.documents.documents)
-                _entry(
-                  d.name,
-                  Icons.description_outlined,
-                  () => session.run('document.activate', d.id),
-                  fileUri: d.uri,
-                  selected: session.documents.active == d,
-                  indicators: session.indicators(d.uri, unsaved: d.dirty),
-                ),
-              const SizedBox(height: 12),
-              Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 8,
-                ),
-                child: Text(
-                  'WORKSPACE',
-                  style: TextStyle(
-                    color: color('muted'),
-                    fontSize: 10,
-                    letterSpacing: 1,
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: Icon(
+                      Icons.folder_outlined,
+                      size: 16,
+                      color: color('muted'),
+                    ),
                   ),
                 ),
               ),
@@ -601,21 +580,6 @@ class _IdeShellState extends ConsumerState<IdeShell> {
                   ),
                 ),
               if (session.workspaceRoot != null) ...[
-                if (session.projectMeta != null)
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
-                    child: Text(
-                      '${session.projectMeta!.remoteUrl}\n'
-                      '${session.projectMeta!.branch}'
-                      '${session.workspaceHasGit ? ' · .git' : ''}'
-                      ' · .tamtoot',
-                      style: TextStyle(
-                        color: color('muted'),
-                        fontSize: 11,
-                        height: 1.45,
-                      ),
-                    ),
-                  ),
                 if (session.gitStatusNote != null)
                   Padding(
                     padding: const EdgeInsets.symmetric(
@@ -678,30 +642,28 @@ class _IdeShellState extends ConsumerState<IdeShell> {
                     ),
                 ],
               ],
-              if (session.recentWorkspaces.isNotEmpty) ...[
-                Padding(
-                  padding: const EdgeInsets.all(12),
-                  child: Text(
-                    'RECENT FOLDERS',
-                    style: TextStyle(color: color('muted'), fontSize: 10),
-                  ),
-                ),
-                for (final path in session.recentWorkspaces)
-                  _entry(
-                    Uri.parse(
-                          path,
-                        ).pathSegments.where((s) => s.isNotEmpty).lastOrNull ??
-                        path,
-                    Icons.history,
-                    () => session.run('workspace.browse', Uri.parse(path)),
-                  ),
-              ],
             ],
           ),
         ),
       ],
     ),
   );
+
+  String get _workspaceDescription {
+    final root = session.workspaceRoot;
+    if (root == null) return 'No workspace open';
+    String? name;
+    final remote = session.projectMeta?.remoteUrl;
+    if (remote != null) {
+      final uri = Uri.tryParse(remote);
+      name = uri?.pathSegments.where((part) => part.isNotEmpty).lastOrNull;
+    }
+    name ??= root.pathSegments.where((part) => part.isNotEmpty).lastOrNull;
+    name = (name ?? root.toString()).replaceFirst(RegExp(r'\.git$'), '');
+    final branch = session.projectMeta?.branch;
+    return 'Repository: $name${branch == null ? '' : '\nBranch: $branch'}\n$root';
+  }
+
   Widget _entry(
     String name,
     IconData icon,

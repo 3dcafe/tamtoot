@@ -26,6 +26,10 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
+      expect(find.text('OPEN DOCUMENTS'), findsNothing);
+      expect(find.text('RECENT FOLDERS'), findsNothing);
+      expect(find.byTooltip('Repository: project\n$root'), findsOneWidget);
+      expect(find.text('project'), findsNothing);
       final folderFinder = find.byKey(ValueKey('explorer-$folder'));
       await tester.tap(folderFinder);
       await tester.pumpAndSettle();

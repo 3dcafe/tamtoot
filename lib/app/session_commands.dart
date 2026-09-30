@@ -139,9 +139,6 @@ void registerSessionCommands(IdeSession s, PresentationActions ui) {
     (_) => ui.showHttpRequests(),
     enabled: () => s.workspaceRoot != null,
   );
-  add('workspace.browse', 'Browse folder', (arg) async {
-    await s.openWorkspaceFolder(arg as Uri);
-  });
   add('editor.undo', 'Undo', (_) {
     s.documents.active!.editor.undo();
   }, enabled: () => s.documents.active?.editor.canUndo ?? false);

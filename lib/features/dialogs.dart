@@ -134,7 +134,6 @@ class _CommandPaletteState extends State<CommandPalette> {
                 'file.openEntry',
                 'keybindings.set',
                 'extensions.install',
-                'workspace.browse',
                 'workspace.toggleFolder',
                 'editor.findNext',
                 'editor.replaceAll',

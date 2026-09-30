@@ -7,7 +7,7 @@
 | 1 | Desktop-style IDE shell | IdeShell: меню/toolbar, Explorer, документы, tools, status |
 | 2–3 | Оригинальные dark/light темы | Midnight Ink / Porcelain, theme packages, переключение и persistence |
 | 4 | Menu/toolbar | File/Edit/View/Tools и command-backed actions |
-| 5 | Solution Explorer | Открытые документы, desktop folder browsing, recent folders |
+| 5 | Solution Explorer | Дерево файлов открытого проекта; документы переключаются центральными вкладками |
 | 6 | Custom editor | CodeEditor + CustomPainter; без TextField документа |
 | 7 | Document tabs | Несколько документов, активная вкладка, dirty marker, close confirmation |
 | 8 | Problems/Output/Terminal placeholders | Действующие Output/ошибки приложения; явные placeholders провайдеров Terminal/Debug/diagnostics |

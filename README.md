@@ -72,6 +72,8 @@ in the file instead of being merged into typographic symbols by the code font.
 
 On startup, Tamtoot reopens the most recent project in history. If there is no project or its folder is unavailable, the project tree stays empty; no demo tabs are created. Existing user drafts are still recovered. Unmodified demo tabs from older installations are removed automatically, while edited drafts and real files are preserved.
 
+Solution shows only the current project tree. Open documents remain in the central editor tabs, and recent folders are available through **File → Open project…** instead of occupying the project tree. Hover the folder icon above the tree to see the repository name, branch and location.
+
 The application saves session data after a 450 ms idle period and when it moves into the background. Theme changes are persisted immediately. Session recovery is separate from saving the actual file. Force-quitting during a pending write may lose the latest unsaved changes.
 
 ## Language highlighting
