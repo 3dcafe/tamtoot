@@ -182,6 +182,7 @@ class _HttpRequestsDialogState extends State<HttpRequestsDialog> {
       authToken = '';
   String? activePath, feedback;
   bool dirty = false, busy = false, parallel = false, stopOnError = false;
+  bool compactEditorVisible = false;
   List<RequestExecutionResult> results = const [];
   List<RequestAttachment> attachments = const [];
 
@@ -268,6 +269,7 @@ class _HttpRequestsDialogState extends State<HttpRequestsDialog> {
           : request.body.value?.toString() ?? '';
       setState(() {
         activePath = path;
+        compactEditorVisible = true;
         method = request.method;
         bodyType = request.body.type;
         authMode = request.auth.mode;
@@ -345,15 +347,17 @@ class _HttpRequestsDialogState extends State<HttpRequestsDialog> {
   }
 
   Future<String?> _ask(String title, {String initial = ''}) async {
-    final controller = TextEditingController(text: initial);
+    var value = initial;
     final result = await showDialog<String>(
       context: context,
       builder: (_) => AlertDialog(
         title: Text(title),
-        content: TextField(
-          controller: controller,
+        content: TextFormField(
+          initialValue: initial,
           autofocus: true,
-          onSubmitted: (v) => Navigator.pop(context, v),
+          onChanged: (updated) => value = updated,
+          onFieldSubmitted: (submitted) =>
+              Navigator.pop(context, submitted.trim()),
         ),
         actions: [
           TextButton(
@@ -361,13 +365,12 @@ class _HttpRequestsDialogState extends State<HttpRequestsDialog> {
             child: const Text('Cancel'),
           ),
           FilledButton(
-            onPressed: () => Navigator.pop(context, controller.text.trim()),
+            onPressed: () => Navigator.pop(context, value.trim()),
             child: const Text('OK'),
           ),
         ],
       ),
     );
-    controller.dispose();
     return result;
   }
 
@@ -482,6 +485,7 @@ class _HttpRequestsDialogState extends State<HttpRequestsDialog> {
     try {
       await storage.delete(activePath!);
       activePath = null;
+      compactEditorVisible = false;
       dirty = false;
       await _load();
     } catch (e) {
@@ -1067,6 +1071,124 @@ class _HttpRequestsDialogState extends State<HttpRequestsDialog> {
     );
   }
 
+  Widget _requestList() => Column(
+    children: [
+      Row(
+        children: [
+          TextButton(
+            onPressed: () => setState(
+              () => selected.addAll(
+                entries
+                    .where((entry) => entry.valid && !entry.directory)
+                    .map((entry) => entry.path),
+              ),
+            ),
+            child: const Text('Select All'),
+          ),
+          TextButton(
+            onPressed: () => setState(selected.clear),
+            child: const Text('Clear'),
+          ),
+        ],
+      ),
+      Expanded(
+        child: ListView.builder(
+          itemCount: entries.length,
+          itemBuilder: (_, index) {
+            final entry = entries[index];
+            if (entry.directory) {
+              return ListTile(
+                dense: true,
+                leading: const Icon(Icons.folder_outlined, size: 18),
+                title: Text(
+                  entry.name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                subtitle: Text(
+                  entry.path,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              );
+            }
+            return GestureDetector(
+              onSecondaryTapDown: (event) =>
+                  _entryMenu(entry, event.globalPosition),
+              onLongPressStart: (event) =>
+                  _entryMenu(entry, event.globalPosition),
+              child: CheckboxListTile(
+                dense: true,
+                value: selected.contains(entry.path),
+                onChanged: entry.valid
+                    ? (value) => setState(() {
+                        if (value == true) {
+                          selected.add(entry.path);
+                        } else {
+                          selected.remove(entry.path);
+                        }
+                      })
+                    : null,
+                secondary: Text(
+                  entry.method,
+                  style: TextStyle(
+                    fontSize: 9,
+                    color: entry.valid
+                        ? Theme.of(context).colorScheme.primary
+                        : Theme.of(context).colorScheme.error,
+                  ),
+                ),
+                title: InkWell(
+                  onTap: entry.valid ? () => _open(entry.path) : null,
+                  child: Text(
+                    entry.name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                subtitle: Text(
+                  entry.error ?? entry.path,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                selected: activePath == entry.path,
+              ),
+            );
+          },
+        ),
+      ),
+    ],
+  );
+
+  Widget _requestsWorkspace(BoxConstraints constraints) {
+    if (constraints.maxWidth >= 720) {
+      return Row(
+        children: [
+          SizedBox(width: 290, child: _requestList()),
+          const VerticalDivider(width: 1),
+          Expanded(child: _editor()),
+        ],
+      );
+    }
+
+    if (!compactEditorVisible || activePath == null) {
+      return _requestList();
+    }
+    return Column(
+      children: [
+        Align(
+          alignment: Alignment.centerLeft,
+          child: TextButton.icon(
+            onPressed: () => setState(() => compactEditorVisible = false),
+            icon: const Icon(Icons.arrow_back),
+            label: const Text('Requests'),
+          ),
+        ),
+        Expanded(child: _editor()),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) => CallbackShortcuts(
     bindings: {
@@ -1174,99 +1296,10 @@ class _HttpRequestsDialogState extends State<HttpRequestsDialog> {
                 ),
               const Divider(height: 1),
               Expanded(
-                child: Row(
-                  children: [
-                    SizedBox(
-                      width: 290,
-                      child: Column(
-                        children: [
-                          Row(
-                            children: [
-                              TextButton(
-                                onPressed: () => setState(
-                                  () => selected.addAll(
-                                    entries
-                                        .where((e) => e.valid && !e.directory)
-                                        .map((e) => e.path),
-                                  ),
-                                ),
-                                child: const Text('Select All'),
-                              ),
-                              TextButton(
-                                onPressed: () => setState(selected.clear),
-                                child: const Text('Clear'),
-                              ),
-                            ],
-                          ),
-                          Expanded(
-                            child: ListView.builder(
-                              itemCount: entries.length,
-                              itemBuilder: (_, i) {
-                                final entry = entries[i];
-                                if (entry.directory) {
-                                  return ListTile(
-                                    dense: true,
-                                    leading: const Icon(
-                                      Icons.folder_outlined,
-                                      size: 18,
-                                    ),
-                                    title: Text(entry.name),
-                                    subtitle: Text(entry.path),
-                                  );
-                                }
-                                return GestureDetector(
-                                  onSecondaryTapDown: (event) =>
-                                      _entryMenu(entry, event.globalPosition),
-                                  onLongPressStart: (event) =>
-                                      _entryMenu(entry, event.globalPosition),
-                                  child: CheckboxListTile(
-                                    dense: true,
-                                    value: selected.contains(entry.path),
-                                    onChanged: entry.valid
-                                        ? (v) => setState(() {
-                                            if (v == true) {
-                                              selected.add(entry.path);
-                                            } else {
-                                              selected.remove(entry.path);
-                                            }
-                                          })
-                                        : null,
-                                    secondary: Text(
-                                      entry.method,
-                                      style: TextStyle(
-                                        fontSize: 9,
-                                        color: entry.valid
-                                            ? Theme.of(
-                                                context,
-                                              ).colorScheme.primary
-                                            : Theme.of(
-                                                context,
-                                              ).colorScheme.error,
-                                      ),
-                                    ),
-                                    title: InkWell(
-                                      onTap: entry.valid
-                                          ? () => _open(entry.path)
-                                          : null,
-                                      child: Text(entry.name, maxLines: 1),
-                                    ),
-                                    subtitle: Text(
-                                      entry.error ?? entry.path,
-                                      maxLines: 2,
-                                      overflow: TextOverflow.ellipsis,
-                                    ),
-                                    selected: activePath == entry.path,
-                                  ),
-                                );
-                              },
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const VerticalDivider(width: 1),
-                    Expanded(child: _editor()),
-                  ],
+                child: LayoutBuilder(
+                  builder: (_, constraints) {
+                    return _requestsWorkspace(constraints);
+                  },
                 ),
               ),
             ],
