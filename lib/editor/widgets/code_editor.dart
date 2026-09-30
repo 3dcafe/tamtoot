@@ -348,6 +348,11 @@ class _CodeEditorState extends State<CodeEditor> implements TextInputClient {
         setState(() => _completions = const []);
         return KeyEventResult.handled;
       }
+    } else if (event.logicalKey == LogicalKeyboardKey.escape &&
+        _focus.hasFocus &&
+        _connection != null) {
+      _hideKeyboard();
+      return KeyEventResult.handled;
     }
     final command = widget.session.keys.resolve(keyChord(event));
     if (command != null) {
@@ -460,9 +465,72 @@ class _CodeEditorState extends State<CodeEditor> implements TextInputClient {
     if (action != null) await widget.session.run(action);
   }
 
+  void _hideKeyboard() {
+    // Unfocus first so connectionClosed does not re-attach IME.
+    _focus.unfocus();
+    _connection?.close();
+    _connection = null;
+    SystemChannels.textInput.invokeMethod<void>('TextInput.hide');
+    _repaint();
+  }
+
+  bool get _isTouchPlatform =>
+      defaultTargetPlatform == TargetPlatform.iOS ||
+      defaultTargetPlatform == TargetPlatform.android;
+
+  Widget _keyboardDismissBar() {
+    final theme = widget.session.theme;
+    return Material(
+      color: Color(theme.color('panel')),
+      elevation: 2,
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          border: Border(top: BorderSide(color: Color(theme.color('border')))),
+        ),
+        child: SafeArea(
+          top: false,
+          minimum: EdgeInsets.zero,
+          child: SizedBox(
+            height: 40,
+            child: Row(
+              children: [
+                const SizedBox(width: 8),
+                Text(
+                  'Клавиатура',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: Color(theme.color('muted')),
+                  ),
+                ),
+                const Spacer(),
+                IconButton(
+                  tooltip: 'Скрыть клавиатуру',
+                  visualDensity: VisualDensity.compact,
+                  onPressed: _hideKeyboard,
+                  icon: Icon(
+                    Icons.keyboard_hide_outlined,
+                    size: 22,
+                    color: Color(theme.color('foreground')),
+                  ),
+                ),
+                const SizedBox(width: 4),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    return LayoutBuilder(
+    final keyboardVisible = MediaQuery.viewInsetsOf(context).bottom > 0;
+    final showDismiss =
+        _isTouchPlatform &&
+        !_editor.readOnly &&
+        _focus.hasFocus &&
+        (keyboardVisible || _connection != null);
+    final editor = LayoutBuilder(
       builder: (context, constraints) {
         _height = constraints.maxHeight;
         final foldRegions = _foldRegions();
@@ -609,6 +677,14 @@ class _CodeEditorState extends State<CodeEditor> implements TextInputClient {
           ),
         );
       },
+    );
+    if (!showDismiss) return editor;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Expanded(child: editor),
+        _keyboardDismissBar(),
+      ],
     );
   }
 

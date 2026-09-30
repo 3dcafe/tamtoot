@@ -710,6 +710,11 @@ class _IdeShellState extends ConsumerState<IdeShell> {
     return 'Repository: $name${branch == null ? '' : '\nBranch: $branch'}\n$root';
   }
 
+  void _dismissKeyboard() {
+    FocusManager.instance.primaryFocus?.unfocus();
+    SystemChannels.textInput.invokeMethod<void>('TextInput.hide');
+  }
+
   Widget _entry(
     String name,
     IconData icon,
@@ -739,7 +744,10 @@ class _IdeShellState extends ConsumerState<IdeShell> {
           key: entryKey,
           color: selected ? color('selection') : Colors.transparent,
           child: InkWell(
-            onTap: onTap,
+            onTap: () {
+              _dismissKeyboard();
+              onTap();
+            },
             child: Padding(
               padding: EdgeInsets.fromLTRB(8 + depth * 14.0, 9, 8, 9),
               child: Row(
