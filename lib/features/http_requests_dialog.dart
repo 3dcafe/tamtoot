@@ -354,22 +354,22 @@ class _HttpRequestsDialogState extends State<HttpRequestsDialog> {
     var value = initial;
     final result = await showDialog<String>(
       context: context,
-      builder: (_) => AlertDialog(
+      builder: (dialogContext) => AlertDialog(
         title: Text(title),
         content: TextFormField(
           initialValue: initial,
           autofocus: true,
           onChanged: (updated) => value = updated,
           onFieldSubmitted: (submitted) =>
-              Navigator.pop(context, submitted.trim()),
+              Navigator.pop(dialogContext, submitted.trim()),
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context),
+            onPressed: () => Navigator.pop(dialogContext),
             child: const Text('Cancel'),
           ),
           FilledButton(
-            onPressed: () => Navigator.pop(context, value.trim()),
+            onPressed: () => Navigator.pop(dialogContext, value.trim()),
             child: const Text('OK'),
           ),
         ],
@@ -1207,134 +1207,144 @@ class _HttpRequestsDialogState extends State<HttpRequestsDialog> {
   }
 
   @override
-  Widget build(BuildContext context) => CallbackShortcuts(
-    bindings: {
-      const SingleActivator(LogicalKeyboardKey.keyS, control: true): _save,
-      const SingleActivator(LogicalKeyboardKey.keyS, meta: true): _save,
-    },
-    child: Focus(
-      autofocus: true,
-      child: AlertDialog(
-        title: Row(
-          children: [
-            const Expanded(child: Text('HTTP Requests')),
-            if (dirty) const Text('● Unsaved', style: TextStyle(fontSize: 12)),
-            IconButton(
-              onPressed: _environment,
-              tooltip: 'Requests settings',
-              icon: const Icon(Icons.settings_outlined),
+  Widget build(BuildContext context) {
+    final size = MediaQuery.sizeOf(context);
+    final dialogWidth = (size.width - 24).clamp(280.0, 1050.0);
+    final dialogHeight = (size.height - 48).clamp(320.0, 680.0);
+    return CallbackShortcuts(
+      bindings: {
+        const SingleActivator(LogicalKeyboardKey.keyS, control: true): _save,
+        const SingleActivator(LogicalKeyboardKey.keyS, meta: true): _save,
+      },
+      child: Focus(
+        autofocus: true,
+        child: AlertDialog(
+          insetPadding: const EdgeInsets.symmetric(
+            horizontal: 12,
+            vertical: 24,
+          ),
+          title: Row(
+            children: [
+              const Expanded(child: Text('HTTP Requests')),
+              if (dirty)
+                const Text('● Unsaved', style: TextStyle(fontSize: 12)),
+              IconButton(
+                onPressed: _environment,
+                tooltip: 'Requests settings',
+                icon: const Icon(Icons.settings_outlined),
+              ),
+              IconButton(
+                onPressed: () async {
+                  if (await _confirmLose() && context.mounted) {
+                    Navigator.pop(context);
+                  }
+                },
+                icon: const Icon(Icons.close),
+              ),
+            ],
+          ),
+          content: SizedBox(
+            width: dialogWidth,
+            height: dialogHeight,
+            child: Column(
+              children: [
+                Wrap(
+                  spacing: 6,
+                  runSpacing: 6,
+                  children: [
+                    FilledButton.tonalIcon(
+                      onPressed: _newRequest,
+                      icon: const Icon(Icons.add),
+                      label: const Text('New Request'),
+                    ),
+                    TextButton.icon(
+                      onPressed: _newFolder,
+                      icon: const Icon(Icons.create_new_folder_outlined),
+                      label: const Text('New Folder'),
+                    ),
+                    TextButton(
+                      onPressed: busy ? null : _rename,
+                      child: const Text('Rename'),
+                    ),
+                    TextButton(
+                      onPressed: busy ? null : _move,
+                      child: const Text('Move'),
+                    ),
+                    TextButton(
+                      onPressed: busy ? null : _delete,
+                      child: const Text('Delete'),
+                    ),
+                    FilledButton.icon(
+                      onPressed: busy ? null : _save,
+                      icon: const Icon(Icons.save_outlined),
+                      label: const Text('Save'),
+                    ),
+                    FilledButton.tonalIcon(
+                      onPressed: busy
+                          ? null
+                          : () => _run(
+                              entries
+                                  .where(
+                                    (entry) =>
+                                        selected.contains(entry.path) &&
+                                        entry.valid &&
+                                        !entry.directory,
+                                  )
+                                  .map((entry) => entry.path)
+                                  .toList(),
+                            ),
+                      icon: const Icon(Icons.play_arrow),
+                      label: const Text('Run Selected'),
+                    ),
+                    FilterChip(
+                      label: const Text('Parallel (5)'),
+                      selected: parallel,
+                      onSelected: (v) => setState(() => parallel = v),
+                    ),
+                    FilterChip(
+                      label: const Text('Stop on error'),
+                      selected: stopOnError,
+                      onSelected: (v) => setState(() => stopOnError = v),
+                    ),
+                  ],
+                ),
+                if (feedback != null)
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 6),
+                      child: Text(
+                        feedback!,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ),
+                const Divider(height: 1),
+                Expanded(
+                  child: LayoutBuilder(
+                    builder: (_, constraints) {
+                      return _requestsWorkspace(constraints);
+                    },
+                  ),
+                ),
+              ],
             ),
-            IconButton(
+          ),
+          actions: [
+            TextButton(
               onPressed: () async {
                 if (await _confirmLose() && context.mounted) {
                   Navigator.pop(context);
                 }
               },
-              icon: const Icon(Icons.close),
+              child: const Text('Close'),
             ),
           ],
         ),
-        content: SizedBox(
-          width: 1050,
-          height: 680,
-          child: Column(
-            children: [
-              Wrap(
-                spacing: 6,
-                runSpacing: 6,
-                children: [
-                  FilledButton.tonalIcon(
-                    onPressed: _newRequest,
-                    icon: const Icon(Icons.add),
-                    label: const Text('New Request'),
-                  ),
-                  TextButton.icon(
-                    onPressed: _newFolder,
-                    icon: const Icon(Icons.create_new_folder_outlined),
-                    label: const Text('New Folder'),
-                  ),
-                  TextButton(
-                    onPressed: busy ? null : _rename,
-                    child: const Text('Rename'),
-                  ),
-                  TextButton(
-                    onPressed: busy ? null : _move,
-                    child: const Text('Move'),
-                  ),
-                  TextButton(
-                    onPressed: busy ? null : _delete,
-                    child: const Text('Delete'),
-                  ),
-                  FilledButton.icon(
-                    onPressed: busy ? null : _save,
-                    icon: const Icon(Icons.save_outlined),
-                    label: const Text('Save'),
-                  ),
-                  FilledButton.tonalIcon(
-                    onPressed: busy
-                        ? null
-                        : () => _run(
-                            entries
-                                .where(
-                                  (entry) =>
-                                      selected.contains(entry.path) &&
-                                      entry.valid &&
-                                      !entry.directory,
-                                )
-                                .map((entry) => entry.path)
-                                .toList(),
-                          ),
-                    icon: const Icon(Icons.play_arrow),
-                    label: const Text('Run Selected'),
-                  ),
-                  FilterChip(
-                    label: const Text('Parallel (5)'),
-                    selected: parallel,
-                    onSelected: (v) => setState(() => parallel = v),
-                  ),
-                  FilterChip(
-                    label: const Text('Stop on error'),
-                    selected: stopOnError,
-                    onSelected: (v) => setState(() => stopOnError = v),
-                  ),
-                ],
-              ),
-              if (feedback != null)
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 6),
-                    child: Text(
-                      feedback!,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                ),
-              const Divider(height: 1),
-              Expanded(
-                child: LayoutBuilder(
-                  builder: (_, constraints) {
-                    return _requestsWorkspace(constraints);
-                  },
-                ),
-              ),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () async {
-              if (await _confirmLose() && context.mounted) {
-                Navigator.pop(context);
-              }
-            },
-            child: const Text('Close'),
-          ),
-        ],
       ),
-    ),
-  );
+    );
+  }
 }
 
 class _KvDraft {
