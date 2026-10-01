@@ -186,8 +186,10 @@ class IdeSession {
   TamtootProjectMeta? projectMeta;
   bool workspaceHasGit = false;
   bool gitBusy = false;
+
   /// Bumped when project model profiles change so Agent UI can reload.
   int agentCatalogRevision = 0;
+  final Map<String, String> _modelApiKeys = {};
   String message = 'Ready';
   bool findVisible = false;
   bool replaceVisible = false;
@@ -197,15 +199,18 @@ class IdeSession {
   Future<void> _pendingSave = Future.value();
   bool _disposed = false;
   IdeTheme get theme => themes[settings.theme] ?? themes.values.first;
+
+  void _schedulePersist() {
+    _saveTimer?.cancel();
+    _saveTimer = Timer(const Duration(milliseconds: 450), () {
+      unawaited(persistNow());
+    });
+  }
+
   void changed({bool persist = true}) {
     if (_disposed) return;
     _events.add(++_revision);
-    if (persist) {
-      _saveTimer?.cancel();
-      _saveTimer = Timer(const Duration(milliseconds: 450), () {
-        unawaited(persistNow());
-      });
-    }
+    if (persist) _schedulePersist();
   }
 
   void log(String value, {bool error = false}) {
@@ -225,6 +230,23 @@ class IdeSession {
   void notifyAgentCatalogChanged() {
     agentCatalogRevision++;
     changed(persist: false);
+  }
+
+  String modelApiKey(String profileId) => _modelApiKeys[profileId] ?? '';
+
+  void rememberModelApiKey(String profileId, String value) {
+    if (profileId.isEmpty) return;
+    final key = value.trim();
+    if (_modelApiKeys[profileId] == key ||
+        (key.isEmpty && !_modelApiKeys.containsKey(profileId))) {
+      return;
+    }
+    if (key.isEmpty) {
+      _modelApiKeys.remove(profileId);
+    } else {
+      _modelApiKeys[profileId] = key;
+    }
+    _schedulePersist();
   }
 
   void clearOutput() {
@@ -365,6 +387,19 @@ class IdeSession {
     await load('settings', settings.restore);
     await load('layout', (data) => layout = DockLayout.parse(data));
     await load('keybindings', (data) => keys = KeybindingRegistry.parse(data));
+    await load('modelCredentials', (source) {
+      final data = decodeVersioned(source, 'Model credentials');
+      final tokens = data['tokens'];
+      if (tokens is! Map<String, dynamic> ||
+          tokens.entries.any(
+            (entry) => entry.key.isEmpty || entry.value is! String,
+          )) {
+        throw const SchemaException('Invalid model credentials');
+      }
+      _modelApiKeys
+        ..clear()
+        ..addAll(tokens.cast<String, String>());
+    });
     await load('session', (source) {
       final data = decodeVersioned(source, 'Session');
       final raw = data['documents'];
@@ -435,6 +470,10 @@ class IdeSession {
       'settings': settings.encode(),
       'layout': layout.encode(),
       'keybindings': jsonEncode(keys.toJson()),
+      'modelCredentials': jsonEncode({
+        'schemaVersion': 1,
+        'tokens': _modelApiKeys,
+      }),
       'session': jsonEncode({
         'schemaVersion': 1,
         'activeIndex': documents.documents.indexWhere(
@@ -469,6 +508,7 @@ class IdeSession {
     _saveTimer?.cancel();
     await persistNow();
     _disposed = true;
+    _modelApiKeys.clear();
     for (final s in _subscriptions.values) {
       await s.cancel();
     }

@@ -96,6 +96,22 @@ API keys are never written to profiles or application settings. The dialogs keep
 the key in memory until the request finishes or the window closes. The headless
 agent reads `TAMTOOT_API_KEY`. Error text is sanitized before display.
 
+### AI STAR
+
+Choose **AI STAR · compatible API**, or use **Add AI STAR agent** when creating
+a profile. Tamtoot fills in `https://ai.starimg.ru/v1`, Chat Completions format,
+and the coding model `gpt-6.1-sol`. Paste the service token into the temporary
+API key field and select **Check connection** to load the models available to
+your account. Save the profile, open the **Agent** sidebar tab, select the saved
+profile, and send a task. The saved token is filled automatically.
+
+The token is shared by the profile editor, model request dialog, and Agent.
+Enter it once when checking or saving the profile; Tamtoot stores it in local
+application preferences for that profile. It is not written to `.tamtoot`, the
+project, or Git. Use **Forget token** in Agent to remove it from the device.
+The alternative service host can be entered manually as
+`https://ai.starimg.space/v1` when the primary domain is unavailable.
+
 ## Single model requests
 
 **Preview prompts** resolves the selected profile locally and sends nothing.
@@ -119,7 +135,6 @@ before it runs it. The available actions are:
 | `list_files` | Lists one project-relative directory |
 | `read_file` | Reads one project-relative regular file |
 | `write_file` | Replaces one project-relative regular file |
-| `run_command` | Runs an executable directly with an argument list, without a shell |
 | `mcp_call` | Calls a tool advertised by a connected MCP server |
 | `finish` | Completes the task after all run conditions are satisfied |
 
@@ -128,16 +143,17 @@ through agent file actions. Files and tool output have size limits. The loop has
 a timeout, an iteration limit and a consecutive-mistake limit. Stop cancels the
 active model request and terminates the active command or hook.
 
-Normal mode asks once before each file write, command execution or MCP call.
-Read-only file inspection does not require approval. After changing files, the
-agent cannot report success until a command whose arguments identify a test,
-analyze or check run succeeds.
+Normal mode asks once before each file write or MCP call. Read-only file
+inspection does not require approval. Every agent request states that Tamtoot is
+a mobile IDE without a terminal, interpreter, compiler, debugger, build runner,
+or test runner. The agent must inspect changed files and finish without trying to
+execute tests or other commands. If a model still emits `run_command`, the host
+skips it and reminds the model about the mobile runtime limit.
 
-Commands are passed directly to the operating system and never through a shell.
-The command runner blocks known shell entry points and destructive operations,
-including destructive Git reset/clean/checkout/restore forms. Output and runtime
-are bounded. These checks reduce accidental damage; they are not an operating
-system sandbox.
+Each task starts with a separate analysis turn. The model first posts a concise
+plan through `say`: the goal, intended inspection, likely files, and relevant
+risks or ambiguities. File and MCP actions begin on the following model request,
+so the plan appears in the Agent conversation before implementation starts.
 
 ## YOLO Mode
 
@@ -330,11 +346,8 @@ out of them.
   endpoint is `http://localhost:11434/api/chat` and no proxy blocks localhost.
 - **YOLO refuses to start:** commit or discard every Git change, then refresh the
   project. `.tamtoot` metadata is excluded by Tamtoot's Git status handling.
-- **The agent cannot finish after editing:** its test/analyze/check command must
-  complete successfully before `finish` is accepted.
-- **A command is rejected:** commands run without a shell. Put the executable and
-  each argument in separate fields; shell operators and scripts that require a
-  shell are intentionally unavailable.
+- **The agent tries to run a command:** current prompts explicitly forbid test,
+  build, interpreter and debug execution; any `run_command` action is skipped.
 - **An MCP server does not appear:** test the JSON in Settings, ensure it is not
   disabled, and verify that initialization and `tools/list` return valid
   JSON-RPC objects.

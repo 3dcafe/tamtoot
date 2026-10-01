@@ -79,7 +79,6 @@ class AgentTaskEngine {
   final AgentHookRunner hooks;
   final AgentCommandRunner commands;
   final McpRegistry? mcp;
-  bool _wroteFiles = false, _ranTests = false;
   bool _stopped = false;
   ModelClient? _active;
 
@@ -92,6 +91,14 @@ class AgentTaskEngine {
 
   static const protocol = '''
 You are an autonomous coding agent.
+RUNTIME LIMIT: Tamtoot is a mobile IDE. It has no terminal, interpreter, compiler, debugger, build runner, or test runner.
+NEVER try to run tests, analysis, builds, applications, debuggers, shell commands, or executables.
+Do not ask the user to run them during the agent loop. Do not spend iterations looking for a way to execute them.
+Verify edits by reading the changed files. State in the final summary that runtime checks were not executed in the mobile IDE.
+FIRST RESPONSE RULE: your first response for every new task must only analyze the request.
+For that first response, emit one say action with a concise plan: restate the goal, identify what you need to inspect, name likely files or areas, and mention important risks or ambiguities.
+Do not list files, read files, write files, call MCP tools, or finish in the first response.
+Begin project inspection and implementation only after the host returns your analysis to you for the next iteration.
 Reply with exactly ONE JSON object for the next step. Never return two actions.
 Do not wrap the object in markdown. Do not add commentary before or after it.
 Allowed actions (examples only — emit one of these shapes):
@@ -99,12 +106,10 @@ Allowed actions (examples only — emit one of these shapes):
 - list_files: {"action":"list_files","path":"relative/folder"}
 - read_file: {"action":"read_file","path":"relative/file"}
 - write_file: {"action":"write_file","path":"relative/file","content":"..."}
-- run_command: {"action":"run_command","executable":"flutter","args":["test"]}
 - mcp_call: {"action":"mcp_call","server":"name","tool":"tool_name","arguments":{}}
 - finish: {"action":"finish","summary":"..."}
 Use relative paths only. Never access .git or .tamtoot. Read relevant files before writing.
-Commands run directly without a shell. After changing files, run relevant tests before finishing.
-Do not finish until the requested work is complete, inspected, and tests pass.
+After writing, read the changed file to inspect it, then finish without running commands.
 ''';
 
   Future<AgentRunResult> run(String task, AgentRunOptions options) async {
@@ -164,6 +169,7 @@ Do not finish until the requested work is complete, inspected, and tests pass.
     }
     final transcript = <String>[
       'Task: $task',
+      'Phase: analysis. Your first response must be a say action containing only the task analysis and implementation plan. Do not use a tool yet.',
       if (promptHook.context.isNotEmpty) 'Hook context:\n${promptHook.context}',
     ];
     var mistakes = 0;
@@ -267,43 +273,20 @@ Do not finish until the requested work is complete, inspected, and tests pass.
             }
             await store.validateRegularFilePath(path);
             await store.writeText(path, content);
-            _wroteFiles = true;
             onEvent(AgentEvent('tool', 'Wrote $path'));
             transcript.add(
               'Tool write_file result: wrote $path successfully. Inspect it before finishing.',
             );
           case 'run_command':
-            final executable = _string(action, 'executable');
-            final rawArgs = action['args'];
-            if (rawArgs is! List || rawArgs.any((item) => item is! String)) {
-              throw const ModelApiException(
-                'run_command args must be strings.',
-              );
-            }
-            final arguments = rawArgs.cast<String>();
-            final allowed =
-                options.yolo || await approve('run_command', action);
-            if (!allowed) {
-              transcript.add('Tool run_command denied by the user.');
-              onEvent(AgentEvent('denied', 'Command denied: $executable'));
-              continue;
-            }
-            onEvent(
-              AgentEvent('tool', 'Running $executable ${arguments.join(' ')}'),
-            );
-            final result = await commands.run(executable, arguments);
-            final looksLikeTest = arguments.any(
-              (arg) => {'test', 'analyze', 'check'}.contains(arg),
-            );
-            if (looksLikeTest && result.exitCode == 0) _ranTests = true;
             transcript.add(
-              'Tool run_command exit ${result.exitCode}:\n${result.output}',
+              'run_command is unavailable: Tamtoot is a mobile IDE without a terminal, interpreter, debugger, build runner, or test runner. Inspect changed files and finish without executing commands.',
             );
-            if (result.exitCode != 0) {
-              throw ModelApiException(
-                'Command exited with ${result.exitCode}.',
-              );
-            }
+            onEvent(
+              AgentEvent(
+                'denied',
+                'Command skipped: this mobile IDE has no runtime or test runner.',
+              ),
+            );
           case 'mcp_call':
             final registry = mcp;
             if (registry == null) {
@@ -325,18 +308,6 @@ Do not finish until the requested work is complete, inspected, and tests pass.
             onEvent(AgentEvent('tool', 'MCP $server/$tool'));
             transcript.add('MCP $server/$tool result:\n${jsonEncode(result)}');
           case 'finish':
-            if (_wroteFiles && !_ranTests) {
-              transcript.add(
-                'Completion blocked: files changed but no successful test/analyze command ran.',
-              );
-              onEvent(
-                AgentEvent(
-                  'guard',
-                  'Completion blocked until relevant tests pass.',
-                ),
-              );
-              continue;
-            }
             final summary = _string(action, 'summary');
             onEvent(AgentEvent('done', summary));
             return AgentRunResult(

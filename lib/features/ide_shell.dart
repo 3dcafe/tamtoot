@@ -295,10 +295,8 @@ class _IdeShellState extends ConsumerState<IdeShell> {
                           child: Row(
                             children: [
                               InkWell(
-                                onTap: () => session.run(
-                                  'document.activate',
-                                  doc.id,
-                                ),
+                                onTap: () =>
+                                    session.run('document.activate', doc.id),
                                 child: Padding(
                                   padding: const EdgeInsets.fromLTRB(
                                     12,

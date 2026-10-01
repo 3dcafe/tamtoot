@@ -54,6 +54,25 @@ void main() {
       await session.dispose();
     },
   );
+  test('model API tokens stay local and restore by profile id', () async {
+    final store = MemoryStore();
+    final first = await testSession(store: store);
+    first.rememberModelApiKey('ai-star-agent', 'secret-token');
+    await first.persistNow();
+
+    final restored = await testSession(store: store);
+    expect(restored.modelApiKey('ai-star-agent'), 'secret-token');
+    expect(restored.modelApiKey('another-profile'), isEmpty);
+
+    restored.rememberModelApiKey('ai-star-agent', '');
+    await restored.persistNow();
+    final forgotten = await testSession(store: store);
+    expect(forgotten.modelApiKey('ai-star-agent'), isEmpty);
+
+    await first.dispose();
+    await restored.dispose();
+    await forgotten.dispose();
+  });
   test(
     'opening same file activates existing tab and normalizes CRLF cleanly',
     () async {

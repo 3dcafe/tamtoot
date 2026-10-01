@@ -194,15 +194,16 @@ actual browser permission behavior requires a writable folder grant.
 ## Agent, YOLO and headless mode
 
 Open **Tools → Agent…**, choose a saved model profile, enter a task and run it.
-The agent has bounded tools to list/read/write project files, run a command without
-a shell, and call connected MCP tools. File writes and commands require one-time
-approval in normal mode. API keys remain in the open window only.
+The agent has bounded tools to list/read/write project files and call connected
+MCP tools. Tamtoot targets mobile devices, so every agent request explicitly
+forbids attempts to run tests, builds, interpreters, debuggers, shells or other
+executables. File writes require one-time approval in normal mode.
 
 **YOLO Mode** auto-approves these actions after a visible first-use warning and a
 clean-Git check. It has a 600-second default timeout, a configurable consecutive
-mistake limit, an iteration limit, a live log and a **Stop** button. Dangerous
-executables and destructive Git commands are blocked. If files changed, the agent
-cannot finish until a test/analyze/check command succeeds.
+mistake limit, an iteration limit, a live log and a **Stop** button. The agent
+verifies edits by reading changed files and reports that runtime checks were not
+executed in the mobile IDE.
 
 For scripts and CI:
 

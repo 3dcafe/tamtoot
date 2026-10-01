@@ -141,6 +141,8 @@ class _AgentPanelState extends State<AgentPanel> {
       _catalogRevision = widget.session.agentCatalogRevision;
       if (selected == null) {
         error = 'Create a model profile in Settings first.';
+      } else {
+        _restoreApiKey();
       }
     } catch (e) {
       error = '$e';
@@ -210,6 +212,18 @@ class _AgentPanelState extends State<AgentPanel> {
       setState(() => error = 'The active project changed. Reopen Agent.');
       return;
     }
+    final profile = profiles[path];
+    if (profile == null) {
+      setState(() => error = 'Select a model profile first.');
+      return;
+    }
+    if (_profileNeedsApiKey(profile) && apiKey.text.trim().isEmpty) {
+      setState(
+        () => error =
+            'Enter the API token below, then send again. It will be reused until the app closes.',
+      );
+      return;
+    }
     if (yolo && !await _confirmYolo()) return;
     final git = widget.session.git as HttpGitService;
     McpRegistry? mcp;
@@ -226,11 +240,11 @@ class _AgentPanelState extends State<AgentPanel> {
       return;
     }
     final runner = AgentTaskEngine(
-      profile: profiles[path]!,
+      profile: profile,
       store: git.openStore(root!),
       git: git,
       root: root!,
-      apiKey: apiKey.text,
+      apiKey: apiKey.text.trim(),
       onEvent: (event) {
         if (mounted) {
           setState(() => events.add(event));
@@ -262,7 +276,7 @@ class _AgentPanelState extends State<AgentPanel> {
     } catch (e) {
       if (mounted) setState(() => error = '$e');
     } finally {
-      apiKey.clear();
+      // Keep the API key in memory for the Agent panel session.
       activeMcp?.close();
       if (mounted) {
         setState(() {
@@ -272,6 +286,38 @@ class _AgentPanelState extends State<AgentPanel> {
         });
       }
     }
+  }
+
+  bool _profileNeedsApiKey(ModelProfile profile) {
+    if (profile.apiFormat == 'ollama') return false;
+    final host = profile.requestUri().host.toLowerCase();
+    return host != 'localhost' && host != '127.0.0.1';
+  }
+
+  bool get _selectedNeedsApiKey {
+    final profile = selected == null ? null : profiles[selected];
+    return profile != null && _profileNeedsApiKey(profile);
+  }
+
+  void _restoreApiKey() {
+    final profile = selected == null ? null : profiles[selected];
+    apiKey.text = profile == null ? '' : widget.session.modelApiKey(profile.id);
+  }
+
+  void _selectProfile(String? value) {
+    setState(() {
+      selected = value;
+      error = null;
+      _restoreApiKey();
+    });
+  }
+
+  void _rememberApiKey(String value) {
+    final profile = selected == null ? null : profiles[selected];
+    if (profile != null) {
+      widget.session.rememberModelApiKey(profile.id, value);
+    }
+    setState(() {});
   }
 
   @override
@@ -343,9 +389,7 @@ class _AgentPanelState extends State<AgentPanel> {
                       ),
                     ),
                 ],
-                onChanged: running
-                    ? null
-                    : (value) => setState(() => selected = value),
+                onChanged: running ? null : _selectProfile,
               ),
             ),
             Expanded(
@@ -371,30 +415,58 @@ class _AgentPanelState extends State<AgentPanel> {
             ),
             if (error != null)
               Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 4,
+                ),
                 child: SelectableText(
                   error!,
                   style: TextStyle(fontSize: 12, color: colors.error),
                 ),
               ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(10, 0, 10, 6),
+              child: TextField(
+                controller: apiKey,
+                enabled: !running,
+                obscureText: true,
+                enableSuggestions: false,
+                autocorrect: false,
+                onChanged: _rememberApiKey,
+                decoration: InputDecoration(
+                  labelText: _selectedNeedsApiKey
+                      ? 'API token'
+                      : 'API token (optional)',
+                  helperText: _selectedNeedsApiKey
+                      ? apiKey.text.isEmpty
+                            ? 'Required. Enter it once; it is saved locally on this device.'
+                            : 'Saved locally for this profile. It is never added to the project.'
+                      : 'Local Ollama usually works without a token.',
+                  suffixIcon: apiKey.text.isEmpty
+                      ? null
+                      : IconButton(
+                          tooltip: 'Forget token',
+                          onPressed: running
+                              ? null
+                              : () {
+                                  apiKey.clear();
+                                  _rememberApiKey('');
+                                },
+                          icon: const Icon(Icons.close, size: 16),
+                        ),
+                  isDense: true,
+                ),
+              ),
+            ),
             ExpansionTile(
               dense: true,
               tilePadding: const EdgeInsets.symmetric(horizontal: 10),
-              title: const Text('Agent options', style: TextStyle(fontSize: 12)),
+              title: const Text(
+                'Agent options',
+                style: TextStyle(fontSize: 12),
+              ),
               childrenPadding: const EdgeInsets.fromLTRB(10, 0, 10, 8),
               children: [
-                TextField(
-                  controller: apiKey,
-                  enabled: !running,
-                  obscureText: true,
-                  enableSuggestions: false,
-                  autocorrect: false,
-                  decoration: const InputDecoration(
-                    labelText: 'API key (kept in memory only)',
-                    isDense: true,
-                  ),
-                ),
-                const SizedBox(height: 6),
                 Wrap(
                   spacing: 8,
                   runSpacing: 6,
@@ -481,7 +553,10 @@ class _AgentPanelState extends State<AgentPanel> {
                           onPressed: running
                               ? null
                               : () => setState(events.clear),
-                          icon: const Icon(Icons.delete_sweep_outlined, size: 18),
+                          icon: const Icon(
+                            Icons.delete_sweep_outlined,
+                            size: 18,
+                          ),
                         ),
                       IconButton(
                         tooltip: 'JSON: client ↔ agent',
@@ -528,8 +603,8 @@ class _AgentPanelState extends State<AgentPanel> {
     final user = event.type == 'user';
     final errorEvent = event.type == 'error';
     final model = event.type == 'model';
-    final hasJson = event.data.containsKey('request') ||
-        event.data.containsKey('response');
+    final hasJson =
+        event.data.containsKey('request') || event.data.containsKey('response');
     return Align(
       alignment: user ? Alignment.centerRight : Alignment.centerLeft,
       child: Container(
@@ -586,11 +661,7 @@ class _AgentPanelState extends State<AgentPanel> {
                 constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
                 padding: EdgeInsets.zero,
                 onPressed: () => _showJsonLog([event]),
-                icon: Icon(
-                  Icons.data_object,
-                  size: 18,
-                  color: colors.primary,
-                ),
+                icon: Icon(Icons.data_object, size: 18, color: colors.primary),
               ),
           ],
         ),
