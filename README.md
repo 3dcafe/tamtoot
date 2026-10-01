@@ -163,6 +163,8 @@ name. URLs and provider details remain available under **Advanced connection
 settings** for custom servers. **Check connection** verifies that the API is
 reachable and compatible, loads its model list when supported, and confirms
 whether the selected model is available. This check does not send a prompt.
+Custom compatible profiles accept a base URL, a `/v1/models` discovery URL or a
+full request endpoint and normalize it to the selected API format.
 
 - Profiles: `.tamtoot/agents/models/<profile-id>.json` (schema version 1).
 - Shared instructions: `.tamtoot/agents/instructions.md`, saved separately and

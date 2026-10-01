@@ -110,7 +110,9 @@ Future<void> main(List<String> arguments) async {
       return (stdin.readLineSync() ?? '').toLowerCase() == 'y';
     },
   );
-  ProcessSignal.sigint.watch().listen((_) => engine.stop());
+  final signalSubscription = ProcessSignal.sigint.watch().listen(
+    (_) => engine.stop(),
+  );
   try {
     final result = await engine.run(
       task,
@@ -145,5 +147,7 @@ Future<void> main(List<String> arguments) async {
       stderr.writeln(e);
     }
     exitCode = 1;
+  } finally {
+    await signalSubscription.cancel();
   }
 }

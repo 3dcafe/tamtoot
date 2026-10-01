@@ -58,6 +58,17 @@ void main() {
       'localhost',
     );
     expect(
+      profile(
+        'chat-completions',
+        'https://ai.qird.ru/v1/models',
+      ).requestUri().toString(),
+      'https://ai.qird.ru/v1/chat/completions',
+    );
+    expect(
+      profile('chat-completions', 'https://ai.qird.ru').requestUri().path,
+      '/v1/chat/completions',
+    );
+    expect(
       () => ModelProfile(
         id: 'a',
         name: 'a',
@@ -67,6 +78,34 @@ void main() {
       ).validate(),
       throwsFormatException,
     );
+  });
+  test('models URL completes the full compatible request cycle', () async {
+    final client = ModelClient(
+      client: MockClient((request) async {
+        expect(
+          request.url.toString(),
+          'https://ai.qird.ru/v1/chat/completions',
+        );
+        final body = jsonDecode(request.body) as Map<String, dynamic>;
+        expect(body['model'], 'test-model');
+        return http.Response(
+          jsonEncode({
+            'choices': [
+              {
+                'message': {'content': 'Ready'},
+                'finish_reason': 'stop',
+              },
+            ],
+          }),
+          200,
+        );
+      }),
+    );
+    final reply = await client.send(
+      profile('chat-completions', 'https://ai.qird.ru/v1/models'),
+      prompt,
+    );
+    expect(reply.text, 'Ready');
   });
   test(
     'chat completion sends selected model, auth and parameters; parses UTF8 and usage',

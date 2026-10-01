@@ -52,6 +52,8 @@ class _IdeShellState extends ConsumerState<IdeShell> {
     ref.watch(sessionChangesProvider);
     // Safe with registerIfAbsent: picks up newly added commands after hot reload.
     registerSessionCommands(session, ShellActions(() => context, session));
+    final systemPadding = MediaQuery.paddingOf(context);
+    final topPadding = systemPadding.top.clamp(0.0, 24.0).toDouble();
     return Focus(
       onKeyEvent: (_, event) {
         if (event is! KeyDownEvent) return KeyEventResult.ignored;
@@ -70,11 +72,14 @@ class _IdeShellState extends ConsumerState<IdeShell> {
         return KeyEventResult.handled;
       },
       child: Scaffold(
-        // Keep top/bottom safe insets only — left/right SafeArea on iPad
-        // landscape wastes ~16–20px each side as an empty gutter.
-        body: SafeArea(
-          left: false,
-          right: false,
+        // Some tablet window managers report their whole caption area as a
+        // safe inset even though Flutter already starts below it. Cap the top
+        // inset so the IDE does not gain a large empty header.
+        body: Padding(
+          padding: EdgeInsets.only(
+            top: topPadding,
+            bottom: systemPadding.bottom,
+          ),
           child: Column(
             children: [
               _menu(),

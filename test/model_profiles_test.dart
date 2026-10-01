@@ -134,6 +134,34 @@ void main() {
     expect(compatibleResult.models, ['local-code']);
     expect(compatibleResult.message, contains('compatible'));
     compatible.close();
+
+    late Uri customChecked;
+    final custom = ModelApiProbe(
+      client: ProbeClient((request) {
+        customChecked = request.url;
+        return http.StreamedResponse(
+          Stream.value(
+            utf8.encode(
+              '{"models":[{"name":"/models/code.gguf"}],"object":"list"}',
+            ),
+          ),
+          200,
+        );
+      }),
+    );
+    final customResult = await custom.check(
+      ModelProfile(
+        id: 'custom',
+        name: 'Custom',
+        provider: 'custom',
+        model: '/models/code.gguf',
+        endpoint: 'https://models.example/v1/models',
+      ),
+    );
+    expect(customChecked.path, '/v1/models');
+    expect(customResult.models, ['/models/code.gguf']);
+    expect(customResult.message, contains('available'));
+    custom.close();
   });
   test(
     'native storage persists profiles and instructions, rejects stale writes and isolates projects',

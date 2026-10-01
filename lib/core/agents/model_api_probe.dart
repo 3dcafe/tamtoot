@@ -13,8 +13,10 @@ class ModelApiProbeResult {
 }
 
 class ModelApiProbe {
-  ModelApiProbe({http.Client? client, this.timeout = const Duration(seconds: 6)})
-    : _client = client ?? http.Client();
+  ModelApiProbe({
+    http.Client? client,
+    this.timeout = const Duration(seconds: 6),
+  }) : _client = client ?? http.Client();
 
   final http.Client _client;
   final Duration timeout;
@@ -45,7 +47,8 @@ class ModelApiProbe {
       final response = await _client.get(modelsUri).timeout(timeout);
       if (response.statusCode == 401 || response.statusCode == 403) {
         return const ModelApiProbeResult(
-          message: 'API is reachable and requires an access key. Compatibility will be checked when you run the model.',
+          message:
+              'API is reachable and requires an access key. Compatibility will be checked when you run the model.',
         );
       }
       if (response.statusCode < 200 || response.statusCode >= 300) {
@@ -54,15 +57,27 @@ class ModelApiProbe {
         );
       }
       final decoded = jsonDecode(response.body);
-      if (decoded is! Map || decoded['data'] is! List) {
+      if (decoded is! Map ||
+          (decoded['data'] is! List && decoded['models'] is! List)) {
         throw const ModelApiException(
           'API is reachable but its model list is not OpenAI-compatible.',
         );
       }
-      final models = <String>[
-        for (final item in decoded['data'] as List)
-          if (item is Map && item['id'] is String) item['id'] as String,
-      ]..sort();
+      final names = <String>{};
+      for (final list in [decoded['data'], decoded['models']]) {
+        if (list is! List) continue;
+        for (final item in list) {
+          if (item is! Map) continue;
+          for (final key in ['id', 'model', 'name']) {
+            final value = item[key];
+            if (value is String && value.trim().isNotEmpty) {
+              names.add(value);
+              break;
+            }
+          }
+        }
+      }
+      final models = names.toList()..sort();
       final selected = models.contains(profile.model);
       return ModelApiProbeResult(
         message: models.isEmpty
@@ -83,11 +98,7 @@ class ModelApiProbe {
 
   Uri _modelsUri(Uri endpoint) {
     var path = endpoint.path;
-    for (final suffix in [
-      '/chat/completions',
-      '/responses',
-      '/messages',
-    ]) {
+    for (final suffix in ['/chat/completions', '/responses', '/messages']) {
       if (path.endsWith(suffix)) {
         path = '${path.substring(0, path.length - suffix.length)}/models';
         break;

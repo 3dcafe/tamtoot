@@ -62,6 +62,29 @@ Public endpoints must use HTTPS. Plain HTTP is accepted only for localhost and
 private IPv4 ranges. URLs containing credentials, query parameters or fragments
 are rejected. Redirects are not followed.
 
+### Custom OpenAI-compatible server
+
+Choose **Custom compatible API** and enter any of these forms in **Server URL**:
+
+- a base URL such as `https://models.example`;
+- a discovery URL such as `https://models.example/v1/models`;
+- the full request URL such as `https://models.example/v1/chat/completions`.
+
+For Chat Completions, Tamtoot normalizes the first two forms to the request
+endpoint automatically. **Check connection** reads both OpenAI `data` model
+lists and compatible `models` lists, fills the model selector and displays the
+final request URL.
+
+Tested example:
+
+```text
+Model server: Custom compatible API
+Server URL: https://ai.qird.ru/v1/models
+API format: Chat Completions
+Model: /home/latin/models/bonsai/Ternary-Bonsai-2-27B-PQ2_0.gguf
+API parameters: {"temperature": 0.2, "max_tokens": 4096}
+```
+
 The template variables are `{{task}}`, `{{file_path}}`, `{{file}}` and
 `{{selection}}`. Substitution happens once, so template-looking text from a file
 is kept as ordinary file content. The Parameters field must contain a JSON

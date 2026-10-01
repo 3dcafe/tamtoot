@@ -28,7 +28,7 @@ class ModelProfile {
   };
 
   Uri requestUri() {
-    final uri = Uri.tryParse(endpoint);
+    final uri = Uri.tryParse(endpoint.trim());
     final local = uri != null && _isPrivateHost(uri.host);
     if (uri == null ||
         uri.host.isEmpty ||
@@ -40,7 +40,36 @@ class ModelProfile {
         'Enter a full HTTPS API endpoint without credentials or query parameters. HTTP is allowed only for localhost.',
       );
     }
-    return uri;
+    return _requestEndpoint(uri, apiFormat);
+  }
+
+  static Uri _requestEndpoint(Uri uri, String format) {
+    var path = uri.path.replaceFirst(RegExp(r'/+$'), '');
+    String without(String suffix) =>
+        path.substring(0, path.length - suffix.length);
+
+    if (format == 'chat-completions') {
+      if (path.endsWith('/models')) {
+        path = '${without('/models')}/chat/completions';
+      } else if (path.isEmpty || path == '/') {
+        path = '/v1/chat/completions';
+      } else if (path.endsWith('/v1')) {
+        path = '$path/chat/completions';
+      }
+    } else if (format == 'responses') {
+      if (path.endsWith('/models')) {
+        path = '${without('/models')}/responses';
+      } else if (path.isEmpty || path == '/') {
+        path = '/v1/responses';
+      } else if (path.endsWith('/v1')) {
+        path = '$path/responses';
+      }
+    } else if (format == 'ollama' && path.isEmpty) {
+      path = '/api/chat';
+    } else if (format == 'anthropic' && path.isEmpty) {
+      path = '/v1/messages';
+    }
+    return uri.replace(path: path);
   }
 
   static bool _isPrivateHost(String host) {

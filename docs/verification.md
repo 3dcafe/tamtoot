@@ -146,3 +146,12 @@ The expanded test suite passes **57 tests**, including folder collapse/reopen, s
 - Added a manual GitHub workflow that validates the source, builds a versioned signed AAB, retains it as an artifact, authorizes through the official RuStore JWE flow, creates a version draft and uploads the bundle.
 - Moderation submission is an explicit workflow input. Manual and automatic-after-approval publication modes are supported; secrets and temporary tokens are never committed.
 - YAML and every embedded Bash script were parsed locally. Application tests remain unchanged at **141 passing tests**.
+
+## Custom model endpoints — 2026-10-01
+
+- Custom compatible profiles accept a base URL, `/v1/models`, or a full Chat Completions request endpoint.
+- Model discovery accepts both OpenAI `data` arrays and compatible `models` arrays and shows the normalized request URL.
+- `https://ai.qird.ru/v1/chat/completions` was checked with the advertised GGUF model and returned `TAMTOOT_OK` without an API key.
+- A headless Agent run using the saved `/v1/models` profile completed its structured action loop in one iteration with `TAMTOOT_AGENT_OK`.
+- Headless mode now cancels its SIGINT subscription after completion so the process exits instead of remaining open.
+- Automated coverage verifies URL normalization, discovery and the complete compatible request/response cycle.

@@ -21,6 +21,29 @@
 
 **Preview prompts** показывает итоговый промт локально. **Run model…** отправляет запрос. API-ключ хранится только в памяти до завершения запроса или закрытия окна и удаляется из отображаемых ошибок.
 
+## Свой OpenAI-совместимый сервер
+
+Выберите **Custom compatible API**. В поле **Server URL** можно вставить базовый
+адрес, URL списка моделей `/v1/models` или полный endpoint
+`/v1/chat/completions`. Tamtoot сам преобразует адрес списка моделей в endpoint
+генерации. **Check connection** загружает список моделей из ответов с полем
+`data` или `models`, предлагает выбрать модель и показывает итоговый адрес.
+
+Проверенная конфигурация:
+
+```text
+Model server: Custom compatible API
+Server URL: https://ai.qird.ru/v1/models
+API compatibility format: Chat Completions
+Model: /home/latin/models/bonsai/Ternary-Bonsai-2-27B-PQ2_0.gguf
+API parameters: {"temperature": 0.2, "max_tokens": 4096}
+```
+
+Нажмите **Check connection**, выберите найденную модель, задайте Display name и
+сохраните профиль. **Run model…** отправляет одиночный запрос. Для работы с кодом
+проекта откройте **Tools → Agent…** и выберите сохранённый профиль. Если сервер
+доступен без авторизации, поле API key оставьте пустым.
+
 ## Быстрый запуск с Ollama
 
 1. Запустите Ollama и загрузите модель, например `ollama pull qwen3-coder`.

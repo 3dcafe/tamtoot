@@ -202,11 +202,7 @@ class _ModelProfilesDialogState extends State<ModelProfilesDialog> {
         'chat-completions',
         'http://localhost:8080/v1/chat/completions',
       ),
-      'openai': (
-        'openai',
-        'responses',
-        'https://api.openai.com/v1/responses',
-      ),
+      'openai': ('openai', 'responses', 'https://api.openai.com/v1/responses'),
       'anthropic': (
         'anthropic',
         'anthropic',
@@ -220,6 +216,10 @@ class _ModelProfilesDialogState extends State<ModelProfilesDialog> {
         provider.text = preset.$1;
         apiFormat = preset.$2;
         endpoint.text = preset.$3;
+      } else if (value == 'custom') {
+        provider.text = 'custom';
+        apiFormat = 'chat-completions';
+        endpoint.clear();
       }
       detectedModels = const [];
       ollamaModels = const [];
@@ -244,7 +244,7 @@ class _ModelProfilesDialogState extends State<ModelProfilesDialog> {
       final result = await probe.check(profile);
       if (!mounted) return;
       detectedModels = result.models;
-      connectionStatus = result.message;
+      connectionStatus = '${result.message}\nRequests: ${profile.requestUri()}';
       if (model.text.isEmpty && result.models.isNotEmpty) {
         model.text = result.models.first;
         dirty = true;
@@ -524,16 +524,36 @@ class _ModelProfilesDialogState extends State<ModelProfilesDialog> {
                     border: OutlineInputBorder(),
                   ),
                   items: const [
-                    DropdownMenuItem(value: 'ollama', child: Text('Ollama · local')),
-                    DropdownMenuItem(value: 'lm-studio', child: Text('LM Studio · local')),
-                    DropdownMenuItem(value: 'localai', child: Text('LocalAI · local')),
+                    DropdownMenuItem(
+                      value: 'ollama',
+                      child: Text('Ollama · local'),
+                    ),
+                    DropdownMenuItem(
+                      value: 'lm-studio',
+                      child: Text('LM Studio · local'),
+                    ),
+                    DropdownMenuItem(
+                      value: 'localai',
+                      child: Text('LocalAI · local'),
+                    ),
                     DropdownMenuItem(value: 'openai', child: Text('OpenAI')),
-                    DropdownMenuItem(value: 'anthropic', child: Text('Anthropic')),
-                    DropdownMenuItem(value: 'custom', child: Text('Custom compatible API')),
+                    DropdownMenuItem(
+                      value: 'anthropic',
+                      child: Text('Anthropic'),
+                    ),
+                    DropdownMenuItem(
+                      value: 'custom',
+                      child: Text('Custom compatible API'),
+                    ),
                   ],
                   onChanged: busy ? null : (value) => _chooseServer(value!),
                 ),
                 const SizedBox(height: 12),
+                if (serverType == 'custom')
+                  _field(
+                    'Server URL (base, /v1/models, or request endpoint)',
+                    endpoint,
+                  ),
                 if (detectedModels.isEmpty && ollamaModels.isEmpty)
                   _field('Model name', model),
                 if (detectedModels.isNotEmpty)
@@ -636,8 +656,13 @@ class _ModelProfilesDialogState extends State<ModelProfilesDialog> {
                             }),
                     ),
                     const SizedBox(height: 12),
-                    _field('API endpoint', endpoint),
-                    _field('API parameters (JSON object)', parameters, lines: 3),
+                    if (serverType != 'custom')
+                      _field('API endpoint', endpoint),
+                    _field(
+                      'API parameters (JSON object)',
+                      parameters,
+                      lines: 3,
+                    ),
                   ],
                 ),
                 _field('System prompt', system, lines: 3),
