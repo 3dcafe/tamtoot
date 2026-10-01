@@ -8,6 +8,7 @@ import '../app/session_commands.dart';
 import '../editor/widgets/code_editor.dart';
 import '../editor/input/keyboard_mapping.dart';
 import 'dialogs.dart';
+import 'agent_dialog.dart';
 import 'git_changes_dialog.dart';
 import 'git_diff.dart';
 import 'http_requests_dialog.dart';
@@ -53,7 +54,9 @@ class _IdeShellState extends ConsumerState<IdeShell> {
     // Safe with registerIfAbsent: picks up newly added commands after hot reload.
     registerSessionCommands(session, ShellActions(() => context, session));
     final systemPadding = MediaQuery.paddingOf(context);
-    final topPadding = systemPadding.top.clamp(0.0, 24.0).toDouble();
+    // Tablet window managers can include an external caption bar in the top
+    // inset even though the Flutter surface already starts below that bar.
+    final topPadding = systemPadding.top > 32 ? 0.0 : systemPadding.top;
     return Focus(
       onKeyEvent: (_, event) {
         if (event is! KeyDownEvent) return KeyEventResult.ignored;
@@ -71,29 +74,34 @@ class _IdeShellState extends ConsumerState<IdeShell> {
         session.run(command);
         return KeyEventResult.handled;
       },
-      child: Scaffold(
-        // Some tablet window managers report their whole caption area as a
-        // safe inset even though Flutter already starts below it. Cap the top
-        // inset so the IDE does not gain a large empty header.
-        body: Padding(
-          padding: EdgeInsets.only(
-            top: topPadding,
-            bottom: systemPadding.bottom,
-          ),
-          child: Column(
-            children: [
-              _menu(),
-              _toolbar(),
-              Expanded(
-                child: DockView(
-                  session: session,
-                  node: session.layout.root,
-                  documents: (_) => _documents(),
-                  panel: _panel,
+      child: PopScope(
+        canPop: session.documents.active == null,
+        onPopInvokedWithResult: (didPop, _) {
+          if (!didPop) session.run('file.close');
+        },
+        child: Scaffold(
+          // Some tablet window managers report their whole caption area as a
+          // safe inset even though Flutter already starts below it.
+          body: Padding(
+            padding: EdgeInsets.only(
+              top: topPadding,
+              bottom: systemPadding.bottom,
+            ),
+            child: Column(
+              children: [
+                _menu(),
+                _toolbar(),
+                Expanded(
+                  child: DockView(
+                    session: session,
+                    node: session.layout.root,
+                    documents: (_) => _documents(),
+                    panel: _panel,
+                  ),
                 ),
-              ),
-              _status(),
-            ],
+                _status(),
+              ],
+            ),
           ),
         ),
       ),
@@ -252,71 +260,100 @@ class _IdeShellState extends ConsumerState<IdeShell> {
           Container(
             height: 38,
             color: color('shell'),
-            child: ListView(
-              scrollDirection: Axis.horizontal,
+            child: Row(
               children: [
-                for (final doc in session.documents.documents)
-                  Container(
-                    decoration: BoxDecoration(
-                      color: doc == active ? color('editor') : color('panel'),
-                      border: Border(
-                        top: BorderSide(
-                          width: 2,
-                          color: doc == active
-                              ? color('accent')
-                              : Colors.transparent,
-                        ),
-                        right: BorderSide(color: color('border')),
-                      ),
-                    ),
-                    child: Row(
-                      children: [
-                        InkWell(
-                          onTap: () => session.run('document.activate', doc.id),
-                          child: Padding(
-                            padding: const EdgeInsets.fromLTRB(12, 8, 8, 8),
-                            child: Row(
-                              children: [
-                                Icon(
-                                  Icons.code,
-                                  size: 15,
-                                  color: color(
-                                    doc.name.endsWith('.cs')
-                                        ? 'keyword'
-                                        : 'type',
-                                  ),
-                                ),
-                                const SizedBox(width: 8),
-                                Text(
-                                  doc.name,
-                                  style: const TextStyle(fontSize: 12),
-                                ),
-                                if (doc.dirty)
-                                  Padding(
-                                    padding: const EdgeInsets.only(left: 8),
-                                    child: Icon(
-                                      Icons.circle,
-                                      size: 6,
-                                      color: color('accent'),
-                                    ),
-                                  ),
-                              ],
+                if (active != null) ...[
+                  IconButton(
+                    key: const ValueKey('editor-back'),
+                    tooltip: 'Close editor',
+                    onPressed: () => session.run('file.close', active.id),
+                    icon: const Icon(Icons.arrow_back, size: 17),
+                    visualDensity: VisualDensity.compact,
+                  ),
+                  const VerticalDivider(width: 1),
+                ],
+                Expanded(
+                  child: ListView(
+                    scrollDirection: Axis.horizontal,
+                    children: [
+                      for (final doc in session.documents.documents)
+                        Container(
+                          decoration: BoxDecoration(
+                            color: doc == active
+                                ? color('editor')
+                                : color('panel'),
+                            border: Border(
+                              top: BorderSide(
+                                width: 2,
+                                color: doc == active
+                                    ? color('accent')
+                                    : Colors.transparent,
+                              ),
+                              right: BorderSide(color: color('border')),
                             ),
                           ),
-                        ),
-                        IconButton(
-                          tooltip: 'Close ${doc.name}',
-                          onPressed: () => session.run('file.close', doc.id),
-                          icon: const Icon(Icons.close, size: 14),
-                          constraints: const BoxConstraints(
-                            minWidth: 32,
-                            minHeight: 32,
+                          child: Row(
+                            children: [
+                              InkWell(
+                                onTap: () => session.run(
+                                  'document.activate',
+                                  doc.id,
+                                ),
+                                child: Padding(
+                                  padding: const EdgeInsets.fromLTRB(
+                                    12,
+                                    8,
+                                    8,
+                                    8,
+                                  ),
+                                  child: Row(
+                                    children: [
+                                      Icon(
+                                        Icons.code,
+                                        size: 15,
+                                        color: color(
+                                          doc.name.endsWith('.cs')
+                                              ? 'keyword'
+                                              : 'type',
+                                        ),
+                                      ),
+                                      const SizedBox(width: 8),
+                                      Text(
+                                        doc.name,
+                                        style: const TextStyle(fontSize: 12),
+                                      ),
+                                      if (doc.dirty)
+                                        Padding(
+                                          padding: const EdgeInsets.only(
+                                            left: 8,
+                                          ),
+                                          child: Icon(
+                                            Icons.circle,
+                                            size: 6,
+                                            color: color('accent'),
+                                          ),
+                                        ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                              IconButton(
+                                tooltip: 'Close ${doc.name}',
+                                onPressed: () =>
+                                    session.run('file.close', doc.id),
+                                icon: const Icon(Icons.close, size: 14),
+                                constraints: const BoxConstraints(
+                                  minWidth: 32,
+                                  minHeight: 32,
+                                ),
+                                padding: EdgeInsets.zero,
+                              ),
+                            ],
                           ),
-                          padding: EdgeInsets.zero,
                         ),
-                      ],
-                    ),
+                    ],
                   ),
+                ),
               ],
             ),
           ),
@@ -535,12 +572,23 @@ class _IdeShellState extends ConsumerState<IdeShell> {
                         ),
                       ),
                       TextButton(
-                        key: const ValueKey('sidebar-requests'),
+                        key: const ValueKey('sidebar-agent'),
                         onPressed: () => setState(() => _sidebar = 2),
+                        child: Text(
+                          'Agent',
+                          style: TextStyle(
+                            color: color(_sidebar == 2 ? 'accent' : 'muted'),
+                            fontSize: 12,
+                          ),
+                        ),
+                      ),
+                      TextButton(
+                        key: const ValueKey('sidebar-requests'),
+                        onPressed: () => setState(() => _sidebar = 3),
                         child: Text(
                           'Requests',
                           style: TextStyle(
-                            color: color(_sidebar == 2 ? 'accent' : 'muted'),
+                            color: color(_sidebar == 3 ? 'accent' : 'muted'),
                             fontSize: 12,
                           ),
                         ),
@@ -579,6 +627,10 @@ class _IdeShellState extends ConsumerState<IdeShell> {
                     ),
                   ),
                 ),
+              AgentPanel(
+                key: ValueKey('agent-panel-${session.workspaceRoot}'),
+                session: session,
+              ),
               RequestsPanel(
                 key: ValueKey('requests-panel-${session.workspaceRoot}'),
                 session: session,

@@ -11,9 +11,17 @@ class ModelApiException implements Exception {
 }
 
 class ModelReply {
-  const ModelReply(this.text, {this.note = '', this.usage = const {}});
+  const ModelReply(
+    this.text, {
+    this.note = '',
+    this.usage = const {},
+    this.request = const {},
+  });
   final String text, note;
   final Map<String, dynamic> usage;
+
+  /// Redacted JSON body that was POSTed to the model API (no secrets).
+  final Map<String, dynamic> request;
 }
 
 /// One request per instance. Owns and closes its transport on completion/cancel.
@@ -89,6 +97,7 @@ class ModelClient {
         redact(reply.text),
         note: redact(reply.note),
         usage: reply.usage,
+        request: body,
       );
     } on ModelApiException catch (e) {
       final safe = redact(e.message);

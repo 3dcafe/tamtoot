@@ -66,6 +66,34 @@ ModelClient queueClient(List<String> actions) => ModelClient(
 
 void main() {
   final root = Uri.parse('memory:///project/');
+  test('agent accepts dot as the project root when listing files', () async {
+    final store = RepositoryMemory();
+    await store.writeText('a.txt', 'content');
+    final events = <AgentEvent>[];
+    final actions = [
+      '{"action":"list_files","path":"."}',
+      '{"action":"finish","summary":"Inspected project root"}',
+    ];
+    final engine = AgentTaskEngine(
+      profile: agentProfile(),
+      store: store,
+      git: AgentGit(),
+      root: root,
+      apiKey: '',
+      onEvent: events.add,
+      approve: (_, _) async => true,
+      clientFactory: () => queueClient(actions),
+      hooks: NoHooks(),
+      commands: FakeCommands(),
+    );
+
+    final result = await engine.run('Inspect files', const AgentRunOptions());
+
+    expect(result.success, isTrue);
+    expect(events.map((event) => event.text), contains('Listed .'));
+    expect(events.where((event) => event.type == 'model'), isNotEmpty);
+  });
+
   test('agent reads, asks before writing, writes and finishes', () async {
     final store = RepositoryMemory();
     await store.writeText('a.txt', 'before');

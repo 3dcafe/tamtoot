@@ -349,9 +349,9 @@ class _CodeEditorState extends State<CodeEditor> implements TextInputClient {
         return KeyEventResult.handled;
       }
     } else if (event.logicalKey == LogicalKeyboardKey.escape &&
-        _focus.hasFocus &&
-        _connection != null) {
-      _hideKeyboard();
+        _focus.hasFocus) {
+      if (_connection != null) _hideKeyboard();
+      unawaited(widget.session.run('file.close'));
       return KeyEventResult.handled;
     }
     final command = widget.session.keys.resolve(keyChord(event));

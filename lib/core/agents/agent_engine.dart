@@ -23,14 +23,16 @@ class AgentRunOptions {
 }
 
 class AgentEvent {
-  const AgentEvent(this.type, this.text, {this.data = const {}});
+  AgentEvent(this.type, this.text, {this.data = const {}, DateTime? at})
+    : at = at ?? DateTime.now();
   final String type, text;
   final Map<String, dynamic> data;
+  final DateTime at;
 
   Map<String, dynamic> toJson() => {
     'type': type,
     'text': text,
-    'ts': DateTime.now().millisecondsSinceEpoch,
+    'ts': at.millisecondsSinceEpoch,
     if (data.isNotEmpty) 'data': data,
   };
 }
@@ -185,6 +187,22 @@ Do not finish until the requested work is complete, inspected, and tests pass.
       } finally {
         _active = null;
       }
+      onEvent(
+        AgentEvent(
+          'model',
+          _preview(reply.text),
+          data: {
+            'endpoint': profile.requestUri().toString(),
+            'apiFormat': profile.apiFormat,
+            'request': reply.request,
+            'response': {
+              'text': reply.text,
+              if (reply.note.isNotEmpty) 'note': reply.note,
+              if (reply.usage.isNotEmpty) 'usage': reply.usage,
+            },
+          },
+        ),
+      );
       final action = _decodeAction(reply.text);
       final name = action['action'];
       try {
@@ -310,7 +328,7 @@ Do not finish until the requested work is complete, inspected, and tests pass.
                 'Completion blocked: files changed but no successful test/analyze command ran.',
               );
               onEvent(
-                const AgentEvent(
+                AgentEvent(
                   'guard',
                   'Completion blocked until relevant tests pass.',
                 ),
@@ -388,7 +406,7 @@ Do not finish until the requested work is complete, inspected, and tests pass.
   String _path(dynamic raw, {bool allowEmpty = false}) {
     if (raw is! String) throw const ModelApiException('Invalid agent path.');
     final path = raw.replaceAll('\\', '/').replaceFirst(RegExp(r'^/+'), '');
-    if (allowEmpty && path.isEmpty) return '';
+    if (allowEmpty && (path.isEmpty || path == '.')) return '';
     final parts = path.split('/');
     if (parts.any((part) => part.isEmpty || part == '.' || part == '..') ||
         !_allowed(path)) {
@@ -411,5 +429,11 @@ Do not finish until the requested work is complete, inspected, and tests pass.
       characters -= transcript[1].length;
       transcript.removeAt(1);
     }
+  }
+
+  String _preview(String text, {int max = 240}) {
+    final trimmed = text.trim();
+    if (trimmed.length <= max) return trimmed;
+    return '${trimmed.substring(0, max)}…';
   }
 }

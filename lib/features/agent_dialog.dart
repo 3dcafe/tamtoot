@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -10,17 +11,35 @@ import '../core/agents/mcp_client.dart';
 import '../core/agents/profile_store.dart';
 import '../core/git/http_git_service.dart';
 
-class AgentDialog extends StatefulWidget {
+class AgentDialog extends StatelessWidget {
   const AgentDialog({super.key, required this.session});
   final IdeSession session;
 
   @override
-  State<AgentDialog> createState() => _AgentDialogState();
+  Widget build(BuildContext context) => Dialog(
+    insetPadding: const EdgeInsets.all(16),
+    child: SizedBox(
+      width: 800,
+      height: MediaQuery.sizeOf(context).height * .82,
+      child: AgentPanel(session: session, embedded: false),
+    ),
+  );
 }
 
-class _AgentDialogState extends State<AgentDialog> {
+class AgentPanel extends StatefulWidget {
+  const AgentPanel({super.key, required this.session, this.embedded = true});
+
+  final IdeSession session;
+  final bool embedded;
+
+  @override
+  State<AgentPanel> createState() => _AgentPanelState();
+}
+
+class _AgentPanelState extends State<AgentPanel> {
   final task = TextEditingController();
   final apiKey = TextEditingController();
+  final scroll = ScrollController();
   final events = <AgentEvent>[];
   final profiles = <String, ModelProfile>{};
   String? selected, error;
@@ -43,13 +62,39 @@ class _AgentDialogState extends State<AgentDialog> {
     apiKey.clear();
     apiKey.dispose();
     task.dispose();
+    scroll.dispose();
     super.dispose();
   }
 
+  void _scrollToEnd() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (scroll.hasClients) {
+        scroll.animateTo(
+          scroll.position.maxScrollExtent,
+          duration: const Duration(milliseconds: 180),
+          curve: Curves.easeOut,
+        );
+      }
+    });
+  }
+
   Future<void> _load() async {
+    if (mounted) {
+      setState(() {
+        loading = true;
+        error = null;
+        profiles.clear();
+        selected = null;
+      });
+    }
     try {
-      if (root == null || widget.session.git is! HttpGitService) {
-        throw StateError('Open a supported project first.');
+      if (root == null) {
+        error = 'Open a project to use Agent.';
+        return;
+      }
+      if (widget.session.git is! HttpGitService) {
+        error = 'Agent is unavailable for this project provider.';
+        return;
       }
       final git = widget.session.git as HttpGitService;
       final store = ProfileStore(git.openStore(root!));
@@ -77,7 +122,7 @@ class _AgentDialogState extends State<AgentDialog> {
       }
       selected = profiles.keys.firstOrNull;
       if (selected == null) {
-        error = 'Create a model profile in Tools → Settings first.';
+        error = 'Create a model profile in Settings first.';
       }
     } catch (e) {
       error = '$e';
@@ -141,7 +186,8 @@ class _AgentDialogState extends State<AgentDialog> {
 
   Future<void> _start() async {
     final path = selected;
-    if (running || path == null || root == null) return;
+    final prompt = task.text.trim();
+    if (running || path == null || root == null || prompt.isEmpty) return;
     if (widget.session.workspaceRoot != root) {
       setState(() => error = 'The active project changed. Reopen Agent.');
       return;
@@ -168,7 +214,10 @@ class _AgentDialogState extends State<AgentDialog> {
       root: root!,
       apiKey: apiKey.text,
       onEvent: (event) {
-        if (mounted) setState(() => events.add(event));
+        if (mounted) {
+          setState(() => events.add(event));
+          _scrollToEnd();
+        }
       },
       approve: _approve,
       mcp: mcp,
@@ -178,11 +227,13 @@ class _AgentDialogState extends State<AgentDialog> {
       activeMcp = mcp;
       running = true;
       error = null;
-      events.clear();
+      events.add(AgentEvent('user', prompt));
+      task.clear();
     });
+    _scrollToEnd();
     try {
       await runner.run(
-        task.text,
+        prompt,
         AgentRunOptions(
           yolo: yolo,
           timeout: Duration(seconds: timeoutSeconds),
@@ -206,148 +257,470 @@ class _AgentDialogState extends State<AgentDialog> {
   }
 
   @override
-  Widget build(BuildContext context) => PopScope(
-    canPop: !running,
-    child: AlertDialog(
-      title: const Text('Agent'),
-      content: SizedBox(
-        width: 800,
-        height: MediaQuery.sizeOf(context).height * .72,
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    return PopScope(
+      canPop: !running,
+      child: Material(
+        color: colors.surface,
+        borderRadius: widget.embedded ? null : BorderRadius.circular(16),
+        clipBehavior: Clip.antiAlias,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            if (loading) const LinearProgressIndicator(),
-            DropdownButton<String>(
-              isExpanded: true,
-              value: selected,
-              hint: const Text('Model profile'),
-              items: [
-                for (final entry in profiles.entries)
-                  DropdownMenuItem(
-                    value: entry.key,
-                    child: Text('${entry.value.name} · ${entry.value.model}'),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 8, 6, 6),
+              child: Row(
+                children: [
+                  const Icon(Icons.smart_toy_outlined, size: 18),
+                  const SizedBox(width: 8),
+                  const Expanded(
+                    child: Text(
+                      'Agent',
+                      style: TextStyle(fontWeight: FontWeight.w600),
+                    ),
                   ),
-              ],
-              onChanged: running
-                  ? null
-                  : (value) => setState(() => selected = value),
-            ),
-            TextField(
-              controller: task,
-              enabled: !running,
-              minLines: 2,
-              maxLines: 5,
-              decoration: const InputDecoration(labelText: 'Task'),
-            ),
-            TextField(
-              controller: apiKey,
-              enabled: !running,
-              obscureText: true,
-              enableSuggestions: false,
-              autocorrect: false,
-              decoration: const InputDecoration(
-                labelText: 'API key (memory only; empty for Ollama)',
+                  IconButton(
+                    tooltip: 'Reload model profiles',
+                    visualDensity: VisualDensity.compact,
+                    onPressed: running || loading ? null : _load,
+                    icon: const Icon(Icons.refresh, size: 18),
+                  ),
+                  IconButton(
+                    tooltip: 'Model settings',
+                    visualDensity: VisualDensity.compact,
+                    onPressed: running
+                        ? null
+                        : () => widget.session.run('settings.open'),
+                    icon: const Icon(Icons.settings_outlined, size: 18),
+                  ),
+                  if (!widget.embedded)
+                    IconButton(
+                      tooltip: 'Close',
+                      visualDensity: VisualDensity.compact,
+                      onPressed: running ? null : () => Navigator.pop(context),
+                      icon: const Icon(Icons.close, size: 18),
+                    ),
+                ],
               ),
             ),
-            Wrap(
-              spacing: 12,
-              crossAxisAlignment: WrapCrossAlignment.center,
-              children: [
-                FilterChip(
-                  selected: yolo,
-                  onSelected: running
-                      ? null
-                      : (value) => setState(() => yolo = value),
-                  label: const Text('YOLO Mode'),
+            if (loading) const LinearProgressIndicator(minHeight: 2),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 10),
+              child: DropdownButtonFormField<String>(
+                isExpanded: true,
+                value: selected,
+                decoration: const InputDecoration(
+                  labelText: 'Model profile',
+                  isDense: true,
                 ),
-                SizedBox(
-                  width: 150,
-                  child: TextFormField(
-                    initialValue: '$timeoutSeconds',
-                    enabled: !running,
-                    keyboardType: TextInputType.number,
-                    decoration: const InputDecoration(
-                      labelText: 'Timeout, sec',
+                items: [
+                  for (final entry in profiles.entries)
+                    DropdownMenuItem(
+                      value: entry.key,
+                      child: Text(
+                        '${entry.value.name} · ${entry.value.model}',
+                        overflow: TextOverflow.ellipsis,
+                      ),
                     ),
-                    onChanged: (value) =>
-                        timeoutSeconds = int.tryParse(value) ?? 600,
-                  ),
-                ),
-                SizedBox(
-                  width: 160,
-                  child: TextFormField(
-                    initialValue: '$maxMistakes',
-                    enabled: !running,
-                    keyboardType: TextInputType.number,
-                    decoration: const InputDecoration(
-                      labelText: 'Max mistakes',
-                    ),
-                    onChanged: (value) =>
-                        maxMistakes = int.tryParse(value) ?? 3,
-                  ),
-                ),
-              ],
+                ],
+                onChanged: running
+                    ? null
+                    : (value) => setState(() => selected = value),
+              ),
             ),
-            const Divider(),
             Expanded(
               child: events.isEmpty
-                  ? const Center(
-                      child: Text('Agent activity will appear here.'),
+                  ? Center(
+                      child: Padding(
+                        padding: const EdgeInsets.all(20),
+                        child: Text(
+                          root == null
+                              ? 'Open a project to chat with Agent.'
+                              : 'Chat with the agent about the project.\nNo open file is required — describe the task below.',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(color: colors.onSurfaceVariant),
+                        ),
+                      ),
                     )
                   : ListView.builder(
+                      controller: scroll,
+                      padding: const EdgeInsets.fromLTRB(10, 4, 10, 10),
                       itemCount: events.length,
-                      itemBuilder: (_, index) {
-                        final event = events[index];
-                        return ListTile(
-                          dense: true,
-                          leading: Icon(
-                            event.type == 'error'
-                                ? Icons.error_outline
-                                : event.type == 'done'
-                                ? Icons.check_circle_outline
-                                : Icons.smart_toy_outlined,
-                          ),
-                          title: SelectableText(event.text),
-                          subtitle: Text(event.type),
-                        );
-                      },
+                      itemBuilder: (_, index) => _eventCard(events[index]),
                     ),
             ),
-            if (running) const LinearProgressIndicator(),
             if (error != null)
-              SelectableText(
-                error!,
-                style: TextStyle(color: Theme.of(context).colorScheme.error),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                child: SelectableText(
+                  error!,
+                  style: TextStyle(fontSize: 12, color: colors.error),
+                ),
               ),
-            if (events.isNotEmpty)
-              TextButton(
-                onPressed: () => Clipboard.setData(
-                  ClipboardData(
-                    text: events
-                        .map((event) => jsonEncode(event.toJson()))
-                        .join('\n'),
+            ExpansionTile(
+              dense: true,
+              tilePadding: const EdgeInsets.symmetric(horizontal: 10),
+              title: const Text('Agent options', style: TextStyle(fontSize: 12)),
+              childrenPadding: const EdgeInsets.fromLTRB(10, 0, 10, 8),
+              children: [
+                TextField(
+                  controller: apiKey,
+                  enabled: !running,
+                  obscureText: true,
+                  enableSuggestions: false,
+                  autocorrect: false,
+                  decoration: const InputDecoration(
+                    labelText: 'API key (kept in memory only)',
+                    isDense: true,
                   ),
                 ),
-                child: const Text('Copy JSON log'),
+                const SizedBox(height: 6),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 6,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    FilterChip(
+                      selected: yolo,
+                      onSelected: running
+                          ? null
+                          : (value) => setState(() => yolo = value),
+                      label: const Text('YOLO'),
+                    ),
+                    SizedBox(
+                      width: 120,
+                      child: TextFormField(
+                        initialValue: '$timeoutSeconds',
+                        enabled: !running,
+                        keyboardType: TextInputType.number,
+                        decoration: const InputDecoration(
+                          labelText: 'Timeout, sec',
+                          isDense: true,
+                        ),
+                        onChanged: (value) =>
+                            timeoutSeconds = int.tryParse(value) ?? 600,
+                      ),
+                    ),
+                    SizedBox(
+                      width: 120,
+                      child: TextFormField(
+                        initialValue: '$maxMistakes',
+                        enabled: !running,
+                        keyboardType: TextInputType.number,
+                        decoration: const InputDecoration(
+                          labelText: 'Max mistakes',
+                          isDense: true,
+                        ),
+                        onChanged: (value) =>
+                            maxMistakes = int.tryParse(value) ?? 3,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+            if (running) const LinearProgressIndicator(minHeight: 2),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(10, 4, 10, 10),
+              child: Column(
+                children: [
+                  TextField(
+                    controller: task,
+                    enabled: !running && root != null,
+                    minLines: 1,
+                    maxLines: 5,
+                    textInputAction: TextInputAction.send,
+                    onSubmitted: (_) {
+                      if (!running &&
+                          selected != null &&
+                          root != null &&
+                          task.text.trim().isNotEmpty) {
+                        unawaited(_start());
+                      }
+                    },
+                    onChanged: (_) => setState(() {}),
+                    decoration: InputDecoration(
+                      hintText: 'Поручите что угодно…',
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      isDense: true,
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 12,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Row(
+                    children: [
+                      if (events.isNotEmpty)
+                        IconButton(
+                          tooltip: 'Clear conversation',
+                          visualDensity: VisualDensity.compact,
+                          onPressed: running
+                              ? null
+                              : () => setState(events.clear),
+                          icon: const Icon(Icons.delete_sweep_outlined, size: 18),
+                        ),
+                      IconButton(
+                        tooltip: 'JSON: client ↔ agent',
+                        visualDensity: VisualDensity.compact,
+                        onPressed: _modelExchanges.isEmpty
+                            ? null
+                            : () => _showJsonLog(_modelExchanges),
+                        icon: const Icon(Icons.data_object, size: 18),
+                      ),
+                      const Spacer(),
+                      if (running)
+                        FilledButton.tonalIcon(
+                          onPressed: () => engine?.stop(),
+                          icon: const Icon(Icons.stop, size: 18),
+                          label: const Text('Stop'),
+                        )
+                      else
+                        IconButton.filled(
+                          tooltip: 'Send',
+                          onPressed:
+                              selected == null ||
+                                  root == null ||
+                                  task.text.trim().isEmpty
+                              ? null
+                              : () => unawaited(_start()),
+                          icon: const Icon(Icons.arrow_upward, size: 18),
+                        ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  List<AgentEvent> get _modelExchanges =>
+      events.where((event) => event.type == 'model').toList(growable: false);
+
+  Widget _eventCard(AgentEvent event) {
+    final colors = Theme.of(context).colorScheme;
+    final user = event.type == 'user';
+    final errorEvent = event.type == 'error';
+    final model = event.type == 'model';
+    final hasJson = event.data.containsKey('request') ||
+        event.data.containsKey('response');
+    return Align(
+      alignment: user ? Alignment.centerRight : Alignment.centerLeft,
+      child: Container(
+        constraints: const BoxConstraints(maxWidth: 620),
+        margin: const EdgeInsets.only(bottom: 8),
+        padding: const EdgeInsets.fromLTRB(10, 8, 6, 8),
+        decoration: BoxDecoration(
+          color: user
+              ? colors.primaryContainer
+              : errorEvent
+              ? colors.errorContainer
+              : model
+              ? colors.surfaceContainerHigh
+              : colors.surfaceContainerHighest,
+          borderRadius: BorderRadius.circular(12),
+          border: model
+              ? Border.all(color: colors.outlineVariant.withValues(alpha: 0.6))
+              : null,
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    user
+                        ? 'You'
+                        : model
+                        ? 'Model'
+                        : event.type,
+                    style: TextStyle(
+                      fontSize: 10,
+                      fontWeight: FontWeight.w600,
+                      color: colors.onSurfaceVariant,
+                    ),
+                  ),
+                  const SizedBox(height: 3),
+                  SelectableText(
+                    event.text,
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontFamily: model ? 'monospace' : null,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            if (hasJson)
+              IconButton(
+                tooltip: 'Show request / response JSON',
+                visualDensity: VisualDensity.compact,
+                constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                padding: EdgeInsets.zero,
+                onPressed: () => _showJsonLog([event]),
+                icon: Icon(
+                  Icons.data_object,
+                  size: 18,
+                  color: colors.primary,
+                ),
               ),
           ],
         ),
       ),
-      actions: [
-        TextButton(
-          onPressed: running ? null : () => Navigator.pop(context),
-          child: const Text('Close'),
-        ),
-        if (running)
-          FilledButton.tonal(
-            onPressed: () => engine?.stop(),
-            child: const Text('Stop'),
+    );
+  }
+
+  Future<void> _showJsonLog(List<AgentEvent> exchanges) async {
+    if (!mounted || exchanges.isEmpty) return;
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (ctx) {
+        final colors = Theme.of(ctx).colorScheme;
+        return DraggableScrollableSheet(
+          expand: false,
+          initialChildSize: 0.72,
+          minChildSize: 0.4,
+          maxChildSize: 0.95,
+          builder: (context, scrollController) => DefaultTabController(
+            length: 2,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 8, 8),
+                  child: Row(
+                    children: [
+                      const Expanded(
+                        child: Text(
+                          'Client ↔ Agent JSON',
+                          style: TextStyle(
+                            fontWeight: FontWeight.w600,
+                            fontSize: 15,
+                          ),
+                        ),
+                      ),
+                      IconButton(
+                        tooltip: 'Copy all',
+                        onPressed: () {
+                          final payload = exchanges
+                              .map((event) => event.toJson())
+                              .toList();
+                          Clipboard.setData(
+                            ClipboardData(
+                              text: const JsonEncoder.withIndent(
+                                '  ',
+                              ).convert(payload),
+                            ),
+                          );
+                        },
+                        icon: const Icon(Icons.copy_outlined, size: 18),
+                      ),
+                    ],
+                  ),
+                ),
+                const TabBar(
+                  tabs: [
+                    Tab(text: 'Client → model'),
+                    Tab(text: 'Agent ← model'),
+                  ],
+                ),
+                Expanded(
+                  child: TabBarView(
+                    children: [
+                      _jsonPages(
+                        scrollController,
+                        colors,
+                        exchanges,
+                        requestSide: true,
+                      ),
+                      _jsonPages(
+                        scrollController,
+                        colors,
+                        exchanges,
+                        requestSide: false,
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
           ),
-        FilledButton(
-          onPressed: running || selected == null ? null : _start,
-          child: const Text('Run agent'),
-        ),
-      ],
-    ),
-  );
+        );
+      },
+    );
+  }
+
+  Widget _jsonPages(
+    ScrollController controller,
+    ColorScheme colors,
+    List<AgentEvent> exchanges, {
+    required bool requestSide,
+  }) {
+    return ListView.separated(
+      controller: controller,
+      padding: const EdgeInsets.all(12),
+      itemCount: exchanges.length,
+      separatorBuilder: (_, _) => const SizedBox(height: 12),
+      itemBuilder: (_, index) {
+        final event = exchanges[index];
+        final payload = requestSide
+            ? {
+                'endpoint': event.data['endpoint'],
+                'apiFormat': event.data['apiFormat'],
+                'request': event.data['request'] ?? {},
+              }
+            : event.data['response'] ?? {'text': event.text};
+        final pretty = const JsonEncoder.withIndent('  ').convert(payload);
+        return Material(
+          color: colors.surfaceContainerHighest,
+          borderRadius: BorderRadius.circular(10),
+          child: Padding(
+            padding: const EdgeInsets.all(10),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        requestSide
+                            ? 'Request #${index + 1}'
+                            : 'Response #${index + 1}',
+                        style: const TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                    IconButton(
+                      tooltip: 'Copy',
+                      visualDensity: VisualDensity.compact,
+                      onPressed: () =>
+                          Clipboard.setData(ClipboardData(text: pretty)),
+                      icon: const Icon(Icons.copy_outlined, size: 16),
+                    ),
+                  ],
+                ),
+                SelectableText(
+                  pretty,
+                  style: const TextStyle(fontSize: 11, fontFamily: 'monospace'),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
 }
