@@ -282,7 +282,7 @@ After writing, read the changed file to inspect it, then finish without running 
               'run_command is unavailable: Tamtoot is a mobile IDE without a terminal, interpreter, debugger, build runner, or test runner. Inspect changed files and finish without executing commands.',
             );
             onEvent(
-              const AgentEvent(
+              AgentEvent(
                 'denied',
                 'Command skipped: this mobile IDE has no runtime or test runner.',
               ),
