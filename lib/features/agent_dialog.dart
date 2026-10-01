@@ -326,8 +326,9 @@ class _AgentPanelState extends State<AgentPanel> {
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 10),
               child: DropdownButtonFormField<String>(
+                key: ValueKey(selected ?? 'none'),
                 isExpanded: true,
-                value: selected,
+                initialValue: selected,
                 decoration: const InputDecoration(
                   labelText: 'Model profile',
                   isDense: true,
