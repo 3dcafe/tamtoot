@@ -121,8 +121,36 @@ void main() {
     ]);
     expect(history.first.hash, latest);
     expect(history.first.author, 'Test Author');
+    expect(history.first.authorEmail, 'test@example.com');
     expect(history.first.committedAt, isNotNull);
   });
+
+  test(
+    'returns changed files and their committed before/after content',
+    () async {
+      await store.writeText('changed.txt', 'before');
+      await store.writeText('deleted.txt', 'removed');
+      await commit('Base', ['changed.txt', 'deleted.txt']);
+      await store.writeText('changed.txt', 'after');
+      await store.delete('deleted.txt');
+      await store.writeText('added.txt', 'created');
+      final hash = await commit('Change files', [
+        'changed.txt',
+        'deleted.txt',
+        'added.txt',
+      ]);
+
+      final changes = await git.commitChanges(root, hash);
+
+      expect(
+        {for (final change in changes) change.path: change.status},
+        {'added.txt': 'A', 'changed.txt': 'M', 'deleted.txt': 'D'},
+      );
+      final snapshot = await git.commitFileSnapshot(root, hash, 'changed.txt');
+      expect(utf8.decode(snapshot.before!), 'before');
+      expect(utf8.decode(snapshot.after!), 'after');
+    },
+  );
 
   test(
     'commits selected snapshots, leaves unselected files and excludes metadata',

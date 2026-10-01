@@ -529,25 +529,33 @@ class HttpGitService
   Future<List<GitCommitSummary>> history(
     Uri directory, {
     int limit = 50,
+    String? startRef,
   }) async {
     final db = GitObjectDatabase(openStore(directory), inflateAt, deflate);
     final result = <GitCommitSummary>[];
     final seen = <String>{};
-    var hash = await db.readHead();
+    var hash = startRef == null
+        ? await db.readHead()
+        : await db.readRef(startRef);
     while (hash != null && seen.add(hash) && result.length < limit) {
       final info = parseCommit((await db.read(hash)).content);
       final ident = RegExp(
-        r'^(.*?)(?:\s+<[^>]*>)?\s+(\d+)\s+[+-]\d{4}$',
+        r'^(.*?)\s+<([^>]*)>\s+(\d+)\s+[+-]\d{4}$',
       ).firstMatch(info.author);
+      final committer = RegExp(
+        r'^(.*?)\s+<[^>]*>\s+\d+\s+[+-]\d{4}$',
+      ).firstMatch(info.committer);
       result.add(
         GitCommitSummary(
           hash: hash,
           message: info.message.trim(),
           author: ident?.group(1)?.trim() ?? info.author,
+          authorEmail: ident?.group(2)?.trim() ?? '',
+          committer: committer?.group(1)?.trim() ?? info.committer,
           committedAt: ident == null
               ? null
               : DateTime.fromMillisecondsSinceEpoch(
-                  int.parse(ident.group(2)!) * 1000,
+                  int.parse(ident.group(3)!) * 1000,
                   isUtc: true,
                 ),
         ),
@@ -555,6 +563,54 @@ class HttpGitService
       hash = info.parents.firstOrNull;
     }
     return result;
+  }
+
+  @override
+  Future<List<GitCommitFileChange>> commitChanges(
+    Uri directory,
+    String commitHash,
+  ) async {
+    final db = GitObjectDatabase(openStore(directory), inflateAt, deflate);
+    final commit = parseCommit((await db.read(commitHash)).content);
+    final before = await _headEntries(db, commit.parents.firstOrNull);
+    final after = await _headEntries(db, commitHash);
+    final changes = <GitCommitFileChange>[];
+    final paths = {...before.keys, ...after.keys}.toList()..sort();
+    for (final path in paths) {
+      final oldEntry = before[path], newEntry = after[path];
+      if (_sameEntry(oldEntry, newEntry)) continue;
+      changes.add(
+        GitCommitFileChange(
+          path: path,
+          status: oldEntry == null
+              ? 'A'
+              : newEntry == null
+              ? 'D'
+              : 'M',
+        ),
+      );
+    }
+    return changes;
+  }
+
+  @override
+  Future<GitCommitFileSnapshot> commitFileSnapshot(
+    Uri directory,
+    String commitHash,
+    String path,
+  ) async {
+    _validateWorkPath(path);
+    final db = GitObjectDatabase(openStore(directory), inflateAt, deflate);
+    final commit = parseCommit((await db.read(commitHash)).content);
+    final before = await _headEntries(db, commit.parents.firstOrNull);
+    final after = await _headEntries(db, commitHash);
+    Future<List<int>?> content(TreeEntry? entry) async =>
+        entry == null ? null : (await db.read(entry.hash)).content;
+    return GitCommitFileSnapshot(
+      path: path,
+      before: await content(before[path]),
+      after: await content(after[path]),
+    );
   }
 
   @override

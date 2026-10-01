@@ -195,14 +195,46 @@ class GitCommitSummary {
     required this.message,
     required this.author,
     required this.committedAt,
+    this.authorEmail = '',
+    this.committer = '',
   });
   final String hash, message, author;
+  final String authorEmail, committer;
   final DateTime? committedAt;
+}
+
+class GitCommitFileChange {
+  const GitCommitFileChange({required this.path, required this.status});
+  final String path;
+  final String status;
+}
+
+class GitCommitFileSnapshot {
+  const GitCommitFileSnapshot({
+    required this.path,
+    required this.before,
+    required this.after,
+  });
+  final String path;
+  final List<int>? before, after;
 }
 
 /// Optional local history capability. It never contacts the remote.
 abstract interface class GitHistoryProvider {
-  Future<List<GitCommitSummary>> history(Uri directory, {int limit = 50});
+  Future<List<GitCommitSummary>> history(
+    Uri directory, {
+    int limit = 50,
+    String? startRef,
+  });
+  Future<List<GitCommitFileChange>> commitChanges(
+    Uri directory,
+    String commitHash,
+  );
+  Future<GitCommitFileSnapshot> commitFileSnapshot(
+    Uri directory,
+    String commitHash,
+    String path,
+  );
 }
 
 /// Snapshot used for review and optimistic concurrency checks when discarding.

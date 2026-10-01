@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'git_diff.dart';
+import 'git_history_dialog.dart';
 import '../app/ide_session.dart';
 import '../core/git/git_service.dart';
 
@@ -491,58 +492,26 @@ class _GitChangesDialogState extends State<GitChangesDialog> {
   Future<void> _history() async {
     final provider = git;
     if (provider is! GitHistoryProvider) return;
+    if (remote.isNotEmpty) {
+      try {
+        final result = await git.fetch(root, credentials: _credentials);
+        result.ensureOk();
+        widget.session.log('[Git] History refreshed from origin/$branch');
+      } catch (error) {
+        widget.session.log(
+          '[Git] Remote history refresh failed; showing local history: ${safeError(error)}',
+          error: true,
+        );
+      }
+    }
+    if (!mounted) return;
     await showDialog<void>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: Text('Commit history · $branch'),
-        content: SizedBox(
-          width: 620,
-          height: 480,
-          child: FutureBuilder<List<GitCommitSummary>>(
-            future: (provider as GitHistoryProvider).history(root),
-            builder: (context, snapshot) {
-              if (snapshot.hasError) {
-                return SelectableText(safeError(snapshot.error!));
-              }
-              if (!snapshot.hasData) {
-                return const Center(child: CircularProgressIndicator());
-              }
-              if (snapshot.data!.isEmpty) {
-                return const Center(child: Text('No commits yet.'));
-              }
-              return ListView.separated(
-                itemCount: snapshot.data!.length,
-                separatorBuilder: (_, _) => const Divider(height: 1),
-                itemBuilder: (_, index) {
-                  final commit = snapshot.data![index];
-                  final date = commit.committedAt?.toLocal();
-                  final dateText = date == null
-                      ? ''
-                      : '${date.year.toString().padLeft(4, "0")}-${date.month.toString().padLeft(2, "0")}-${date.day.toString().padLeft(2, "0")} '
-                            '${date.hour.toString().padLeft(2, "0")}:${date.minute.toString().padLeft(2, "0")}';
-                  return ListTile(
-                    dense: true,
-                    leading: const Icon(Icons.commit, size: 18),
-                    title: Text(
-                      commit.message.split('\n').first,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    subtitle: Text(
-                      '${commit.hash.substring(0, 7)} · ${commit.author}${dateText.isEmpty ? "" : " · $dateText"}',
-                    ),
-                  );
-                },
-              );
-            },
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Close'),
-          ),
-        ],
+      builder: (_) => GitHistoryDialog(
+        session: widget.session,
+        root: root,
+        branch: branch,
+        safeError: safeError,
       ),
     );
   }

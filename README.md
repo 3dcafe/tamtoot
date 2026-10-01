@@ -112,7 +112,7 @@ Open a cloned project and select the **Git** tab beside **Solution** in the side
 1. Use the checkboxes to select the files to include, including additions or deletions. Selected unsaved editor changes are saved before committing. Files not selected remain outside the commit.
 2. Enter a commit message and click **Commit**. The main panel stays focused on changed files and their diffs.
 3. Open the gear menu to configure the remote URL, author name, author email, HTTPS username and access token. The identity and remote are stored in the repository Git configuration. Credentials stay in memory while this Git view is open and are never written to settings or repository files.
-4. Use the compact Pull, Push and Sync buttons at the top. The history button shows the latest local commits with their authors, dates and hashes.
+4. Use the compact Pull, Push and Sync buttons at the top. The history button refreshes refs over Smart HTTP and combines local and remote commits. It shows commit titles, full messages, hashes, authors, email addresses, committers and dates. Open a commit to see added, modified and deleted files; open a file to inspect its before/after text diff.
 
 Use **Pull** to fetch the current branch from `origin`. Pull requires a clean working tree and no unsaved project editors, so it cannot overwrite local work. It fast-forwards when possible. For divergent histories it performs a three-way merge and creates a merge commit when local and remote changes do not conflict. If both sides changed the same path, it leaves the working files untouched and reports every conflicting path. Open files and Solution refresh after a successful pull. Progress and results are written to Output.
 
