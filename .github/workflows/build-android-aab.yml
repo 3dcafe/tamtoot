@@ -1,7 +1,13 @@
 name: Build signed Android AAB
 
+# Manual signed AAB; also re-registers on workflow file updates after repo recreate.
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - master
+    paths:
+      - .github/workflows/build-android-aab.yml
 
 jobs:
   build-aab:

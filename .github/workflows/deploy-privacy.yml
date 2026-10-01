@@ -1,5 +1,6 @@
 name: Deploy privacy policy
 
+# Deploys privacy/; path push also re-registers this workflow after a repo recreate.
 on:
   workflow_dispatch:
   push:

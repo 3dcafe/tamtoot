@@ -1,5 +1,6 @@
 name: Build and upload AAB to RuStore
 
+# Manual RuStore upload; path push re-registers after a repo recreate.
 on:
   workflow_dispatch:
     inputs:
@@ -41,6 +42,11 @@ on:
           - "3"
           - "4"
           - "5"
+  push:
+    branches:
+      - master
+    paths:
+      - .github/workflows/upload-rustore.yml
 
 permissions:
   contents: read
