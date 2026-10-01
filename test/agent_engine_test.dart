@@ -169,6 +169,10 @@ void main() {
   test('agent never executes a command proposed by the model', () async {
     final commands = FakeCommands();
     final events = <AgentEvent>[];
+    final actions = [
+      '{"action":"run_command","executable":"flutter","args":["test"]}',
+      '{"action":"finish","summary":"Finished without runtime checks"}',
+    ];
     final engine = AgentTaskEngine(
       profile: agentProfile(),
       store: RepositoryMemory(),
@@ -177,10 +181,7 @@ void main() {
       apiKey: '',
       onEvent: events.add,
       approve: (_, _) async => throw StateError('must not ask'),
-      clientFactory: () => queueClient([
-        '{"action":"run_command","executable":"flutter","args":["test"]}',
-        '{"action":"finish","summary":"Finished without runtime checks"}',
-      ]),
+      clientFactory: () => queueClient(actions),
       hooks: NoHooks(),
       commands: commands,
     );

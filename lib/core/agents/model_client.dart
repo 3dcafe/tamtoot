@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
+import 'model_attachment.dart';
 import 'model_profile.dart';
 
 class ModelApiException implements Exception {
@@ -41,6 +42,7 @@ class ModelClient {
     ModelProfile profile,
     Map<String, dynamic> prompt, {
     String apiKey = '',
+    List<ModelAttachment> attachments = const [],
     void Function(String delta)? onDelta,
   }) async {
     if (_started) {
@@ -64,22 +66,22 @@ class ModelClient {
       if (key.contains('\n') || key.contains('\r')) {
         throw const ModelApiException('Invalid API key.');
       }
-      final host = uri.host.toLowerCase();
-      final local = host == 'localhost' || host == '127.0.0.1';
-      if (key.isEmpty && profile.apiFormat != 'ollama' && !local) {
-        throw const ModelApiException(
-          'API key is required for this endpoint. Paste it in the Agent panel.',
-        );
+      try {
+        ModelAttachment.validateAll(attachments);
+      } on FormatException catch (e) {
+        throw ModelApiException(e.message);
       }
       final body = requestBody(
         profile,
         prompt,
         stream: profile.apiFormat == 'ollama' && onDelta != null,
+        attachments: attachments,
       );
       final encoded = utf8.encode(jsonEncode(body));
-      if (encoded.length > 2 * 1024 * 1024) {
-        throw const ModelApiException(
-          'Prompt exceeds the 2 MiB request limit.',
+      final limit = attachments.isEmpty ? 2 * 1024 * 1024 : 16 * 1024 * 1024;
+      if (encoded.length > limit) {
+        throw ModelApiException(
+          'Prompt exceeds the ${limit ~/ (1024 * 1024)} MiB request limit.',
         );
       }
       final request = http.Request('POST', uri)..followRedirects = false;
@@ -107,7 +109,7 @@ class ModelClient {
         redact(reply.text),
         note: redact(reply.note),
         usage: reply.usage,
-        request: body,
+        request: redactAttachmentPayload(body),
       );
     } on ModelApiException catch (e) {
       final safe = redact(e.message);
@@ -134,19 +136,32 @@ class ModelClient {
     ModelProfile p,
     Map<String, dynamic> prompt, {
     bool stream = false,
+    List<ModelAttachment> attachments = const [],
   }) {
     p.validate();
+    ModelAttachment.validateAll(attachments);
     final system = prompt['systemPrompt'] as String;
     final user = prompt['userPrompt'] as String;
-    if (user.trim().isEmpty) {
+    if (user.trim().isEmpty && attachments.isEmpty) {
       throw const ModelApiException('The user prompt is empty.');
     }
+    final userText = user.trim().isEmpty && attachments.isNotEmpty
+        ? 'Please inspect the attached files.'
+        : user;
     return switch (p.apiFormat) {
       'ollama' => {
         'model': p.model,
         'messages': [
           if (system.isNotEmpty) {'role': 'system', 'content': system},
-          {'role': 'user', 'content': user},
+          {
+            'role': 'user',
+            'content': _ollamaUserContent(userText, attachments),
+            if (attachments.any((item) => item.isImage))
+              'images': [
+                for (final item in attachments)
+                  if (item.isImage) base64Encode(item.bytes),
+              ],
+          },
         ],
         'options': p.parameters,
         'stream': stream,
@@ -156,7 +171,14 @@ class ModelClient {
         ...p.parameters,
         'model': p.model,
         'instructions': system,
-        'input': user,
+        'input': attachments.isEmpty
+            ? userText
+            : [
+                {
+                  'role': 'user',
+                  'content': _responsesContent(userText, attachments),
+                },
+              ],
         'stream': false,
       },
       'anthropic' => {
@@ -165,7 +187,7 @@ class ModelClient {
         'model': p.model,
         if (system.isNotEmpty) 'system': system,
         'messages': [
-          {'role': 'user', 'content': user},
+          {'role': 'user', 'content': _anthropicContent(userText, attachments)},
         ],
         'stream': false,
       },
@@ -174,11 +196,168 @@ class ModelClient {
         'model': p.model,
         'messages': [
           if (system.isNotEmpty) {'role': 'system', 'content': system},
-          {'role': 'user', 'content': user},
+          {
+            'role': 'user',
+            'content': attachments.isEmpty
+                ? userText
+                : _chatCompletionsContent(userText, attachments),
+          },
         ],
         'stream': false,
       },
     };
+  }
+
+  /// OpenAI / STAR / ai.starimg.ru chat.completions multimodal parts.
+  static List<Map<String, dynamic>> _chatCompletionsContent(
+    String user,
+    List<ModelAttachment> attachments,
+  ) {
+    final parts = <Map<String, dynamic>>[
+      {'type': 'text', 'text': user},
+    ];
+    for (final item in attachments) {
+      if (item.isImage) {
+        parts.add({
+          'type': 'image_url',
+          'image_url': {'url': item.dataUri},
+        });
+        continue;
+      }
+      final text = item.asUtf8Text;
+      if (text != null) {
+        parts.add({
+          'type': 'text',
+          'text': 'Attached file `${item.name}`:\n```\n$text\n```',
+        });
+        continue;
+      }
+      // STAR / Bedrock-style document part (PDF, Office, …).
+      parts.add({
+        'type': 'file',
+        'file': {
+          'filename': item.name,
+          'file_data': item.dataUri,
+          'file_type': item.mimeType,
+        },
+      });
+    }
+    return parts;
+  }
+
+  static List<Map<String, dynamic>> _responsesContent(
+    String user,
+    List<ModelAttachment> attachments,
+  ) {
+    final parts = <Map<String, dynamic>>[
+      {'type': 'input_text', 'text': user},
+    ];
+    for (final item in attachments) {
+      if (item.isImage) {
+        parts.add({'type': 'input_image', 'image_url': item.dataUri});
+        continue;
+      }
+      final text = item.asUtf8Text;
+      if (text != null) {
+        parts.add({
+          'type': 'input_text',
+          'text': 'Attached file `${item.name}`:\n```\n$text\n```',
+        });
+        continue;
+      }
+      parts.add({
+        'type': 'input_file',
+        'filename': item.name,
+        'file_data': item.dataUri,
+      });
+    }
+    return parts;
+  }
+
+  static Object _anthropicContent(
+    String user,
+    List<ModelAttachment> attachments,
+  ) {
+    if (attachments.isEmpty) return user;
+    final parts = <Map<String, dynamic>>[
+      {'type': 'text', 'text': user},
+    ];
+    for (final item in attachments) {
+      if (item.isImage) {
+        final media = item.mimeType;
+        parts.add({
+          'type': 'image',
+          'source': {
+            'type': 'base64',
+            'media_type': media,
+            'data': base64Encode(item.bytes),
+          },
+        });
+        continue;
+      }
+      final text = item.asUtf8Text;
+      if (text != null) {
+        parts.add({
+          'type': 'text',
+          'text': 'Attached file `${item.name}`:\n```\n$text\n```',
+        });
+        continue;
+      }
+      parts.add({
+        'type': 'text',
+        'text':
+            'Attached binary file `${item.name}` (${item.mimeType}, ${item.bytes.length} bytes). This API format cannot embed it; paste text or use an OpenAI-compatible profile.',
+      });
+    }
+    return parts;
+  }
+
+  static String _ollamaUserContent(
+    String user,
+    List<ModelAttachment> attachments,
+  ) {
+    final buffer = StringBuffer(user);
+    for (final item in attachments) {
+      if (item.isImage) continue;
+      final text = item.asUtf8Text;
+      if (text != null) {
+        buffer.write('\n\nAttached file `${item.name}`:\n```\n$text\n```');
+      } else {
+        buffer.write(
+          '\n\nAttached binary file `${item.name}` (${item.mimeType}).',
+        );
+      }
+    }
+    return buffer.toString();
+  }
+
+  /// Drop huge base64 payloads from request snapshots shown in Agent JSON log.
+  static Map<String, dynamic> redactAttachmentPayload(
+    Map<String, dynamic> body,
+  ) {
+    dynamic scrub(dynamic value) {
+      if (value is String) {
+        if (value.startsWith('data:') && value.length > 120) {
+          final comma = value.indexOf(',');
+          final head = comma > 0 ? value.substring(0, comma + 1) : 'data:';
+          return '$head[redacted ${value.length - head.length} chars]';
+        }
+        if (value.length > 4000 &&
+            RegExp(r'^[A-Za-z0-9+/=]+$').hasMatch(value)) {
+          return '[redacted base64 ${value.length} chars]';
+        }
+        return value;
+      }
+      if (value is List) return [for (final item in value) scrub(item)];
+      if (value is Map) {
+        return <String, dynamic>{
+          for (final entry in value.entries) '${entry.key}': scrub(entry.value),
+        };
+      }
+      return value;
+    }
+
+    return Map<String, dynamic>.from(scrub(body) as Map);
   }
 
   Future<ModelReply> _perform(

@@ -1,9 +1,11 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
+import 'package:tamtoot/core/agents/model_attachment.dart';
 import 'package:tamtoot/core/agents/model_client.dart';
 import 'package:tamtoot/core/agents/model_profile.dart';
 import 'package:tamtoot/core/agents/ollama_client.dart';
@@ -27,6 +29,35 @@ const prompt = {
 };
 
 void main() {
+  test('chat-completions embeds image and file parts like STAR/OpenAI', () {
+    final png = ModelAttachment(
+      name: 'shot.png',
+      mimeType: 'image/png',
+      bytes: Uint8List.fromList([137, 80, 78, 71]),
+    );
+    final note = ModelAttachment(
+      name: 'note.txt',
+      mimeType: 'text/plain',
+      bytes: Uint8List.fromList(utf8.encode('hello')),
+    );
+    final body = ModelClient.requestBody(
+      profile(),
+      prompt,
+      attachments: [png, note],
+    );
+    final user = (body['messages'] as List).last as Map;
+    final content = user['content'] as List;
+    expect(content.first, {'type': 'text', 'text': 'Explain this code.'});
+    expect(content[1]['type'], 'image_url');
+    expect(
+      (content[1]['image_url'] as Map)['url'],
+      startsWith('data:image/png;base64,'),
+    );
+    expect(content[2]['type'], 'text');
+    expect(content[2]['text'], contains('note.txt'));
+    expect(content[2]['text'], contains('hello'));
+  });
+
   test('legacy profiles load without endpoint and new profiles round-trip', () {
     final old = jsonDecode(profile().encode()) as Map<String, dynamic>;
     old.remove('endpoint');

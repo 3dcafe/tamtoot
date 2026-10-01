@@ -1,11 +1,13 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../app/ide_session.dart';
 import '../core/agents/agent_engine.dart';
+import '../core/agents/model_attachment.dart';
 import '../core/agents/model_profile.dart';
 import '../core/agents/mcp_client.dart';
 import '../core/agents/profile_store.dart';
@@ -42,6 +44,7 @@ class _AgentPanelState extends State<AgentPanel> {
   final scroll = ScrollController();
   final events = <AgentEvent>[];
   final profiles = <String, ModelProfile>{};
+  final attachments = <ModelAttachment>[];
   String? selected, error;
   bool loading = true, running = false, yolo = false, yoloConfirmed = false;
   int timeoutSeconds = 600, maxMistakes = 3;
@@ -204,10 +207,70 @@ class _AgentPanelState extends State<AgentPanel> {
     return confirmed == true;
   }
 
+  Future<void> _pickAttachments() async {
+    if (running) return;
+    final files = await openFiles(
+      acceptedTypeGroups: [
+        const XTypeGroup(
+          label: 'Images',
+          extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp'],
+        ),
+        const XTypeGroup(
+          label: 'Documents',
+          extensions: [
+            'pdf',
+            'txt',
+            'md',
+            'csv',
+            'json',
+            'xml',
+            'html',
+            'doc',
+            'docx',
+            'xls',
+            'xlsx',
+            'dart',
+            'py',
+            'js',
+            'ts',
+            'yaml',
+            'yml',
+          ],
+        ),
+      ],
+    );
+    if (files.isEmpty || !mounted) return;
+    final next = List<ModelAttachment>.from(attachments);
+    try {
+      for (final file in files) {
+        final bytes = await file.readAsBytes();
+        next.add(
+          ModelAttachment(
+            name: file.name,
+            mimeType: ModelAttachment.mimeForName(file.name),
+            bytes: Uint8List.fromList(bytes),
+          ),
+        );
+      }
+      ModelAttachment.validateAll(next);
+      setState(() {
+        attachments
+          ..clear()
+          ..addAll(next);
+        error = null;
+      });
+    } on FormatException catch (e) {
+      if (mounted) setState(() => error = e.message);
+    } catch (e) {
+      if (mounted) setState(() => error = 'Could not attach file: $e');
+    }
+  }
+
   Future<void> _start() async {
     final path = selected;
     final prompt = task.text.trim();
-    if (running || path == null || root == null || prompt.isEmpty) return;
+    if (running || path == null || root == null) return;
+    if (prompt.isEmpty && attachments.isEmpty) return;
     if (widget.session.workspaceRoot != root) {
       setState(() => error = 'The active project changed. Reopen Agent.');
       return;
@@ -222,6 +285,12 @@ class _AgentPanelState extends State<AgentPanel> {
         () => error =
             'Enter the API token below, then send again. It will be reused until the app closes.',
       );
+      return;
+    }
+    try {
+      ModelAttachment.validateAll(attachments);
+    } on FormatException catch (e) {
+      setState(() => error = e.message);
       return;
     }
     if (yolo && !await _confirmYolo()) return;
@@ -245,6 +314,7 @@ class _AgentPanelState extends State<AgentPanel> {
       git: git,
       root: root!,
       apiKey: apiKey.text.trim(),
+      attachments: List<ModelAttachment>.from(attachments),
       onEvent: (event) {
         if (mounted) {
           setState(() => events.add(event));
@@ -259,13 +329,23 @@ class _AgentPanelState extends State<AgentPanel> {
       activeMcp = mcp;
       running = true;
       error = null;
-      events.add(AgentEvent('user', prompt));
+      events.add(
+        AgentEvent(
+          'user',
+          [
+            prompt,
+            if (attachments.isNotEmpty)
+              'Attachments: ${attachments.map((item) => item.name).join(', ')}',
+          ].join('\n'),
+        ),
+      );
       task.clear();
+      attachments.clear();
     });
     _scrollToEnd();
     try {
       await runner.run(
-        prompt,
+        prompt.isEmpty ? 'Please inspect the attached files.' : prompt,
         AgentRunOptions(
           yolo: yolo,
           timeout: Duration(seconds: timeoutSeconds),
@@ -516,6 +596,34 @@ class _AgentPanelState extends State<AgentPanel> {
               padding: const EdgeInsets.fromLTRB(10, 4, 10, 10),
               child: Column(
                 children: [
+                  if (attachments.isNotEmpty)
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: Wrap(
+                        spacing: 6,
+                        runSpacing: 6,
+                        children: [
+                          for (var i = 0; i < attachments.length; i++)
+                            InputChip(
+                              avatar: Icon(
+                                attachments[i].isImage
+                                    ? Icons.image_outlined
+                                    : Icons.attach_file,
+                                size: 16,
+                              ),
+                              label: Text(
+                                attachments[i].name,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                              onDeleted: running
+                                  ? null
+                                  : () =>
+                                        setState(() => attachments.removeAt(i)),
+                            ),
+                        ],
+                      ),
+                    ),
+                  if (attachments.isNotEmpty) const SizedBox(height: 6),
                   TextField(
                     controller: task,
                     enabled: !running && root != null,
@@ -526,7 +634,8 @@ class _AgentPanelState extends State<AgentPanel> {
                       if (!running &&
                           selected != null &&
                           root != null &&
-                          task.text.trim().isNotEmpty) {
+                          (task.text.trim().isNotEmpty ||
+                              attachments.isNotEmpty)) {
                         unawaited(_start());
                       }
                     },
@@ -559,6 +668,14 @@ class _AgentPanelState extends State<AgentPanel> {
                           ),
                         ),
                       IconButton(
+                        tooltip: 'Attach image or file',
+                        visualDensity: VisualDensity.compact,
+                        onPressed: running || root == null
+                            ? null
+                            : () => unawaited(_pickAttachments()),
+                        icon: const Icon(Icons.attach_file, size: 18),
+                      ),
+                      IconButton(
                         tooltip: 'JSON: client ↔ agent',
                         visualDensity: VisualDensity.compact,
                         onPressed: _modelExchanges.isEmpty
@@ -579,7 +696,8 @@ class _AgentPanelState extends State<AgentPanel> {
                           onPressed:
                               selected == null ||
                                   root == null ||
-                                  task.text.trim().isEmpty
+                                  (task.text.trim().isEmpty &&
+                                      attachments.isEmpty)
                               ? null
                               : () => unawaited(_start()),
                           icon: const Icon(Icons.arrow_upward, size: 18),

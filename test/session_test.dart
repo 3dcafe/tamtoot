@@ -73,6 +73,28 @@ void main() {
     await restored.dispose();
     await forgotten.dispose();
   });
+  test('Git credentials stay local and restore by remote URL', () async {
+    final store = MemoryStore();
+    final first = await testSession(store: store);
+    const remote = 'https://github.com/example/project.git';
+    first.rememberGitCredentials(
+      remote,
+      username: 'developer',
+      token: 'github-token',
+    );
+    await first.persistNow();
+
+    final restored = await testSession(store: store);
+    expect(restored.gitCredentials(remote).username, 'developer');
+    expect(restored.gitCredentials(remote).token, 'github-token');
+    expect(
+      restored.gitCredentials('https://example.com/other.git').token,
+      isEmpty,
+    );
+
+    await first.dispose();
+    await restored.dispose();
+  });
   test(
     'opening same file activates existing tab and normalizes CRLF cleanly',
     () async {

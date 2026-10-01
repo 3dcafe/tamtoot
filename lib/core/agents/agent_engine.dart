@@ -3,6 +3,7 @@ import 'dart:convert';
 
 import '../git/git_service.dart';
 import '../git/git_store.dart';
+import 'model_attachment.dart';
 import 'model_client.dart';
 import 'model_profile.dart';
 import 'hook_runner.dart';
@@ -61,6 +62,7 @@ class AgentTaskEngine {
     required this.apiKey,
     required this.onEvent,
     required this.approve,
+    this.attachments = const [],
     this.clientFactory,
     AgentHookRunner? hooks,
     AgentCommandRunner? commands,
@@ -73,6 +75,7 @@ class AgentTaskEngine {
   final GitService git;
   final Uri root;
   final String apiKey;
+  final List<ModelAttachment> attachments;
   final AgentEventSink onEvent;
   final AgentApproval approve;
   final ModelClient Function()? clientFactory;
@@ -183,15 +186,20 @@ After writing, read the changed file to inspect it, then finish without running 
       _active = client;
       ModelReply reply;
       try {
-        reply = await client.send(profile, {
-          'systemPrompt': [
-            profile.systemPrompt,
-            protocol,
-            if (mcp != null && mcp!.tools.isNotEmpty)
-              'Available MCP tools:\n${mcp!.describe()}',
-          ].join('\n\n'),
-          'userPrompt': transcript.join('\n\n'),
-        }, apiKey: apiKey);
+        reply = await client.send(
+          profile,
+          {
+            'systemPrompt': [
+              profile.systemPrompt,
+              protocol,
+              if (mcp != null && mcp!.tools.isNotEmpty)
+                'Available MCP tools:\n${mcp!.describe()}',
+            ].join('\n\n'),
+            'userPrompt': transcript.join('\n\n'),
+          },
+          apiKey: apiKey,
+          attachments: attachments,
+        );
       } finally {
         _active = null;
       }

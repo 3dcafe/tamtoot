@@ -82,7 +82,9 @@ class _ModelProfilesDialogState extends State<ModelProfilesDialog> {
 
   List<String> get _modelChoices {
     if (detectedModels.isNotEmpty) return detectedModels;
-    if (serverType == 'openai') return openaiSuggestedModels;
+    if (serverType == 'openai' || serverType == 'ai-star') {
+      return openaiSuggestedModels;
+    }
     return const [];
   }
 
