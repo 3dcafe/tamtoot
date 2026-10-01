@@ -21,7 +21,10 @@ class ModelApiProbe {
   final http.Client _client;
   final Duration timeout;
 
-  Future<ModelApiProbeResult> check(ModelProfile profile) async {
+  Future<ModelApiProbeResult> check(
+    ModelProfile profile, {
+    String? apiKey,
+  }) async {
     profile.validate();
     final endpoint = profile.requestUri();
     if (profile.apiFormat == 'ollama') {
@@ -43,12 +46,25 @@ class ModelApiProbe {
     }
 
     final modelsUri = _modelsUri(endpoint);
+    final headers = <String, String>{};
+    final key = apiKey?.trim() ?? '';
+    if (key.isNotEmpty) {
+      if (profile.apiFormat == 'anthropic') {
+        headers['anthropic-version'] = '2023-06-01';
+        headers['x-api-key'] = key;
+      } else {
+        headers['authorization'] = 'Bearer $key';
+      }
+    }
     try {
-      final response = await _client.get(modelsUri).timeout(timeout);
+      final response = await _client
+          .get(modelsUri, headers: headers)
+          .timeout(timeout);
       if (response.statusCode == 401 || response.statusCode == 403) {
-        return const ModelApiProbeResult(
-          message:
-              'API is reachable and requires an access key. Compatibility will be checked when you run the model.',
+        return ModelApiProbeResult(
+          message: key.isEmpty
+              ? 'API is reachable and requires an access key. Paste the key above and check again.'
+              : 'API rejected the access key (HTTP ${response.statusCode}).',
         );
       }
       if (response.statusCode < 200 || response.statusCode >= 300) {

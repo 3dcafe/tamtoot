@@ -49,7 +49,10 @@ class ModelClient {
       );
     }
     _started = true;
-    final key = apiKey.trim();
+    var key = apiKey.trim();
+    if (key.toLowerCase().startsWith('bearer ')) {
+      key = key.substring(7).trim();
+    }
     String redact(String text) =>
         key.isEmpty ? text : text.replaceAll(key, '[redacted]');
     try {
@@ -60,6 +63,13 @@ class ModelClient {
       final uri = profile.requestUri();
       if (key.contains('\n') || key.contains('\r')) {
         throw const ModelApiException('Invalid API key.');
+      }
+      final host = uri.host.toLowerCase();
+      final local = host == 'localhost' || host == '127.0.0.1';
+      if (key.isEmpty && profile.apiFormat != 'ollama' && !local) {
+        throw const ModelApiException(
+          'API key is required for this endpoint. Paste it in the Agent panel.',
+        );
       }
       final body = requestBody(
         profile,

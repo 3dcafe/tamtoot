@@ -96,6 +96,19 @@ API keys are never written to profiles or application settings. The dialogs keep
 the key in memory until the request finishes or the window closes. The headless
 agent reads `TAMTOOT_API_KEY`. Error text is sanitized before display.
 
+### AI STAR
+
+Choose **AI STAR · compatible API**, or use **Add AI STAR agent** when creating
+a profile. Tamtoot fills in `https://ai.starimg.ru/v1`, Chat Completions format,
+and the coding model `gpt-6.1-sol`. Paste the service token into the temporary
+API key field and select **Check connection** to load the models available to
+your account. Save the profile, open the **Agent** sidebar tab, select the saved
+profile, and paste the token under **Agent options** before sending a task.
+
+The token is kept in memory and is not written to `.tamtoot`, settings, or Git.
+The alternative service host can be entered manually as
+`https://ai.starimg.space/v1` when the primary domain is unavailable.
+
 ## Single model requests
 
 **Preview prompts** resolves the selected profile locally and sends nothing.

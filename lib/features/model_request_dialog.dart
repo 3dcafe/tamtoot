@@ -11,11 +11,13 @@ class ModelRequestDialog extends StatefulWidget {
     super.key,
     required this.profile,
     required this.prompt,
+    this.initialApiKey,
     this.clientFactory,
   });
 
   final ModelProfile profile;
   final Map<String, dynamic> prompt;
+  final String? initialApiKey;
   final ModelClient Function()? clientFactory;
 
   @override
@@ -23,7 +25,7 @@ class ModelRequestDialog extends StatefulWidget {
 }
 
 class _ModelRequestDialogState extends State<ModelRequestDialog> {
-  final apiKey = TextEditingController();
+  late final apiKey = TextEditingController(text: widget.initialApiKey ?? '');
   ModelClient? active;
   ModelReply? reply;
   String? error;

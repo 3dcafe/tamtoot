@@ -17,6 +17,15 @@ class ModelProfilesDialog extends StatefulWidget {
 }
 
 class _ModelProfilesDialogState extends State<ModelProfilesDialog> {
+  static const openaiSuggestedModels = [
+    'gpt-4o-mini',
+    'gpt-4o',
+    'gpt-4.1-mini',
+    'gpt-4.1',
+    'o4-mini',
+    'o3-mini',
+  ];
+
   final id = TextEditingController(),
       name = TextEditingController(),
       provider = TextEditingController(text: 'ollama'),
@@ -26,7 +35,8 @@ class _ModelProfilesDialogState extends State<ModelProfilesDialog> {
       template = TextEditingController(text: defaultUserTemplate),
       parameters = TextEditingController(text: '{}'),
       instructions = TextEditingController(),
-      task = TextEditingController();
+      task = TextEditingController(),
+      apiKey = TextEditingController();
   String apiFormat = 'ollama';
   String serverType = 'ollama';
   List<OllamaModel> ollamaModels = const [];
@@ -57,10 +67,23 @@ class _ModelProfilesDialogState extends State<ModelProfilesDialog> {
       parameters,
       instructions,
       task,
+      apiKey,
     ]) {
       c.dispose();
     }
     super.dispose();
+  }
+
+  bool get _needsApiKey =>
+      serverType == 'openai' ||
+      serverType == 'anthropic' ||
+      serverType == 'ai-star' ||
+      serverType == 'custom';
+
+  List<String> get _modelChoices {
+    if (detectedModels.isNotEmpty) return detectedModels;
+    if (serverType == 'openai') return openaiSuggestedModels;
+    return const [];
   }
 
   Future<void> _run(Future<void> Function() action) async {
@@ -117,13 +140,13 @@ class _ModelProfilesDialogState extends State<ModelProfilesDialog> {
       ) ??
       false;
 
-  Future<void> _select(String? path) async {
+  Future<bool> _select(String? path) async {
     if (dirty &&
         !await _confirm(
           'Discard profile edits?',
           'Unsaved edits to this model profile will be lost.',
         )) {
-      return;
+      return false;
     }
     await _run(() async {
       final text = path == null ? null : await store!.read(path);
@@ -153,6 +176,7 @@ class _ModelProfilesDialogState extends State<ModelProfilesDialog> {
       ).convert(p?.parameters ?? {});
       dirty = false;
     });
+    return true;
   }
 
   ModelProfile _profile() {
@@ -186,6 +210,9 @@ class _ModelProfilesDialogState extends State<ModelProfilesDialog> {
     if (value.contains('localhost:8080')) return 'localai';
     if (value.contains('api.openai.com')) return 'openai';
     if (value.contains('api.anthropic.com')) return 'anthropic';
+    if (value.contains('ai.starimg.ru') || value.contains('ai.starimg.space')) {
+      return 'ai-star';
+    }
     return 'custom';
   }
 
@@ -203,6 +230,7 @@ class _ModelProfilesDialogState extends State<ModelProfilesDialog> {
         'http://localhost:8080/v1/chat/completions',
       ),
       'openai': ('openai', 'responses', 'https://api.openai.com/v1/responses'),
+      'ai-star': ('ai-star', 'chat-completions', 'https://ai.starimg.ru/v1'),
       'anthropic': (
         'anthropic',
         'anthropic',
@@ -220,6 +248,29 @@ class _ModelProfilesDialogState extends State<ModelProfilesDialog> {
         provider.text = 'custom';
         apiFormat = 'chat-completions';
         endpoint.clear();
+      }
+      if (value == 'openai') {
+        if (name.text.trim().isEmpty || name.text.trim() == 'New model') {
+          name.text = 'OpenAI GPT';
+        }
+        if (id.text.trim().isEmpty || id.text.trim() == 'new-model') {
+          id.text = 'openai-gpt';
+        }
+        if (model.text.trim().isEmpty ||
+            !openaiSuggestedModels.contains(model.text.trim())) {
+          model.text = openaiSuggestedModels.first;
+        }
+      } else if (value == 'ai-star') {
+        if (name.text.trim().isEmpty || name.text.trim() == 'New model') {
+          name.text = 'AI STAR coding agent';
+        }
+        if (id.text.trim().isEmpty || id.text.trim() == 'new-model') {
+          id.text = 'ai-star-agent';
+        }
+        model.text = 'gpt-6.1-sol';
+        parameters.text = const JsonEncoder.withIndent(
+          '  ',
+        ).convert({'temperature': 0.1, 'max_tokens': 8192});
       }
       detectedModels = const [];
       ollamaModels = const [];
@@ -241,7 +292,7 @@ class _ModelProfilesDialogState extends State<ModelProfilesDialog> {
     );
     final probe = ModelApiProbe();
     try {
-      final result = await probe.check(profile);
+      final result = await probe.check(profile, apiKey: apiKey.text);
       if (!mounted) return;
       detectedModels = result.models;
       connectionStatus = '${result.message}\nRequests: ${profile.requestUri()}';
@@ -370,7 +421,11 @@ class _ModelProfilesDialogState extends State<ModelProfilesDialog> {
       await showDialog<void>(
         context: context,
         barrierDismissible: false,
-        builder: (_) => ModelRequestDialog(profile: profile, prompt: prompt),
+        builder: (_) => ModelRequestDialog(
+          profile: profile,
+          prompt: prompt,
+          initialApiKey: apiKey.text,
+        ),
       );
     } catch (e) {
       if (mounted) setState(() => error = '$e');
@@ -461,7 +516,7 @@ class _ModelProfilesDialogState extends State<ModelProfilesDialog> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               const Text(
-                'Project profiles and prompt templates. Run uses the current form, including unsaved prompt edits. API keys are entered separately and are never saved.',
+                'Project profiles and prompt templates. Run uses the current form, including unsaved prompt edits. API keys stay in memory only and are never saved into the profile.',
               ),
               const SizedBox(height: 12),
               if (busy) const LinearProgressIndicator(),
@@ -489,6 +544,26 @@ class _ModelProfilesDialogState extends State<ModelProfilesDialog> {
                     TextButton(
                       onPressed: busy ? null : () => _select(null),
                       child: const Text('New profile'),
+                    ),
+                    TextButton(
+                      onPressed: busy
+                          ? null
+                          : () async {
+                              if (!await _select(null)) return;
+                              if (!mounted) return;
+                              _chooseServer('openai');
+                            },
+                      child: const Text('Add OpenAI GPT'),
+                    ),
+                    TextButton(
+                      onPressed: busy
+                          ? null
+                          : () async {
+                              if (!await _select(null)) return;
+                              if (!mounted) return;
+                              _chooseServer('ai-star');
+                            },
+                      child: const Text('Add AI STAR agent'),
                     ),
                     TextButton(
                       onPressed: busy || selected == null ? null : _delete,
@@ -540,6 +615,10 @@ class _ModelProfilesDialogState extends State<ModelProfilesDialog> {
                     ),
                     DropdownMenuItem(value: 'openai', child: Text('OpenAI')),
                     DropdownMenuItem(
+                      value: 'ai-star',
+                      child: Text('AI STAR · compatible API'),
+                    ),
+                    DropdownMenuItem(
                       value: 'anthropic',
                       child: Text('Anthropic'),
                     ),
@@ -556,22 +635,50 @@ class _ModelProfilesDialogState extends State<ModelProfilesDialog> {
                     'Server URL (base, /v1/models, or request endpoint)',
                     endpoint,
                   ),
-                if (detectedModels.isEmpty && ollamaModels.isEmpty)
+                if (_needsApiKey) ...[
+                  TextField(
+                    controller: apiKey,
+                    enabled: !busy,
+                    obscureText: true,
+                    enableSuggestions: false,
+                    autocorrect: false,
+                    decoration: InputDecoration(
+                      labelText: serverType == 'openai'
+                          ? 'OpenAI API key (for check / run, not saved)'
+                          : serverType == 'ai-star'
+                          ? 'AI STAR token (for check / run, not saved)'
+                          : 'API key (for check / run, not saved)',
+                      border: const OutlineInputBorder(),
+                      helperText:
+                          'Paste the key here to check models and Run model. Agent uses its own key field.',
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                ],
+                if (ollamaModels.isEmpty && _modelChoices.isEmpty)
                   _field('Model name', model),
-                if (detectedModels.isNotEmpty)
+                if (_modelChoices.isNotEmpty)
                   DropdownButtonFormField<String>(
-                    key: ValueKey('detected-${model.text}'),
+                    key: ValueKey(
+                      'models-$serverType-${_modelChoices.join(',')}-${model.text}',
+                    ),
                     isExpanded: true,
-                    initialValue: detectedModels.contains(model.text)
+                    initialValue: _modelChoices.contains(model.text)
                         ? model.text
                         : null,
-                    hint: const Text('Choose a detected model'),
-                    decoration: const InputDecoration(
-                      labelText: 'Available models',
-                      border: OutlineInputBorder(),
+                    hint: Text(
+                      detectedModels.isNotEmpty
+                          ? 'Choose a detected model'
+                          : 'Choose an OpenAI model',
+                    ),
+                    decoration: InputDecoration(
+                      labelText: detectedModels.isNotEmpty
+                          ? 'Available models'
+                          : 'OpenAI model',
+                      border: const OutlineInputBorder(),
                     ),
                     items: [
-                      for (final value in detectedModels)
+                      for (final value in _modelChoices)
                         DropdownMenuItem(value: value, child: Text(value)),
                     ],
                     onChanged: busy
@@ -581,6 +688,10 @@ class _ModelProfilesDialogState extends State<ModelProfilesDialog> {
                             dirty = true;
                           }),
                   ),
+                if (serverType == 'openai' && detectedModels.isEmpty) ...[
+                  const SizedBox(height: 8),
+                  _field('Or type another model id', model),
+                ],
                 Wrap(
                   spacing: 8,
                   runSpacing: 8,

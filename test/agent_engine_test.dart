@@ -66,36 +66,39 @@ ModelClient queueClient(List<String> actions) => ModelClient(
 
 void main() {
   final root = Uri.parse('memory:///project/');
-  test('agent accepts the first JSON object when the model emits NDJSON', () async {
-    final store = RepositoryMemory();
-    await store.writeText('a.txt', 'content');
-    final events = <AgentEvent>[];
-    final actions = [
-      '{\n"action":"list_files","path":"."\n}\n{"action":"read_file","path":"a.txt"}',
-      '{"action":"finish","summary":"ok"}',
-    ];
-    final engine = AgentTaskEngine(
-      profile: agentProfile(),
-      store: store,
-      git: AgentGit(),
-      root: root,
-      apiKey: '',
-      onEvent: events.add,
-      approve: (_, _) async => true,
-      clientFactory: () => queueClient(actions),
-      hooks: NoHooks(),
-      commands: FakeCommands(),
-    );
+  test(
+    'agent accepts the first JSON object when the model emits NDJSON',
+    () async {
+      final store = RepositoryMemory();
+      await store.writeText('a.txt', 'content');
+      final events = <AgentEvent>[];
+      final actions = [
+        '{\n"action":"list_files","path":"."\n}\n{"action":"read_file","path":"a.txt"}',
+        '{"action":"finish","summary":"ok"}',
+      ];
+      final engine = AgentTaskEngine(
+        profile: agentProfile(),
+        store: store,
+        git: AgentGit(),
+        root: root,
+        apiKey: '',
+        onEvent: events.add,
+        approve: (_, _) async => true,
+        clientFactory: () => queueClient(actions),
+        hooks: NoHooks(),
+        commands: FakeCommands(),
+      );
 
-    final result = await engine.run('Inspect', const AgentRunOptions());
-    expect(result.success, isTrue);
-    expect(events.map((event) => event.text), contains('Listed .'));
-    expect(
-      events.where((event) => event.type == 'error'),
-      isEmpty,
-      reason: 'extra JSON lines must not crash the action decoder',
-    );
-  });
+      final result = await engine.run('Inspect', const AgentRunOptions());
+      expect(result.success, isTrue);
+      expect(events.map((event) => event.text), contains('Listed .'));
+      expect(
+        events.where((event) => event.type == 'error'),
+        isEmpty,
+        reason: 'extra JSON lines must not crash the action decoder',
+      );
+    },
+  );
 
   test('agent accepts dot as the project root when listing files', () async {
     final store = RepositoryMemory();
