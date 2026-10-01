@@ -1,5 +1,7 @@
 import 'dart:async';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../features/ide_shell.dart';
 import 'providers.dart';
@@ -12,6 +14,26 @@ class TamtootApp extends ConsumerStatefulWidget {
 
 class _TamtootAppState extends ConsumerState<TamtootApp>
     with WidgetsBindingObserver {
+  static const _windowChannel = MethodChannel('dev.tamtoot/window');
+  String? _lastWindowTitle;
+
+  Future<void> _updateWindowTitle(String title, bool dirty) async {
+    if (kIsWeb || defaultTargetPlatform != TargetPlatform.macOS) return;
+    if (_lastWindowTitle == title) return;
+    _lastWindowTitle = title;
+    try {
+      await _windowChannel.invokeMethod<void>('setTitle', {
+        'title': title,
+        'dirty': dirty,
+      });
+    } on MissingPluginException {
+      // Widget tests and older native hosts may not expose the window channel.
+      _lastWindowTitle = null;
+    } on PlatformException {
+      _lastWindowTitle = null;
+    }
+  }
+
   @override
   void initState() {
     super.initState();
@@ -37,13 +59,25 @@ class _TamtootAppState extends ConsumerState<TamtootApp>
   Widget build(BuildContext context) {
     ref.watch(sessionChangesProvider);
     final session = ref.watch(sessionProvider);
+    final root = session.workspaceRoot;
+    final projectName = root?.pathSegments
+        .where((segment) => segment.isNotEmpty)
+        .lastOrNull;
+    final document = session.documents.active;
+    final dirty = document?.dirty ?? false;
+    final title = [
+      'TamToot',
+      if (root != null) projectName ?? root.toString(),
+      if (document != null) '${document.name}${dirty ? ' *' : ''}',
+    ].join(' — ');
+    unawaited(_updateWindowTitle(title, dirty));
     final theme = session.theme;
     final colors = ColorScheme.fromSeed(
       seedColor: Color(theme.color('accent')),
       brightness: theme.dark ? Brightness.dark : Brightness.light,
     );
     return MaterialApp(
-      title: 'Tamtoot IDE',
+      title: title,
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         useMaterial3: true,
