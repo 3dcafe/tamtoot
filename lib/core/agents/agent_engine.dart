@@ -91,15 +91,17 @@ class AgentTaskEngine {
   }
 
   static const protocol = '''
-You are an autonomous coding agent. Respond with exactly one JSON object and no markdown.
-Actions:
-{"action":"say","text":"short progress update"}
-{"action":"list_files","path":"relative/folder"}
-{"action":"read_file","path":"relative/file"}
-{"action":"write_file","path":"relative/file","content":"complete new contents"}
-{"action":"run_command","executable":"flutter","args":["test"]}
-{"action":"mcp_call","server":"name","tool":"tool_name","arguments":{}}
-{"action":"finish","summary":"what was completed"}
+You are an autonomous coding agent.
+Reply with exactly ONE JSON object for the next step. Never return two actions.
+Do not wrap the object in markdown. Do not add commentary before or after it.
+Allowed actions (examples only — emit one of these shapes):
+- say: {"action":"say","text":"..."}
+- list_files: {"action":"list_files","path":"relative/folder"}
+- read_file: {"action":"read_file","path":"relative/file"}
+- write_file: {"action":"write_file","path":"relative/file","content":"..."}
+- run_command: {"action":"run_command","executable":"flutter","args":["test"]}
+- mcp_call: {"action":"mcp_call","server":"name","tool":"tool_name","arguments":{}}
+- finish: {"action":"finish","summary":"..."}
 Use relative paths only. Never access .git or .tamtoot. Read relevant files before writing.
 Commands run directly without a shell. After changing files, run relevant tests before finishing.
 Do not finish until the requested work is complete, inspected, and tests pass.
@@ -383,16 +385,52 @@ Do not finish until the requested work is complete, inspected, and tests pass.
   }
 
   Map<String, dynamic> _decodeAction(String text) {
-    var source = text.trim();
-    if (source.startsWith('```')) {
-      source = source.replaceFirst(RegExp(r'^```(?:json)?\s*'), '');
-      source = source.replaceFirst(RegExp(r'\s*```$'), '');
-    }
+    final source = _extractJsonObject(text);
     final decoded = jsonDecode(source);
     if (decoded is! Map<String, dynamic> || decoded['action'] is! String) {
       throw const ModelApiException('Model returned an invalid agent action.');
     }
     return decoded;
+  }
+
+  /// Models sometimes emit NDJSON / several actions; keep the first object only.
+  String _extractJsonObject(String text) {
+    var source = text.trim();
+    if (source.startsWith('```')) {
+      source = source.replaceFirst(RegExp(r'^```(?:json)?\s*'), '');
+      source = source.replaceFirst(RegExp(r'\s*```$'), '');
+      source = source.trim();
+    }
+    final start = source.indexOf('{');
+    if (start < 0) {
+      throw const ModelApiException('Model returned an invalid agent action.');
+    }
+    var depth = 0;
+    var inString = false;
+    var escaped = false;
+    for (var i = start; i < source.length; i++) {
+      final ch = source[i];
+      if (inString) {
+        if (escaped) {
+          escaped = false;
+        } else if (ch == '\\') {
+          escaped = true;
+        } else if (ch == '"') {
+          inString = false;
+        }
+        continue;
+      }
+      if (ch == '"') {
+        inString = true;
+        continue;
+      }
+      if (ch == '{') depth++;
+      if (ch == '}') {
+        depth--;
+        if (depth == 0) return source.substring(start, i + 1);
+      }
+    }
+    throw const ModelApiException('Model returned an invalid agent action.');
   }
 
   String _string(Map<String, dynamic> action, String key) {

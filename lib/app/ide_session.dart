@@ -186,6 +186,8 @@ class IdeSession {
   TamtootProjectMeta? projectMeta;
   bool workspaceHasGit = false;
   bool gitBusy = false;
+  /// Bumped when project model profiles change so Agent UI can reload.
+  int agentCatalogRevision = 0;
   String message = 'Ready';
   bool findVisible = false;
   bool replaceVisible = false;
@@ -217,6 +219,11 @@ class IdeSession {
     output.add('[$time] $value');
     if (output.length > 500) output.removeAt(0);
     if (error) errors.add(value);
+    changed(persist: false);
+  }
+
+  void notifyAgentCatalogChanged() {
+    agentCatalogRevision++;
     changed(persist: false);
   }
 

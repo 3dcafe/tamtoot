@@ -271,6 +271,7 @@ class _ModelProfilesDialogState extends State<ModelProfilesDialog> {
     original = text;
     dirty = false;
     paths = await store!.list();
+    widget.session.notifyAgentCatalogChanged();
   });
 
   Future<void> _saveInstructions() => _run(() async {
@@ -313,6 +314,7 @@ class _ModelProfilesDialogState extends State<ModelProfilesDialog> {
       system.text = defaultSystemPrompt;
       template.text = defaultUserTemplate;
       parameters.text = '{}';
+      widget.session.notifyAgentCatalogChanged();
     });
   }
 

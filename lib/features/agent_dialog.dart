@@ -45,6 +45,8 @@ class _AgentPanelState extends State<AgentPanel> {
   String? selected, error;
   bool loading = true, running = false, yolo = false, yoloConfirmed = false;
   int timeoutSeconds = 600, maxMistakes = 3;
+  int _catalogRevision = -1;
+  StreamSubscription<int>? _sessionSub;
   AgentTaskEngine? engine;
   McpRegistry? activeMcp;
   late final Uri? root = widget.session.workspaceRoot;
@@ -52,11 +54,19 @@ class _AgentPanelState extends State<AgentPanel> {
   @override
   void initState() {
     super.initState();
+    _catalogRevision = widget.session.agentCatalogRevision;
+    _sessionSub = widget.session.changes.listen((_) {
+      if (!mounted || running) return;
+      if (widget.session.agentCatalogRevision == _catalogRevision) return;
+      _catalogRevision = widget.session.agentCatalogRevision;
+      unawaited(_load(preserveSelection: true));
+    });
     _load();
   }
 
   @override
   void dispose() {
+    _sessionSub?.cancel();
     engine?.stop();
     activeMcp?.close();
     apiKey.clear();
@@ -78,13 +88,14 @@ class _AgentPanelState extends State<AgentPanel> {
     });
   }
 
-  Future<void> _load() async {
+  Future<void> _load({bool preserveSelection = false}) async {
+    final previous = selected;
     if (mounted) {
       setState(() {
         loading = true;
         error = null;
         profiles.clear();
-        selected = null;
+        if (!preserveSelection) selected = null;
       });
     }
     try {
@@ -120,7 +131,14 @@ class _AgentPanelState extends State<AgentPanel> {
           );
         }
       }
-      selected = profiles.keys.firstOrNull;
+      if (preserveSelection &&
+          previous != null &&
+          profiles.containsKey(previous)) {
+        selected = previous;
+      } else {
+        selected = profiles.keys.firstOrNull;
+      }
+      _catalogRevision = widget.session.agentCatalogRevision;
       if (selected == null) {
         error = 'Create a model profile in Settings first.';
       }
