@@ -167,6 +167,7 @@ class _ModelProfilesDialogState extends State<ModelProfilesDialog> {
       endpoint.text = p?.endpoint ?? 'http://localhost:11434/api/chat';
       apiFormat = p?.apiFormat ?? 'ollama';
       serverType = _serverType(p);
+      apiKey.text = p == null ? '' : widget.session.modelApiKey(p.id);
       detectedModels = const [];
       connectionStatus = null;
       system.text = p?.systemPrompt ?? defaultSystemPrompt;
@@ -294,6 +295,10 @@ class _ModelProfilesDialogState extends State<ModelProfilesDialog> {
     try {
       final result = await probe.check(profile, apiKey: apiKey.text);
       if (!mounted) return;
+      final profileId = id.text.trim();
+      if (profileId.isNotEmpty) {
+        widget.session.rememberModelApiKey(profileId, apiKey.text);
+      }
       detectedModels = result.models;
       connectionStatus = '${result.message}\nRequests: ${profile.requestUri()}';
       if (model.text.isEmpty && result.models.isNotEmpty) {
@@ -322,6 +327,7 @@ class _ModelProfilesDialogState extends State<ModelProfilesDialog> {
     original = text;
     dirty = false;
     paths = await store!.list();
+    widget.session.rememberModelApiKey(p.id, apiKey.text);
     widget.session.notifyAgentCatalogChanged();
   });
 
@@ -347,6 +353,7 @@ class _ModelProfilesDialogState extends State<ModelProfilesDialog> {
     }
     await _run(() async {
       _checkProject();
+      widget.session.rememberModelApiKey(id.text.trim(), '');
       await store!.delete(id.text, original!);
       if (!mounted) return;
       paths = await store!.list();

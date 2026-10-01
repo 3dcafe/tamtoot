@@ -141,6 +141,8 @@ class _AgentPanelState extends State<AgentPanel> {
       _catalogRevision = widget.session.agentCatalogRevision;
       if (selected == null) {
         error = 'Create a model profile in Settings first.';
+      } else {
+        _restoreApiKey();
       }
     } catch (e) {
       error = '$e';
@@ -218,7 +220,7 @@ class _AgentPanelState extends State<AgentPanel> {
     if (_profileNeedsApiKey(profile) && apiKey.text.trim().isEmpty) {
       setState(
         () => error =
-            'Paste your OpenAI API key in the field below, then send again. The key stays in memory only.',
+            'Enter the API token below, then send again. It will be reused until the app closes.',
       );
       return;
     }
@@ -297,6 +299,27 @@ class _AgentPanelState extends State<AgentPanel> {
     return profile != null && _profileNeedsApiKey(profile);
   }
 
+  void _restoreApiKey() {
+    final profile = selected == null ? null : profiles[selected];
+    apiKey.text = profile == null ? '' : widget.session.modelApiKey(profile.id);
+  }
+
+  void _selectProfile(String? value) {
+    setState(() {
+      selected = value;
+      error = null;
+      _restoreApiKey();
+    });
+  }
+
+  void _rememberApiKey(String value) {
+    final profile = selected == null ? null : profiles[selected];
+    if (profile != null) {
+      widget.session.rememberModelApiKey(profile.id, value);
+    }
+    setState(() {});
+  }
+
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
@@ -366,9 +389,7 @@ class _AgentPanelState extends State<AgentPanel> {
                       ),
                     ),
                 ],
-                onChanged: running
-                    ? null
-                    : (value) => setState(() => selected = value),
+                onChanged: running ? null : _selectProfile,
               ),
             ),
             Expanded(
@@ -411,13 +432,28 @@ class _AgentPanelState extends State<AgentPanel> {
                 obscureText: true,
                 enableSuggestions: false,
                 autocorrect: false,
+                onChanged: _rememberApiKey,
                 decoration: InputDecoration(
                   labelText: _selectedNeedsApiKey
-                      ? 'API key (required for this profile)'
-                      : 'API key (optional, kept in memory only)',
+                      ? 'API token'
+                      : 'API token (optional)',
                   helperText: _selectedNeedsApiKey
-                      ? 'Paste your OpenAI / Anthropic key. It is not saved to disk.'
-                      : 'Needed for cloud APIs. Local Ollama usually works without a key.',
+                      ? apiKey.text.isEmpty
+                            ? 'Required. Enter it once; it is saved locally on this device.'
+                            : 'Saved locally for this profile. It is never added to the project.'
+                      : 'Local Ollama usually works without a token.',
+                  suffixIcon: apiKey.text.isEmpty
+                      ? null
+                      : IconButton(
+                          tooltip: 'Forget token',
+                          onPressed: running
+                              ? null
+                              : () {
+                                  apiKey.clear();
+                                  _rememberApiKey('');
+                                },
+                          icon: const Icon(Icons.close, size: 16),
+                        ),
                   isDense: true,
                 ),
               ),

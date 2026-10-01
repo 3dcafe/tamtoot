@@ -61,7 +61,7 @@
 | Agent commands | Готово на desktop | Direct process без shell, timeout/output limits, stop, dangerous command denylist |
 | Normal approvals | Готово | One-time approval перед write/command/MCP call |
 | YOLO Mode | Готово | First-use warning, clean Git, auto-approval; остальные ограничения остаются |
-| Завершение после проверки | Готово | После write нужен successful test/analyze/check command |
+| Завершение после проверки | Готово | После write агент перечитывает файл; runtime-команды недоступны в мобильной IDE |
 | Headless `ide-agent` | Готово | `-y`, JSON Lines, stdin, timeout, mistake limit, profile, exit codes, Ctrl+C |
 | Project hooks | Частично | 5 lifecycle hooks, cancel/context, timeout; global hooks и TaskResume отсутствуют |
 | MCP STDIO + Streamable HTTP | Готово | initialize, tools/list, tools/call, SSE/JSON, session ID, test UI |

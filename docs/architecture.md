@@ -52,7 +52,7 @@ Flutter UI наблюдает `IdeSession.changes` через Riverpod. Кома
 
 `Agent dialog / ide-agent → ModelProfile → TaskStart/UserPromptSubmit hooks → ModelClient → validated action → approval or YOLO policy → file/command/MCP adapter → PreToolUse/PostToolUse hooks → next model iteration → finish`.
 
-После первой записи файла `finish` разрешается только после успешной команды, распознанной как test/analyze/check. Stop отменяет активный HTTP client и завершает текущие process/hook. Все file actions используют относительные пути внутри workspace; `.git` и `.tamtoot` через них недоступны. Command runner не вызывает shell и отдельно блокирует опасные executable и destructive Git forms. Это защитные ограничения приложения, а не полноценная OS sandbox.
+После записи агент повторно читает изменённый файл и может завершить задачу без runtime-проверки. В каждый запрос добавляется ограничение мобильной IDE: терминал, интерпретатор, компилятор, отладчик, сборка и тесты недоступны. Если модель всё же вернёт `run_command`, host пропустит действие без запуска процесса. Stop отменяет активный HTTP client и hook. Все file actions используют относительные пути внутри workspace; `.git` и `.tamtoot` через них недоступны.
 
 ## Дальнейшие изменения
 

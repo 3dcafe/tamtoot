@@ -32,11 +32,15 @@ class NoHooks extends AgentHookRunner {
 
 class FakeCommands extends AgentCommandRunner {
   FakeCommands() : super(Uri());
+  int calls = 0;
   @override
   Future<AgentCommandResult> run(
     String executable,
     List<String> arguments,
-  ) async => const AgentCommandResult(0, 'tests passed');
+  ) async {
+    calls++;
+    return const AgentCommandResult(0, 'unexpected');
+  }
 }
 
 ModelProfile agentProfile() => ModelProfile(
@@ -134,7 +138,7 @@ void main() {
     final actions = [
       '{"action":"read_file","path":"a.txt"}',
       '{"action":"write_file","path":"a.txt","content":"after"}',
-      '{"action":"run_command","executable":"flutter","args":["test"]}',
+      '{"action":"read_file","path":"a.txt"}',
       '{"action":"finish","summary":"Updated a.txt"}',
     ];
     final events = <AgentEvent>[];
@@ -148,7 +152,7 @@ void main() {
       onEvent: events.add,
       approve: (action, arguments) async {
         if (action == 'write_file') approvals++;
-        expect({'write_file', 'run_command'}, contains(action));
+        expect(action, 'write_file');
         return true;
       },
       clientFactory: () => queueClient(actions),
@@ -160,6 +164,37 @@ void main() {
     expect(await store.readText('a.txt'), 'after');
     expect(approvals, 1);
     expect(events.map((e) => e.type), containsAll(['tool', 'done']));
+  });
+
+  test('agent never executes a command proposed by the model', () async {
+    final commands = FakeCommands();
+    final events = <AgentEvent>[];
+    final engine = AgentTaskEngine(
+      profile: agentProfile(),
+      store: RepositoryMemory(),
+      git: AgentGit(),
+      root: root,
+      apiKey: '',
+      onEvent: events.add,
+      approve: (_, _) async => throw StateError('must not ask'),
+      clientFactory: () => queueClient([
+        '{"action":"run_command","executable":"flutter","args":["test"]}',
+        '{"action":"finish","summary":"Finished without runtime checks"}',
+      ]),
+      hooks: NoHooks(),
+      commands: commands,
+    );
+
+    final result = await engine.run('Inspect only', const AgentRunOptions());
+
+    expect(result.success, isTrue);
+    expect(commands.calls, 0);
+    expect(
+      events.map((event) => event.text),
+      contains(
+        'Command skipped: this mobile IDE has no runtime or test runner.',
+      ),
+    );
   });
 
   test('YOLO requires clean Git and then writes without approval', () async {
@@ -188,7 +223,6 @@ void main() {
     final store = RepositoryMemory();
     final actions = [
       '{"action":"write_file","path":"new.txt","content":"created"}',
-      '{"action":"run_command","executable":"flutter","args":["test"]}',
       '{"action":"finish","summary":"done"}',
     ];
     final clean = AgentTaskEngine(
