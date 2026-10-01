@@ -2,17 +2,10 @@ name: Build Android APK
 
 on:
   workflow_dispatch:
-  # Register and run the workflow after it is restored in a recreated repo.
-  # Normal source pushes remain manual to avoid unnecessary runner usage.
-  push:
-    branches:
-      - master
-    paths:
-      - .github/workflows/build-android-apk.yml
 
 jobs:
   build-apk:
-    name: Build release APK
+    name: Build signed release APK
     runs-on: ubuntu-latest
     timeout-minutes: 60
 
@@ -60,17 +53,54 @@ jobs:
       - name: Point Flutter at Android SDK
         run: flutter config --android-sdk "$ANDROID_HOME"
 
+      # Same secrets as Build signed Android AAB / RuStore upload.
+      - name: Restore release signing key
+        shell: bash
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          for name in KEYSTORE_BASE64 STORE_PASSWORD KEY_ALIAS KEY_PASSWORD; do
+            if [ -z "${!name}" ]; then
+              echo "::error::Missing GitHub secret $name. Add the four ANDROID_* secrets from docs/ru/android-release.md"
+              exit 1
+            fi
+          done
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > android/app/upload-keystore.jks
+          {
+            echo "storeFile=app/upload-keystore.jks"
+            echo "storePassword=$STORE_PASSWORD"
+            echo "keyAlias=$KEY_ALIAS"
+            echo "keyPassword=$KEY_PASSWORD"
+          } > android/key.properties
+
       - name: Install dependencies
         run: flutter pub get
 
-      - name: Build release APK
+      - name: Build signed release APK
         run: flutter build apk --release
 
-      - name: Verify APK
+      - name: Verify signed APK
         run: |
-          test -f build/app/outputs/flutter-apk/app-release.apk
-          ls -lh build/app/outputs/flutter-apk/app-release.apk
-          cp build/app/outputs/flutter-apk/app-release.apk "$RUNNER_TEMP/tamtoot.apk"
+          set -euo pipefail
+          apk=build/app/outputs/flutter-apk/app-release.apk
+          test -f "$apk"
+          ls -lh "$apk"
+          apksigner="$ANDROID_HOME/build-tools/36.0.0/apksigner"
+          if [ ! -x "$apksigner" ]; then
+            echo "::error::apksigner not found at $apksigner"
+            exit 1
+          fi
+          # Fail if Gradle fell back to the debug keystore.
+          if "$apksigner" verify --print-certs "$apk" | grep -qi 'CN=Android Debug'; then
+            echo "::error::APK is still debug-signed; release keystore was not applied."
+            exit 1
+          fi
+          "$apksigner" verify --print-certs "$apk" | head -20
+          cp "$apk" "$RUNNER_TEMP/tamtoot.apk"
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4

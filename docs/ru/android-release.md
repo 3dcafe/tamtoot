@@ -39,7 +39,7 @@ base64 < android/signing/tamtoot-upload.jks | tr -d '\n'
 base64 -w 0 android/signing/tamtoot-upload.jks
 ```
 
-В GitHub откройте **Actions → Build signed Android AAB → Run workflow**. После завершения скачайте артефакт **tamtoot-android-aab**. Workflow временно восстанавливает ключ на runner, собирает release AAB и не добавляет ключ или пароли в репозиторий.
+В GitHub откройте **Actions → Build signed Android AAB** или **Build Android APK → Run workflow**. После завершения скачайте артефакт. Оба workflow временно восстанавливают ключ на runner, собирают release-сборку и не добавляют ключ или пароли в репозиторий. Подписанный APK можно ставить поверх предыдущей установки с тем же upload-ключом.
 
 Приватный API-ключ RuStore храните только в GitHub Secrets под именем `RUSTORE_PRIVATE_KEY`. Не помещайте его в YAML, исходный код, `.tamtoot` или историю Git.
 
