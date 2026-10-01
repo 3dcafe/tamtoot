@@ -226,9 +226,15 @@ class HttpGitService
     }
     if (localHash != null &&
         !await _isAncestor(db, ancestor: localHash, tip: remoteHash)) {
-      return _fail(
-        'Non fast-forward pull; merge is not supported in this client',
-        const ['pull'],
+      return _mergeDiverged(
+        directory: directory,
+        store: store,
+        db: db,
+        branchRef: branchRef,
+        remote: remote,
+        shortBranch: short,
+        localHash: localHash,
+        remoteHash: remoteHash,
       );
     }
     final localEntries = await _headEntries(db, localHash);
@@ -700,6 +706,136 @@ class HttpGitService
       queue.addAll(parseCommit(obj.content).parents);
     }
     return false;
+  }
+
+  Future<String?> _mergeBase(
+    GitObjectDatabase db,
+    String local,
+    String remote,
+  ) async {
+    final localAncestors = <String>{};
+    final pendingLocal = <String>[local];
+    while (pendingLocal.isNotEmpty) {
+      final hash = pendingLocal.removeLast();
+      if (!localAncestors.add(hash)) continue;
+      final object = await db.read(hash);
+      if (object.type == GitObjectType.commit) {
+        pendingLocal.addAll(parseCommit(object.content).parents);
+      }
+    }
+    final pendingRemote = <String>[remote];
+    final seenRemote = <String>{};
+    while (pendingRemote.isNotEmpty) {
+      final hash = pendingRemote.removeAt(0);
+      if (!seenRemote.add(hash)) continue;
+      if (localAncestors.contains(hash)) return hash;
+      final object = await db.read(hash);
+      if (object.type == GitObjectType.commit) {
+        pendingRemote.addAll(parseCommit(object.content).parents);
+      }
+    }
+    return null;
+  }
+
+  bool _sameEntry(TreeEntry? left, TreeEntry? right) =>
+      left?.hash == right?.hash && left?.mode == right?.mode;
+
+  Future<GitResult> _mergeDiverged({
+    required Uri directory,
+    required GitRepositoryStore store,
+    required GitObjectDatabase db,
+    required String branchRef,
+    required String remote,
+    required String shortBranch,
+    required String localHash,
+    required String remoteHash,
+  }) async {
+    final baseHash = await _mergeBase(db, localHash, remoteHash);
+    if (baseHash == null) {
+      return _fail(
+        'Branches have no common ancestor; automatic merge was not attempted.',
+        const ['pull'],
+      );
+    }
+    final base = await _headEntries(db, baseHash);
+    final local = await _headEntries(db, localHash);
+    final remoteEntries = await _headEntries(db, remoteHash);
+    final merged = <String, TreeEntry>{};
+    final conflicts = <String>[];
+    final paths = {...base.keys, ...local.keys, ...remoteEntries.keys}.toList()
+      ..sort();
+    for (final path in paths) {
+      final baseEntry = base[path];
+      final localEntry = local[path];
+      final remoteEntry = remoteEntries[path];
+      TreeEntry? chosen;
+      if (_sameEntry(localEntry, remoteEntry)) {
+        chosen = localEntry;
+      } else if (_sameEntry(localEntry, baseEntry)) {
+        chosen = remoteEntry;
+      } else if (_sameEntry(remoteEntry, baseEntry)) {
+        chosen = localEntry;
+      } else {
+        conflicts.add(path);
+        continue;
+      }
+      if (chosen != null) {
+        merged[path] = TreeEntry(chosen.mode, path, chosen.hash);
+      }
+    }
+    final mergedPaths = merged.keys.toList()..sort();
+    for (var index = 0; index < mergedPaths.length - 1; index++) {
+      final path = mergedPaths[index];
+      final next = mergedPaths[index + 1];
+      if (next.startsWith('$path/')) {
+        conflicts.addAll([path, next]);
+      }
+    }
+    if (conflicts.isNotEmpty) {
+      final uniqueConflicts = conflicts.toSet().toList()..sort();
+      return _fail(
+        'Automatic merge stopped because both sides changed:\n${uniqueConflicts.map((path) => 'CONFLICT  $path').join('\n')}\nNo working files were changed.',
+        const ['pull'],
+      );
+    }
+    final author = await identity(directory);
+    if (author.name.isEmpty || author.email.isEmpty) {
+      return _fail(
+        'Set Git author name and email before creating an automatic merge commit.',
+        const ['pull'],
+      );
+    }
+    final treeHash = await _writePathTree(db, merged.values.toList());
+    final ident = formatIdent(
+      author.name,
+      author.email,
+      DateTime.now().toUtc(),
+    );
+    final commit = GitObject(
+      GitObjectType.commit,
+      encodeCommit(
+        CommitInfo(
+          tree: treeHash,
+          parents: [localHash, remoteHash],
+          author: ident,
+          committer: ident,
+          message: 'Merge $remote/$shortBranch into $shortBranch',
+        ),
+      ),
+    );
+    await db.write(commit);
+    await _checkout(db, store, commit.hash, previousCommitHash: localHash);
+    await store.writeBytes(
+      '.git/index',
+      encodeGitIndex(merged.values.toList()),
+    );
+    await db.writeRef(branchRef, commit.hash);
+    await db.writeHead(branchRef);
+    _staged.remove(directory);
+    return _ok(
+      'Merged $remote/$shortBranch into $shortBranch\nMerge commit: ${commit.hash}\n${paths.length} paths reconciled automatically',
+      const ['pull'],
+    );
   }
 
   Future<List<GitObject>> _objectsToPush(

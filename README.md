@@ -114,13 +114,19 @@ Open a cloned project and select the **Git** tab beside **Solution** in the side
 3. Open the gear menu to configure the remote URL, author name, author email, HTTPS username and access token. The identity and remote are stored in the repository Git configuration. Credentials stay in memory while this Git view is open and are never written to settings or repository files.
 4. Use the compact Pull, Push and Sync buttons at the top. The history button shows the latest local commits with their authors, dates and hashes.
 
-Use **Pull** to fetch the current branch from `origin` and fast-forward the local project. Pull requires a clean working tree and no unsaved project editors, so it cannot overwrite local work. It refreshes open files and Solution after checkout, removes files deleted upstream and preserves a clean local branch that is already ahead. Start, completion, failure and every added, modified or deleted file are written to Output. Divergent histories are reported for manual resolution because the embedded client does not create merge commits.
+Use **Pull** to fetch the current branch from `origin`. Pull requires a clean working tree and no unsaved project editors, so it cannot overwrite local work. It fast-forwards when possible. For divergent histories it performs a three-way merge and creates a merge commit when local and remote changes do not conflict. If both sides changed the same path, it leaves the working files untouched and reports every conflicting path. Open files and Solution refresh after a successful pull. Progress and results are written to Output.
 
 The Git panel provides separate directional actions: **Pull changes** uses a download icon, **Push commits** uses an upload icon, and **Sync** uses a bidirectional icon. Sync performs the same safe pull first and pushes local commits only after pull succeeds.
 
+Push and Sync require an HTTPS access token with repository write permission.
+Git settings save the username and token in local application preferences for
+that remote URL; credentials are never written into the remote URL, project,
+`.git/config`, or commits. A missing token opens Git settings before Push, while
+HTTP 401 and 403 responses are reported as authentication or permission errors.
+
 Commit and push are separate operations: a failed push leaves the local commit available for retry. The Git view shows progress and errors; Explorer indicators refresh after successful operations. Push verifies the remote's unpack/ref status, refuses non-fast-forward updates and sets the current branch's upstream after success. No new dependencies or system Git executable are required by the application.
 
-File selection is whole-file staging for one commit, not a persistent staging UI. The client maintains a standard Git v2 index and refuses to overwrite existing staging from another client. Advanced indexes, merge conflicts, detached HEAD commits, symlink/submodule edits, hooks, signing and packed object databases are not supported. Private `.tamtoot` metadata is excluded; shared HTTP requests and their project environment are visible to Git. Full `.gitignore` semantics are still not implemented: review new files explicitly before selecting them. Web push additionally depends on the remote host allowing browser requests (CORS).
+File selection is whole-file staging for one commit, not a persistent staging UI. The client maintains a standard Git v2 index and refuses to overwrite existing staging from another client. Automatic merge covers non-conflicting whole-file changes; an interactive conflict editor is not implemented. Advanced indexes, detached HEAD commits, symlink/submodule edits, hooks, signing and packed object databases are not supported. Private `.tamtoot` metadata is excluded; shared HTTP requests and their project environment are visible to Git. Full `.gitignore` semantics are still not implemented: review new files explicitly before selecting them. Web push additionally depends on the remote host allowing browser requests (CORS).
 
 ## Compare and discard changes
 

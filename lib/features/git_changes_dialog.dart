@@ -27,6 +27,7 @@ class _GitChangesDialogState extends State<GitChangesDialog> {
   final selected = <String>{};
   final unsaved = <String>{};
   bool busy = true, ready = false, _identityLoaded = false;
+  bool _credentialsLoaded = false;
   bool _loading = false;
   StreamSubscription<int>? _changes;
   Timer? _refreshTimer;
@@ -77,6 +78,12 @@ class _GitChangesDialogState extends State<GitChangesDialog> {
   String safeError(Object error) {
     var text = error.toString();
     if (token.text.isNotEmpty) text = text.replaceAll(token.text, '[redacted]');
+    if (text.contains('(401)')) {
+      return 'Authentication failed (HTTP 401). Open Git settings and enter a valid access token with repository write permission.';
+    }
+    if (text.contains('(403)')) {
+      return 'Push was forbidden (HTTP 403). The saved token does not have repository write permission.';
+    }
     return text;
   }
 
@@ -121,6 +128,12 @@ class _GitChangesDialogState extends State<GitChangesDialog> {
       // Never display credentials embedded in a pre-existing remote URL.
       if (remote.isNotEmpty) {
         remote = Uri.parse(remote).replace(userInfo: '').toString();
+        if (!_credentialsLoaded) {
+          final saved = widget.session.gitCredentials(remote);
+          username.text = saved.username;
+          token.text = saved.token;
+          _credentialsLoaded = true;
+        }
       }
       entries = [...await git.statusEntries(root)];
       unsaved.clear();
@@ -229,6 +242,7 @@ class _GitChangesDialogState extends State<GitChangesDialog> {
 
   Future<void> _push() async {
     if (widget.session.gitBusy) return;
+    if (!await _ensurePushCredentials()) return;
     widget.session.gitBusy = true;
     widget.session.changed(persist: false);
     setState(() {
@@ -263,8 +277,19 @@ class _GitChangesDialogState extends State<GitChangesDialog> {
           token: token.text,
         );
 
+  Future<bool> _ensurePushCredentials() async {
+    if (token.text.trim().isNotEmpty) return true;
+    setState(() {
+      feedback =
+          'Push requires an access token with repository write permission. Add it in Git settings.';
+    });
+    await _settings();
+    return token.text.trim().isNotEmpty;
+  }
+
   Future<void> _pull({bool pushAfter = false}) async {
     if (widget.session.gitBusy) return;
+    if (pushAfter && !await _ensurePushCredentials()) return;
     if (widget.session.documents.documents.any(
       (document) =>
           document.dirty &&
@@ -381,7 +406,8 @@ class _GitChangesDialogState extends State<GitChangesDialog> {
                     enableSuggestions: false,
                     decoration: InputDecoration(
                       labelText: 'Access token / password',
-                      helperText: 'Kept only while this Git view is open.',
+                      helperText:
+                          'Saved locally for this remote; never added to the project or Git.',
                       suffixIcon: IconButton(
                         tooltip: obscure ? 'Show token' : 'Hide token',
                         onPressed: () => update(() => obscure = !obscure),
@@ -438,6 +464,11 @@ class _GitChangesDialogState extends State<GitChangesDialog> {
         email.text = emailController.text;
         username.text = usernameController.text;
         token.text = tokenController.text;
+        widget.session.rememberGitCredentials(
+          remoteUri.toString(),
+          username: username.text,
+          token: token.text,
+        );
         await _load();
         widget.session.log('[Git] Settings updated for origin/$branch');
       } catch (error) {

@@ -190,6 +190,7 @@ class IdeSession {
   /// Bumped when project model profiles change so Agent UI can reload.
   int agentCatalogRevision = 0;
   final Map<String, String> _modelApiKeys = {};
+  final Map<String, ({String username, String token})> _gitCredentials = {};
   String message = 'Ready';
   bool findVisible = false;
   bool replaceVisible = false;
@@ -245,6 +246,24 @@ class IdeSession {
       _modelApiKeys.remove(profileId);
     } else {
       _modelApiKeys[profileId] = key;
+    }
+    _schedulePersist();
+  }
+
+  ({String username, String token}) gitCredentials(String remote) =>
+      _gitCredentials[remote] ?? (username: '', token: '');
+
+  void rememberGitCredentials(
+    String remote, {
+    required String username,
+    required String token,
+  }) {
+    if (remote.isEmpty) return;
+    final value = (username: username.trim(), token: token.trim());
+    if (value.token.isEmpty) {
+      _gitCredentials.remove(remote);
+    } else {
+      _gitCredentials[remote] = value;
     }
     _schedulePersist();
   }
@@ -400,6 +419,26 @@ class IdeSession {
         ..clear()
         ..addAll(tokens.cast<String, String>());
     });
+    await load('gitCredentials', (source) {
+      final data = decodeVersioned(source, 'Git credentials');
+      final remotes = data['remotes'];
+      if (remotes is! Map<String, dynamic>) {
+        throw const SchemaException('Invalid Git credentials');
+      }
+      _gitCredentials.clear();
+      for (final entry in remotes.entries) {
+        final value = entry.value;
+        if (value is! Map<String, dynamic> ||
+            value['username'] is! String ||
+            value['token'] is! String) {
+          throw const SchemaException('Invalid Git credential entry');
+        }
+        _gitCredentials[entry.key] = (
+          username: value['username'] as String,
+          token: value['token'] as String,
+        );
+      }
+    });
     await load('session', (source) {
       final data = decodeVersioned(source, 'Session');
       final raw = data['documents'];
@@ -474,6 +513,16 @@ class IdeSession {
         'schemaVersion': 1,
         'tokens': _modelApiKeys,
       }),
+      'gitCredentials': jsonEncode({
+        'schemaVersion': 1,
+        'remotes': {
+          for (final entry in _gitCredentials.entries)
+            entry.key: {
+              'username': entry.value.username,
+              'token': entry.value.token,
+            },
+        },
+      }),
       'session': jsonEncode({
         'schemaVersion': 1,
         'activeIndex': documents.documents.indexWhere(
@@ -509,6 +558,7 @@ class IdeSession {
     await persistNow();
     _disposed = true;
     _modelApiKeys.clear();
+    _gitCredentials.clear();
     for (final s in _subscriptions.values) {
       await s.cancel();
     }
