@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../app/ide_session.dart';
 import '../core/agents/kanban.dart';
@@ -240,69 +241,93 @@ class _KanbanDialogState extends State<KanbanDialog> {
     ),
   );
 
+  void _close() {
+    if (busy) return;
+    // Only pop this dialog; nested menus/dialogs keep their own routes.
+    Navigator.of(context).maybePop();
+  }
+
   @override
-  Widget build(BuildContext context) => AlertDialog(
-    title: const Text('Agent Kanban'),
-    content: SizedBox(
-      width: 1100,
-      height: MediaQuery.sizeOf(context).height * .72,
-      child: Column(
-        children: [
-          Row(
+  Widget build(BuildContext context) => CallbackShortcuts(
+    bindings: {
+      const SingleActivator(LogicalKeyboardKey.escape): _close,
+    },
+    child: Focus(
+      autofocus: true,
+      child: AlertDialog(
+        title: Row(
+          children: [
+            const Expanded(child: Text('Agent Kanban')),
+            IconButton(
+              tooltip: 'Close',
+              onPressed: busy ? null : _close,
+              icon: const Icon(Icons.close),
+            ),
+          ],
+        ),
+        content: SizedBox(
+          width: 1100,
+          height: MediaQuery.sizeOf(context).height * .72,
+          child: Column(
             children: [
-              Expanded(
-                child: TextField(
-                  controller: title,
-                  enabled: !busy,
-                  decoration: const InputDecoration(labelText: 'New task'),
-                ),
+              Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: title,
+                      enabled: !busy,
+                      decoration: const InputDecoration(labelText: 'New task'),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: TextField(
+                      controller: description,
+                      enabled: !busy,
+                      decoration:
+                          const InputDecoration(labelText: 'Description'),
+                    ),
+                  ),
+                  IconButton(
+                    onPressed: busy ? null : _create,
+                    icon: const Icon(Icons.add),
+                    tooltip: 'Add card',
+                  ),
+                ],
               ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: TextField(
-                  controller: description,
-                  enabled: !busy,
-                  decoration: const InputDecoration(labelText: 'Description'),
+              if (busy) const LinearProgressIndicator(),
+              if (error != null)
+                SelectableText(
+                  error!,
+                  style: TextStyle(color: Theme.of(context).colorScheme.error),
                 ),
+              const SizedBox(height: 8),
+              Text(
+                'Hold a card to drag it to another column.',
+                style: Theme.of(context).textTheme.bodySmall,
               ),
-              IconButton(
-                onPressed: busy ? null : _create,
-                icon: const Icon(Icons.add),
-                tooltip: 'Add card',
+              const SizedBox(height: 8),
+              Expanded(
+                child: SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      for (final status in KanbanStatus.values) _column(status),
+                    ],
+                  ),
+                ),
               ),
             ],
           ),
-          if (busy) const LinearProgressIndicator(),
-          if (error != null)
-            SelectableText(
-              error!,
-              style: TextStyle(color: Theme.of(context).colorScheme.error),
-            ),
-          const SizedBox(height: 8),
-          Text(
-            'Hold a card to drag it to another column.',
-            style: Theme.of(context).textTheme.bodySmall,
-          ),
-          const SizedBox(height: 8),
-          Expanded(
-            child: SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  for (final status in KanbanStatus.values) _column(status),
-                ],
-              ),
-            ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: busy ? null : _close,
+            child: const Text('Close'),
           ),
         ],
       ),
     ),
-    actions: [
-      TextButton(
-        onPressed: busy ? null : () => Navigator.pop(context),
-        child: const Text('Close'),
-      ),
-    ],
   );
 }

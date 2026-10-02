@@ -179,6 +179,8 @@ class ModelClient {
                   'content': _responsesContent(userText, attachments),
                 },
               ],
+        // Tamtoot agents speak JSON actions in text; native tools are unsupported.
+        'tool_choice': 'none',
         'stream': false,
       },
       'anthropic' => {
@@ -189,6 +191,7 @@ class ModelClient {
         'messages': [
           {'role': 'user', 'content': _anthropicContent(userText, attachments)},
         ],
+        'tool_choice': {'type': 'none'},
         'stream': false,
       },
       _ => {
@@ -203,6 +206,8 @@ class ModelClient {
                 : _chatCompletionsContent(userText, attachments),
           },
         ],
+        // Prevent providers from answering with tool_calls instead of text JSON.
+        'tool_choice': 'none',
         'stream': false,
       },
     };
@@ -452,6 +457,7 @@ class ModelClient {
   static ModelReply parseReply(String format, Map<String, dynamic> data) {
     final parts = <String>[];
     String note = '';
+    final hints = <String>[];
     void content(dynamic value) {
       if (value is String) {
         parts.add(value);
@@ -460,20 +466,50 @@ class ModelClient {
       if (value is List) {
         for (final block in value) {
           if (block is! Map) continue;
-          if ({'text', 'output_text'}.contains(block['type']) &&
+          final type = block['type'];
+          if ({'text', 'output_text'}.contains(type) &&
               block['text'] is String) {
             parts.add(block['text'] as String);
           }
-          if (block['type'] == 'refusal' && block['refusal'] is String) {
+          if (type == 'refusal' && block['refusal'] is String) {
             parts.add(block['refusal'] as String);
+          }
+          // Some providers put the answer in reasoning / thinking fields.
+          if (block['text'] is String &&
+              {'reasoning', 'thinking', 'reasoning_text'}.contains(type)) {
+            // Keep as fallback only; prefer primary text parts.
+            if (parts.isEmpty) parts.add(block['text'] as String);
+          }
+          if (type == 'tool_use' || type == 'function_call') {
+            final name = block['name'] ?? block['call_id'] ?? type;
+            hints.add('native tool: $name');
           }
         }
       }
     }
 
+    void noteToolCalls(dynamic raw) {
+      if (raw is! List || raw.isEmpty) return;
+      final names = <String>[];
+      for (final item in raw) {
+        if (item is! Map) continue;
+        final fn = item['function'];
+        final name = fn is Map
+            ? fn['name']
+            : item['name'] ?? item['type'] ?? 'tool';
+        names.add('$name');
+      }
+      if (names.isNotEmpty) {
+        hints.add('tool_calls: ${names.join(', ')}');
+      }
+    }
+
     if (format == 'ollama') {
       final message = data['message'];
-      if (message is Map) content(message['content']);
+      if (message is Map) {
+        content(message['content']);
+        noteToolCalls(message['tool_calls']);
+      }
       if (data['prompt_eval_count'] is num) {
         data['usage'] = {
           'input_tokens': data['prompt_eval_count'],
@@ -484,8 +520,12 @@ class ModelClient {
       final output = data['output'];
       if (output is List) {
         for (final item in output) {
-          if (item is Map && item['type'] == 'message') {
+          if (item is! Map) continue;
+          if (item['type'] == 'message') {
             content(item['content']);
+          }
+          if (item['type'] == 'function_call' || item['type'] == 'tool_call') {
+            hints.add('native tool: ${item['name'] ?? item['type']}');
           }
         }
       }
@@ -500,6 +540,9 @@ class ModelClient {
       if (data['stop_reason'] == 'max_tokens') {
         note = 'Output token limit reached; answer may be incomplete.';
       }
+      if (data['stop_reason'] == 'tool_use') {
+        hints.add('stop_reason: tool_use');
+      }
     } else {
       final choices = data['choices'];
       if (choices is List && choices.isNotEmpty && choices.first is Map) {
@@ -510,15 +553,26 @@ class ModelClient {
           if (message['refusal'] is String) {
             parts.add(message['refusal'] as String);
           }
+          // Some OpenAI-compatible hosts put text here when content is null.
+          if (parts.isEmpty && message['reasoning_content'] is String) {
+            parts.add(message['reasoning_content'] as String);
+          }
+          noteToolCalls(message['tool_calls']);
         }
-        if (first['finish_reason'] == 'length') {
+        final finish = first['finish_reason'];
+        if (finish == 'length') {
           note = 'Output token limit reached; answer may be incomplete.';
+        } else if (finish != null && finish != 'stop') {
+          hints.add('finish_reason: $finish');
         }
       }
     }
     if (parts.join().trim().isEmpty) {
-      throw const ModelApiException(
-        'No text answer returned. Tool calls and non-text outputs are not supported.',
+      final detail = hints.isEmpty ? '' : ' (${hints.join('; ')})';
+      throw ModelApiException(
+        'No text answer returned$detail. '
+        'Tamtoot needs a plain-text JSON action, not native tool calls. '
+        'Retry, or check the model response in Agent logs.',
       );
     }
     final rawUsage = data['usage'];

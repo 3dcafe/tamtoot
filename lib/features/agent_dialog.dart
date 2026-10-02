@@ -678,6 +678,12 @@ class _AgentPanelState extends State<AgentPanel> {
                         icon: const Icon(Icons.attach_file, size: 18),
                       ),
                       IconButton(
+                        tooltip: 'Copy chat log',
+                        visualDensity: VisualDensity.compact,
+                        onPressed: events.isEmpty ? null : _copyTranscript,
+                        icon: const Icon(Icons.copy_all_outlined, size: 18),
+                      ),
+                      IconButton(
                         tooltip: 'JSON: client ↔ agent',
                         visualDensity: VisualDensity.compact,
                         onPressed: _modelExchanges.isEmpty
@@ -717,6 +723,38 @@ class _AgentPanelState extends State<AgentPanel> {
 
   List<AgentEvent> get _modelExchanges =>
       events.where((event) => event.type == 'model').toList(growable: false);
+
+  String _transcriptText() {
+    final buffer = StringBuffer();
+    for (var i = 0; i < events.length; i++) {
+      final event = events[i];
+      buffer.writeln('[${event.type}] ${event.text}');
+      if (event.data.isNotEmpty) {
+        try {
+          buffer.writeln(
+            const JsonEncoder.withIndent('  ').convert(event.data),
+          );
+        } catch (_) {
+          buffer.writeln(event.data.toString());
+        }
+      }
+      if (i < events.length - 1) buffer.writeln();
+    }
+    return buffer.toString();
+  }
+
+  Future<void> _copyTranscript() async {
+    final text = _transcriptText();
+    if (text.trim().isEmpty) return;
+    await Clipboard.setData(ClipboardData(text: text));
+    if (!mounted) return;
+    ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+      const SnackBar(
+        content: Text('Chat log copied'),
+        duration: Duration(seconds: 2),
+      ),
+    );
+  }
 
   Widget _eventCard(AgentEvent event) {
     final colors = Theme.of(context).colorScheme;
@@ -768,10 +806,31 @@ class _AgentPanelState extends State<AgentPanel> {
                     event.text,
                     style: TextStyle(
                       fontSize: 12,
-                      fontFamily: model ? 'monospace' : null,
+                      fontFamily: model || errorEvent ? 'monospace' : null,
                     ),
                   ),
                 ],
+              ),
+            ),
+            IconButton(
+              tooltip: 'Copy message',
+              visualDensity: VisualDensity.compact,
+              constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+              padding: EdgeInsets.zero,
+              onPressed: () async {
+                final payload = event.data.isEmpty
+                    ? event.text
+                    : const JsonEncoder.withIndent('  ').convert({
+                        'type': event.type,
+                        'text': event.text,
+                        'data': event.data,
+                      });
+                await Clipboard.setData(ClipboardData(text: payload));
+              },
+              icon: Icon(
+                Icons.copy_outlined,
+                size: 16,
+                color: colors.onSurfaceVariant,
               ),
             ),
             if (hasJson)
@@ -831,6 +890,12 @@ class _AgentPanelState extends State<AgentPanel> {
                               text: const JsonEncoder.withIndent(
                                 '  ',
                               ).convert(payload),
+                            ),
+                          );
+                          ScaffoldMessenger.maybeOf(ctx)?.showSnackBar(
+                            const SnackBar(
+                              content: Text('JSON log copied'),
+                              duration: Duration(seconds: 2),
                             ),
                           );
                         },

@@ -423,4 +423,60 @@ void main() {
     expect(find.text('Copy response'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
+
+  test('chat-completions / responses / anthropic disable native tools', () {
+    final chat = ModelClient.requestBody(profile(), prompt);
+    expect(chat['tool_choice'], 'none');
+    final responses = ModelClient.requestBody(profile('responses'), prompt);
+    expect(responses['tool_choice'], 'none');
+    final anthropic = ModelClient.requestBody(profile('anthropic'), prompt);
+    expect(anthropic['tool_choice'], {'type': 'none'});
+  });
+
+  test('parseReply explains empty tool_calls answers', () {
+    expect(
+      () => ModelClient.parseReply('chat-completions', {
+        'choices': [
+          {
+            'finish_reason': 'tool_calls',
+            'message': {
+              'role': 'assistant',
+              'content': null,
+              'tool_calls': [
+                {
+                  'type': 'function',
+                  'function': {'name': 'replace_in_file', 'arguments': '{}'},
+                },
+              ],
+            },
+          },
+        ],
+      }),
+      throwsA(
+        isA<ModelApiException>().having(
+          (e) => e.message,
+          'message',
+          allOf(
+            contains('tool_calls: replace_in_file'),
+            contains('plain-text JSON'),
+          ),
+        ),
+      ),
+    );
+  });
+
+  test('parseReply accepts ordinary chat text', () {
+    final reply = ModelClient.parseReply('chat-completions', {
+      'choices': [
+        {
+          'finish_reason': 'stop',
+          'message': {
+            'role': 'assistant',
+            'content': '{"action":"say","text":"ok"}',
+          },
+        },
+      ],
+    });
+    expect(reply.text, '{"action":"say","text":"ok"}');
+  });
 }
