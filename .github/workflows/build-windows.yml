@@ -17,7 +17,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
@@ -47,7 +47,7 @@ jobs:
 
       # Do not pre-zip: upload-artifact already wraps files in one zip for download.
       - name: Upload Windows artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: tamtoot-windows
           path: build/windows/x64/runner/Release/
