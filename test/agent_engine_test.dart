@@ -947,6 +947,76 @@ void main() {
     );
   });
 
+  test('agent recovers from truncated replace_in_file JSON', () async {
+    final store = RepositoryMemory();
+    await store.writeText(
+      'lib/a.dart',
+      'class A {\n  final value = 1;\n}\n',
+    );
+    final events = <AgentEvent>[];
+    final actions = [
+      // Truncated mid-string like a max_tokens cut.
+      '{"action":"replace_in_file","path":"lib/a.dart","oldText":"final value = 1;","newText":"/// huge rewrite that never finishes',
+      '{"action":"replace_in_file","path":"lib/a.dart","oldText":"final value = 1;","newText":"final value = 2;"}',
+      '{"action":"finish","summary":"Small edit applied."}',
+    ];
+    final engine = AgentTaskEngine(
+      profile: agentProfile(),
+      store: store,
+      git: AgentGit(),
+      root: root,
+      apiKey: '',
+      onEvent: events.add,
+      approve: (_, _) async => true,
+      clientFactory: () => queueClient(actions),
+      hooks: NoHooks(),
+      commands: FakeCommands(),
+    );
+    final result = await engine.run(
+      'Bump value',
+      const AgentRunOptions(yolo: false, maxConsecutiveMistakes: 2),
+    );
+    expect(result.success, isTrue);
+    expect(await store.readText('lib/a.dart'), contains('value = 2'));
+    expect(
+      events.where((e) => e.type == 'error').map((e) => e.text),
+      anyElement(contains('truncated')),
+    );
+  });
+
+  test('agent rejects oversized replace_in_file fragments', () async {
+    final store = RepositoryMemory();
+    await store.writeText('lib/a.dart', 'const x = 1;');
+    final events = <AgentEvent>[];
+    final huge = 'x' * (AgentTaskEngine.maxReplaceFragmentCharacters + 50);
+    final actions = [
+      '{"action":"replace_in_file","path":"lib/a.dart","oldText":"const x = 1;","newText":"$huge"}',
+      '{"action":"replace_in_file","path":"lib/a.dart","oldText":"const x = 1;","newText":"const x = 2;"}',
+      '{"action":"finish","summary":"done"}',
+    ];
+    final engine = AgentTaskEngine(
+      profile: agentProfile(),
+      store: store,
+      git: AgentGit(),
+      root: root,
+      apiKey: '',
+      onEvent: events.add,
+      approve: (_, _) async => true,
+      clientFactory: () => queueClient(actions),
+      hooks: NoHooks(),
+      commands: FakeCommands(),
+    );
+    final result = await engine.run(
+      'Edit',
+      const AgentRunOptions(yolo: false, maxConsecutiveMistakes: 2),
+    );
+    expect(result.success, isTrue);
+    expect(
+      events.where((e) => e.type == 'error').map((e) => e.text),
+      anyElement(contains('too large')),
+    );
+  });
+
   test('agent caps max_tokens for JSON actions', () async {
     final store = RepositoryMemory();
     await store.writeText('lib/a.dart', 'const x = 1;');

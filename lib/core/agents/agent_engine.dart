@@ -124,6 +124,8 @@ Implementation rules:
 - Prefer making a reasonable localized fix over fully mapping the architecture.
 - If you have read both the caller and the failing implementation, your next action should normally be replace_in_file.
 - Additional searches after root cause identification are allowed only when required to make the edit safely.
+- replace_in_file must change a SMALL unique fragment only. Keep oldText and newText short (a few lines). Never paste a whole class/file into JSON.
+- If a larger rewrite is needed, prefer several small replace_in_file steps, not one giant payload.
 
 Memory rules:
 - Use retained project knowledge before searching.
@@ -160,6 +162,9 @@ Reuse retained excerpts — do not re-read unchanged files.
   static const int maxActiveFiles = 2;
   static const int maxActiveCharacters = 8000;
   static const int maxExcerptCharacters = 3000;
+
+  /// Soft cap so replace_in_file JSON cannot burn the whole completion budget.
+  static const int maxReplaceFragmentCharacters = 1200;
 
   static const investigationBudgetPrompt =
       'Investigation budget reached. You have enough context.\n'
@@ -347,9 +352,22 @@ Reuse retained excerpts — do not re-read unchanged files.
           },
         ),
       );
-      final action = _decodeAction(reply.text);
-      final name = action['action'];
+      late final Map<String, dynamic> action;
+      late final String name;
       try {
+        if (_looksTruncated(reply.text, reply.note)) {
+          throw ModelApiException(
+            'Model output was truncated before a complete JSON action '
+            '(${reply.note.isEmpty ? 'incomplete JSON' : reply.note}). '
+            'Emit a MUCH smaller action next. For edits, use replace_in_file '
+            'with a few-line unique oldText/newText only — never a whole file.',
+          );
+        }
+        action = _decodeAction(reply.text);
+        name = action['action'] as String;
+        if (name == 'replace_in_file' || name == 'write_file') {
+          _assertCompactEditPayload(name, action);
+        }
         if (!hasEdited &&
             _blocksPreEditInvestigation(
               name,
@@ -800,8 +818,17 @@ Reuse retained excerpts — do not re-read unchanged files.
         mistakes++;
         final message = e is ModelApiException ? e.message : '$e';
         onEvent(AgentEvent('error', message));
+        final editHint =
+            message.contains('truncated') ||
+                message.contains('too large') ||
+                message.contains('incomplete JSON') ||
+                message.contains('invalid agent action')
+            ? '\nFor code changes: emit replace_in_file with a few-line unique '
+                  'oldText/newText only. Do not rewrite whole files in one JSON action.'
+            : '';
         transcript.add(
-          'Tool/action error: $message\nFix the mistake and continue.',
+          'Tool/action error: $message$editHint\n'
+          'Fix the mistake and continue with one short JSON action.',
         );
         if (mistakes >= options.maxConsecutiveMistakes) {
           throw ModelApiException(
@@ -829,6 +856,68 @@ Reuse retained excerpts — do not re-read unchanged files.
       throw const ModelApiException('Model returned an invalid agent action.');
     }
     return decoded;
+  }
+
+  void _assertCompactEditPayload(String name, Map<String, dynamic> action) {
+    if (name == 'replace_in_file') {
+      for (final key in ['oldText', 'newText']) {
+        final value = action[key];
+        if (value is! String) continue;
+        if (value.length > maxReplaceFragmentCharacters) {
+          throw ModelApiException(
+            '$name.$key is too large (${value.length} chars; '
+            'max $maxReplaceFragmentCharacters). '
+            'Replace a few unique lines only, then finish or do another small edit.',
+          );
+        }
+      }
+      return;
+    }
+    if (name == 'write_file') {
+      final content = action['content'];
+      if (content is String && content.length > maxReplaceFragmentCharacters * 4) {
+        throw ModelApiException(
+          'write_file.content is too large for one agent step '
+          '(${content.length} chars). Prefer replace_in_file for small unique fragments.',
+        );
+      }
+    }
+  }
+
+  static bool _looksTruncated(String text, String note) {
+    final source = text.trim();
+    if (source.isEmpty) return true;
+    var depth = 0;
+    var inString = false;
+    var escaped = false;
+    var sawObject = false;
+    for (var i = 0; i < source.length; i++) {
+      final ch = source[i];
+      if (inString) {
+        if (escaped) {
+          escaped = false;
+        } else if (ch == '\\') {
+          escaped = true;
+        } else if (ch == '"') {
+          inString = false;
+        }
+        continue;
+      }
+      if (ch == '"') {
+        inString = true;
+        continue;
+      }
+      if (ch == '{') {
+        depth++;
+        sawObject = true;
+      } else if (ch == '}') {
+        depth--;
+      }
+    }
+    final incompleteJson = sawObject && (inString || depth != 0);
+    if (incompleteJson) return true;
+    // Provider said length, but JSON closed — accept it.
+    return false;
   }
 
   /// Models sometimes emit NDJSON / several actions; keep the first object only.
@@ -868,7 +957,11 @@ Reuse retained excerpts — do not re-read unchanged files.
         if (depth == 0) return source.substring(start, i + 1);
       }
     }
-    throw const ModelApiException('Model returned an invalid agent action.');
+    throw ModelApiException(
+      inString || depth != 0
+          ? 'Model returned truncated JSON (incomplete agent action).'
+          : 'Model returned an invalid agent action.',
+    );
   }
 
   String _string(Map<String, dynamic> action, String key) {
