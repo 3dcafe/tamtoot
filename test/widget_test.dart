@@ -16,6 +16,51 @@ import 'support.dart';
 import 'package:tamtoot/core/filesystem/filesystem.dart';
 
 void main() {
+  for (final platform in [TargetPlatform.macOS, TargetPlatform.windows]) {
+    testWidgets('shell menu uses shared commands on $platform', (tester) async {
+      debugDefaultTargetPlatformOverride = platform;
+      addTearDown(() => debugDefaultTargetPlatformOverride = null);
+      await tester.binding.setSurfaceSize(const Size(1280, 800));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final session = await testSession();
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [sessionProvider.overrideWithValue(session)],
+          child: const TamtootApp(),
+        ),
+      );
+      await tester.pumpAndSettle();
+      if (platform == TargetPlatform.macOS) {
+        expect(find.text('File'), findsNothing);
+        final bar = tester.widget<PlatformMenuBar>(
+          find.byType(PlatformMenuBar),
+        );
+        final file = bar.menus.whereType<PlatformMenu>().firstWhere(
+          (menu) => menu.label == 'File',
+        );
+        final items = file.menus.expand((item) => item.members);
+        final newFile = items.firstWhere(
+          (item) => item.label == 'New document',
+        );
+        newFile.onSelected!();
+        await tester.pumpAndSettle();
+        expect(session.documents.active, isNotNull);
+      } else {
+        expect(find.byType(PlatformMenuBar), findsNothing);
+        await tester.tap(find.text('File'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('New document'));
+        await tester.pumpAndSettle();
+        expect(session.documents.active, isNotNull);
+      }
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox());
+      await tester.pumpAndSettle();
+      await tester.runAsync(session.dispose);
+      debugDefaultTargetPlatformOverride = null;
+    });
+  }
+
   testWidgets(
     'Explorer expands folders in place and opens files without changing root',
     (tester) async {

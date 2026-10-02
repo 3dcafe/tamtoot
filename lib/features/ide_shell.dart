@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -60,7 +61,7 @@ class _IdeShellState extends ConsumerState<IdeShell> {
     // Tablet window managers can include an external caption bar in the top
     // inset even though the Flutter surface already starts below that bar.
     final topPadding = systemPadding.top > 32 ? 0.0 : systemPadding.top;
-    return Focus(
+    final shell = Focus(
       onKeyEvent: (_, event) {
         if (event is! KeyDownEvent) return KeyEventResult.ignored;
         // Native text inputs in dialogs/find retain their own editing shortcuts.
@@ -92,7 +93,7 @@ class _IdeShellState extends ConsumerState<IdeShell> {
             ),
             child: Column(
               children: [
-                _menu(),
+                if (!_nativeMenu) _menu(),
                 _toolbar(),
                 Expanded(
                   child: DockView(
@@ -109,6 +110,133 @@ class _IdeShellState extends ConsumerState<IdeShell> {
         ),
       ),
     );
+    return _nativeMenu
+        ? PlatformMenuBar(menus: _platformMenus(), child: shell)
+        : shell;
+  }
+
+  // One menu definition feeds both the native macOS and in-window menus.
+  static const _menus = <String, List<String>>{
+    'File': [
+      'file.new',
+      'file.open',
+      '—',
+      'workspace.open',
+      'workspace.openProject',
+      'git.clone',
+      '—',
+      'file.save',
+      'file.saveAs',
+      'file.saveAll',
+      'file.close',
+    ],
+    'Edit': [
+      'editor.undo',
+      'editor.redo',
+      'editor.copy',
+      'editor.cut',
+      'editor.paste',
+      'editor.find',
+      'workspace.search',
+      'editor.replace',
+    ],
+    'View': [
+      'view.solutionExplorer',
+      'view.problems',
+      'view.output',
+      'view.terminal',
+      'view.debug',
+      'view.theme',
+      'layout.reset',
+      'view.commands',
+    ],
+    'Git': ['git.changes', 'git.clone'],
+    'Tools': [
+      'requests.open',
+      'agent.open',
+      'agent.kanban',
+      'settings.open',
+      'extensions.manage',
+    ],
+    'Help': ['help.privacy'],
+  };
+
+  bool get _nativeMenu =>
+      !kIsWeb && defaultTargetPlatform == TargetPlatform.macOS;
+
+  List<PlatformMenuItem> _platformMenus() => [
+    const PlatformMenu(
+      label: 'TamToot',
+      menus: [
+        PlatformProvidedMenuItem(type: PlatformProvidedMenuItemType.about),
+        PlatformMenuItemGroup(
+          members: [
+            PlatformProvidedMenuItem(
+              type: PlatformProvidedMenuItemType.servicesSubmenu,
+            ),
+          ],
+        ),
+        PlatformMenuItemGroup(
+          members: [
+            PlatformProvidedMenuItem(type: PlatformProvidedMenuItemType.hide),
+            PlatformProvidedMenuItem(
+              type: PlatformProvidedMenuItemType.hideOtherApplications,
+            ),
+            PlatformProvidedMenuItem(
+              type: PlatformProvidedMenuItemType.showAllApplications,
+            ),
+          ],
+        ),
+        PlatformMenuItemGroup(
+          members: [
+            PlatformProvidedMenuItem(type: PlatformProvidedMenuItemType.quit),
+          ],
+        ),
+      ],
+    ),
+    for (final menu in _menus.entries)
+      PlatformMenu(label: menu.key, menus: _platformItems(menu.value)),
+    const PlatformMenu(
+      label: 'Window',
+      menus: [
+        PlatformProvidedMenuItem(
+          type: PlatformProvidedMenuItemType.minimizeWindow,
+        ),
+        PlatformProvidedMenuItem(type: PlatformProvidedMenuItemType.zoomWindow),
+        PlatformProvidedMenuItem(
+          type: PlatformProvidedMenuItemType.toggleFullScreen,
+        ),
+      ],
+    ),
+  ];
+
+  List<PlatformMenuItem> _platformItems(List<String> ids) {
+    final groups = <PlatformMenuItem>[];
+    var members = <PlatformMenuItem>[];
+    void flush() {
+      if (members.isEmpty) return;
+      groups.add(PlatformMenuItemGroup(members: members));
+      members = <PlatformMenuItem>[];
+    }
+
+    for (final id in ids) {
+      if (id == '—') {
+        flush();
+        continue;
+      }
+      if (!session.commands.isVisible(id)) continue;
+      final command = session.commands.commands.firstWhere((c) => c.id == id);
+      members.add(
+        PlatformMenuItem(
+          label: command.title,
+          onSelected: session.commands.isEnabled(id)
+              ? () => session.run(id)
+              : null,
+        ),
+      );
+    }
+    flush();
+    return groups;
   }
 
   Widget _menu() {
@@ -122,48 +250,8 @@ class _IdeShellState extends ConsumerState<IdeShell> {
               scrollDirection: Axis.horizontal,
               child: Row(
                 children: [
-                  _menuItem('File', const [
-                    'file.new',
-                    'file.open',
-                    '—',
-                    'workspace.open',
-                    'workspace.openProject',
-                    'git.clone',
-                    '—',
-                    'file.save',
-                    'file.saveAs',
-                    'file.saveAll',
-                    'file.close',
-                  ]),
-                  _menuItem('Edit', [
-                    'editor.undo',
-                    'editor.redo',
-                    'editor.copy',
-                    'editor.cut',
-                    'editor.paste',
-                    'editor.find',
-                    'workspace.search',
-                    'editor.replace',
-                  ]),
-                  _menuItem('View', [
-                    'view.solutionExplorer',
-                    'view.problems',
-                    'view.output',
-                    'view.terminal',
-                    'view.debug',
-                    'view.theme',
-                    'layout.reset',
-                    'view.commands',
-                  ]),
-                  _menuItem('Git', ['git.changes', 'git.clone']),
-                  _menuItem('Tools', [
-                    'requests.open',
-                    'agent.open',
-                    'agent.kanban',
-                    'settings.open',
-                    'extensions.manage',
-                  ]),
-                  _menuItem('Help', ['help.privacy']),
+                  for (final menu in _menus.entries)
+                    _menuItem(menu.key, menu.value),
                 ],
               ),
             ),
@@ -251,7 +339,11 @@ class _IdeShellState extends ConsumerState<IdeShell> {
     await Clipboard.setData(ClipboardData(text: path));
   }
 
-  Future<void> _showPathMenu(Offset globalPosition, String path, {required bool canReveal}) async {
+  Future<void> _showPathMenu(
+    Offset globalPosition,
+    String path, {
+    required bool canReveal,
+  }) async {
     final action = await showMenu<String>(
       context: context,
       position: RelativeRect.fromLTRB(
