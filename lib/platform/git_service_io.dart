@@ -53,7 +53,7 @@ final class FileGitRepositoryStore extends GitRepositoryStore {
     final input = await _file(path).open();
     try {
       await input.setPosition(start);
-      return input.read(end - start);
+      return await input.read(end - start);
     } finally {
       await input.close();
     }

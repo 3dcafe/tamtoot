@@ -1,10 +1,11 @@
 class GitIgnore {
-  GitIgnore([List<_GitIgnoreRule>? rules])
-    : _rules = rules == null ? [] : List.of(rules);
+  GitIgnore() : _rules = [];
+
+  GitIgnore._(List<_GitIgnoreRule> rules) : _rules = List.of(rules);
 
   final List<_GitIgnoreRule> _rules;
 
-  GitIgnore copy() => GitIgnore(_rules);
+  GitIgnore copy() => GitIgnore._(_rules);
 
   void add(String source, {String base = ''}) {
     final normalizedBase = base

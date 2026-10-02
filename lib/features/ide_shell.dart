@@ -431,27 +431,6 @@ class _IdeShellState extends ConsumerState<IdeShell> {
             ),
           ),
           if (session.findVisible) _findBar(),
-          if (active != null)
-            Container(
-              height: 28,
-              padding: const EdgeInsets.symmetric(horizontal: 14),
-              alignment: Alignment.centerLeft,
-              decoration: BoxDecoration(
-                border: Border(bottom: BorderSide(color: color('border'))),
-              ),
-              child: GestureDetector(
-                onSecondaryTapUp: (details) => _showPathMenu(
-                  details.globalPosition,
-                  _documentLocation(active),
-                  canReveal: _canRevealPath(active),
-                ),
-                child: SelectableText(
-                  _pathBarText(),
-                  maxLines: 1,
-                  style: TextStyle(fontSize: 11, color: color('muted')),
-                ),
-              ),
-            ),
           Expanded(
             child: active == null
                 ? Center(

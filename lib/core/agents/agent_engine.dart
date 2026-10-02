@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:collection';
 import 'dart:convert';
 
 import '../git/git_service.dart';
@@ -177,8 +176,8 @@ After a small edit, re-read the changed area, then finish.
       'Phase: analysis. Your first response must be a say action containing only the task analysis and implementation plan. Do not use a tool yet.',
       if (promptHook.context.isNotEmpty) 'Hook context:\n${promptHook.context}',
     ];
-    final activeFiles = LinkedHashMap<String, String>();
-    final observations = LinkedHashMap<String, String>();
+    final activeFiles = <String, String>{};
+    final observations = <String, String>{};
     var mistakes = 0;
     var consecutiveSays = 0;
     for (var iteration = 1; iteration <= options.maxIterations; iteration++) {
@@ -649,8 +648,8 @@ After a small edit, re-read the changed area, then finish.
 
   String _buildPrompt(
     List<String> transcript,
-    LinkedHashMap<String, String> activeFiles,
-    LinkedHashMap<String, String> observations,
+    Map<String, String> activeFiles,
+    Map<String, String> observations,
   ) {
     final out = StringBuffer(transcript.join('\n\n'));
     if (observations.isNotEmpty) {
@@ -692,7 +691,7 @@ After a small edit, re-read the changed area, then finish.
     return out.toString();
   }
 
-  void _compactProjectIndex(LinkedHashMap<String, String> observations) {
+  void _compactProjectIndex(Map<String, String> observations) {
     final current = observations['Project index'];
     if (current == null || current.startsWith('Project file index already')) {
       return;
@@ -842,7 +841,7 @@ After a small edit, re-read the changed area, then finish.
   }
 
   void _rememberFile(
-    LinkedHashMap<String, String> activeFiles,
+    Map<String, String> activeFiles,
     String key,
     String content,
     List<String> transcript,
@@ -867,7 +866,7 @@ After a small edit, re-read the changed area, then finish.
   }
 
   void _rememberObservation(
-    LinkedHashMap<String, String> observations,
+    Map<String, String> observations,
     String key,
     String value,
   ) {
