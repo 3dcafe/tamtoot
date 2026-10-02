@@ -53,6 +53,7 @@ class ShellActions implements PresentationActions {
     return session.workspaceRoot != null &&
         (!requireGit || session.workspaceHasGit);
   }
+
   @override
   Future<void> showProjectSearch() => showDialog<void>(
     context: context(),
@@ -141,6 +142,7 @@ class ShellActions implements PresentationActions {
       builder: (_) => AgentDialog(session: session),
     );
   }
+
   @override
   Future<void> showKanban() async {
     if (!await _ensureProject(requireGit: true)) return;
@@ -150,6 +152,7 @@ class ShellActions implements PresentationActions {
       builder: (_) => KanbanDialog(session: session),
     );
   }
+
   @override
   Future<void> showLanguagePackageInstaller() => showDialog<void>(
     context: context(),
@@ -974,8 +977,56 @@ class _OpenProjectDialogState extends State<OpenProjectDialog> {
   }
 
   Future<void> _open(ClonedProjectRef project) async {
-    await widget.session.openWorkspaceFolder(project.uri);
-    if (mounted) Navigator.pop(context);
+    try {
+      await widget.session.openWorkspaceFolder(project.uri);
+      if (mounted) Navigator.pop(context);
+    } catch (e) {
+      if (!mounted) return;
+      await showDialog<void>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Cannot open project'),
+          content: Text('$e'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('OK'),
+            ),
+            FilledButton(
+              onPressed: () {
+                Navigator.pop(ctx);
+                unawaited(_browse());
+              },
+              child: const Text('Choose folder…'),
+            ),
+          ],
+        ),
+      );
+    }
+  }
+
+  Future<void> _browse() async {
+    final picked = await widget.session.documents.dialogs.openWorkspace();
+    if (picked == null) return;
+    try {
+      await widget.session.openWorkspaceFolder(picked);
+      if (mounted) Navigator.pop(context);
+    } catch (e) {
+      if (!mounted) return;
+      await showDialog<void>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('Cannot open project'),
+          content: Text('$e'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('OK'),
+            ),
+          ],
+        ),
+      );
+    }
   }
 
   @override
@@ -995,7 +1046,7 @@ class _OpenProjectDialogState extends State<OpenProjectDialog> {
             if (items.isEmpty) {
               return const Center(
                 child: Text(
-                  'No projects yet.\n\nFile → Clone repository… to download one.',
+                  'No projects yet.\n\nFile → Clone repository… to download one,\nor Choose folder… below.',
                   textAlign: TextAlign.center,
                 ),
               );
@@ -1013,7 +1064,7 @@ class _OpenProjectDialogState extends State<OpenProjectDialog> {
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                   ),
-                  onTap: () => _open(project),
+                  onTap: () => unawaited(_open(project)),
                 );
               },
             );
@@ -1025,6 +1076,11 @@ class _OpenProjectDialogState extends State<OpenProjectDialog> {
           onPressed: () => Navigator.pop(context),
           child: const Text('Cancel'),
         ),
+        if (widget.session.documents.dialogs.supportsDirectories)
+          FilledButton(
+            onPressed: () => unawaited(_browse()),
+            child: const Text('Choose folder…'),
+          ),
       ],
     );
   }

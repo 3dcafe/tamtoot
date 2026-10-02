@@ -11,6 +11,7 @@ import '../core/settings/settings.dart';
 import '../core/themes/ide_theme.dart';
 import '../core/workspace/tamtoot_meta.dart';
 import '../languages/language_registry.dart';
+import '../platform/security_scoped_roots.dart';
 import '../platform/tamtoot_meta_store.dart';
 import '../workspace/documents/document_service.dart';
 import '../workspace/layout/dock_layout.dart';
@@ -282,6 +283,11 @@ class IdeSession {
       );
     }
     root = Uri.parse('${root.toString().replaceAll(RegExp(r'/+$'), '')}/');
+    final previous = workspaceRoot;
+    if (previous != null && previous != root) {
+      await SecurityScopedRoots.release(previous);
+    }
+    await SecurityScopedRoots.ensureAccess(root);
     workspaceRoot = root;
     completionIndex = null;
     _gitEntries = {};
@@ -290,7 +296,13 @@ class IdeSession {
     await explorer.open(root);
     if (workspaceRoot != root) return;
     if (explorer.errors.containsKey(root)) {
-      throw StateError(explorer.errors[root]!);
+      final detail = explorer.errors[root]!;
+      if (SecurityScopedRoots.looksLikeSandboxDenial(detail)) {
+        workspaceRoot = null;
+        explorer.clear();
+        throw StateError(SecurityScopedRoots.reopenHint(root));
+      }
+      throw StateError(detail);
     }
     recentWorkspaces
       ..remove(root.toString())
@@ -482,9 +494,12 @@ class IdeSession {
     });
     log('Foundation ready · API v1');
     if (recentWorkspaces.isNotEmpty) {
+      final recentRoot = Uri.tryParse(recentWorkspaces.first);
       try {
-        final root = Uri.parse(recentWorkspaces.first);
-        if (!root.hasScheme) throw const FormatException('Invalid project URI');
+        final root = recentRoot;
+        if (root == null || !root.hasScheme) {
+          throw const FormatException('Invalid project URI');
+        }
         await openWorkspaceFolder(root);
       } catch (error) {
         workspaceRoot = null;
@@ -496,7 +511,10 @@ class IdeSession {
         _gitTimer?.cancel();
         explorer.clear();
         log(
-          'Last project is unavailable. Open a project to continue: $error',
+          recentRoot != null &&
+                  SecurityScopedRoots.looksLikeSandboxDenial(error)
+              ? SecurityScopedRoots.reopenHint(recentRoot)
+              : 'Last project is unavailable. Open a project to continue: $error',
           error: true,
         );
       }

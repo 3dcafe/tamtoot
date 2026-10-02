@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../core/filesystem/filesystem.dart';
 import 'local_files.dart';
+import 'security_scoped_roots.dart';
 import 'workspace_roots.dart';
 
 class PreferenceStore implements PersistenceStore {
@@ -102,7 +103,10 @@ class PlatformFiles implements FileSystemProvider, FileDialogs {
       );
     }
     final path = await getDirectoryPath();
-    return path == null ? null : Uri.directory(path);
+    if (path == null) return null;
+    final uri = Uri.directory(path);
+    await SecurityScopedRoots.rememberPickedFolder(uri);
+    return uri;
   }
 
   @override
