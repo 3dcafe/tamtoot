@@ -9,9 +9,12 @@ class SettingsService {
     'tabSize': 2,
     'insertSpaces': true,
     'readOnly': false,
+    'flutterSdkPath': '',
+    'flutterDeviceId': '',
+    'flutterEntryPoint': 'lib/main.dart',
   };
   final Map<String, Object> user = {}, workspace = {};
-  Object get(String key) => key == 'theme'
+  Object get(String key) => key == 'theme' || key.startsWith('flutter')
       ? user[key] ?? defaults[key]!
       : workspace[key] ?? user[key] ?? defaults[key]!;
   double get fontSize => (get('fontSize') as num).toDouble();
@@ -24,6 +27,7 @@ class SettingsService {
   static void _validate(String key, Object value) {
     if (!defaults.containsKey(key)) return;
     final valid = switch (key) {
+      'flutterSdkPath' || 'flutterDeviceId' => value is String,
       'fontSize' => value is num && value >= 8 && value <= 40,
       'tabSize' => value is int && value >= 1 && value <= 8,
       'insertSpaces' || 'readOnly' => value is bool,

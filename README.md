@@ -2,6 +2,8 @@
 
 Tamtoot is a **free code and plain-text editor** and an extensible Flutter IDE for tablets and desktop windows. It includes an original editor engine, resizable tool panels, language packages, Git integration, and light and dark themes. Markdown (`.md`) files can be edited as plain text; a rendered Markdown preview is not implemented yet. Raster images open in a closable preview tab; SVG opens as a code + live preview split.
 
+## [Download Tamtoot on Google Play](https://play.google.com/store/apps/details?id=dev.tamtoot.tamtoot)
+
 [Документация на русском языке](docs/ru/README.md)
 
 [Privacy Policy / Политика конфиденциальности](https://3dcafe.github.io/tamtoot/privacy/)
@@ -60,11 +62,13 @@ The existing Windows workflows remain available separately.
 
 ## Everyday use
 
-- **File**: new/open/save/save as/save all, open a file from the device, open project, clone repository. Android uses the system document picker and keeps permission to save later edits back to the selected file.
+- **File**: new/open/save/save as/save all, open a file from the device, create/open project, clone repository. Android uses the system document picker and keeps permission to save later edits back to the selected file.
 - **Edit**: undo/redo, clipboard, find and replace.
 - **View**: show/hide panels, switch theme, reset layout, command palette.
 - **Tools → Settings**: theme, font, size, tabs, and keybindings.
 - **Tools → Install language package**: install versioned `language.json`, `syntax.json`, and optional `snippets.json` without rebuilding the IDE. The bundled languages and their extensions are documented below instead of being enumerated in the application UI.
+
+**File → New project…** creates an empty project folder and opens it. On Windows, Linux, and macOS, choose a parent folder on disk; cloning also creates a child folder there. On Android and iOS, new and cloned projects stay in the app’s `TamtootRepos` storage. New projects never overwrite an existing folder.
 
 Drag panel dividers to resize. Click folders to expand or collapse them, and files to open them. Tap in the editor to position the cursor; double-click selects a complete word, and long-press and drag selects text on touch devices. Click the triangle beside a class or method line to collapse or expand its body. Ordinary touch dragging scrolls the document.
 
@@ -78,7 +82,7 @@ in the file instead of being merged into typographic symbols by the code font.
 
 On startup, Tamtoot reopens the most recent project in history. If there is no project or its folder is unavailable, the project tree stays empty; no demo tabs are created. Existing user drafts are still recovered. Unmodified demo tabs from older installations are removed automatically, while edited drafts and real files are preserved.
 
-Solution shows only the current project tree. Open documents remain in the central editor tabs, and recent folders are available through **File → Open project…** instead of occupying the project tree. Hover the folder icon above the tree to see the repository name, branch and location.
+Solution initially shows the current project tree. On desktop, use **File → Add folder to workspace…** to attach more folders to the same Solution; each root expands independently and an additional root can be removed with its close button. The first folder remains the primary project for Git, Flutter, Requests and `.tamtoot` settings. Agents can read and edit every attached folder: primary paths stay unchanged and additional folders use explicit `@folder/...` prefixes. The folder set is restored with the session. Open documents remain in the central editor tabs, and recent primary projects are available through **File → Open project…**. Hover the folder icon above the tree to see the primary repository name, branch and location.
 
 The application saves session data after a 450 ms idle period and when it moves into the background. Theme changes are persisted immediately. Session recovery is separate from saving the actual file. Force-quitting during a pending write may lose the latest unsaved changes.
 
@@ -197,6 +201,16 @@ excludes these agent settings, so they remain local when committing through
 Tamtoot. Existing browser folder stores support profile files;
 actual browser permission behavior requires a writable folder grant.
 
+## Flutter run and debug (desktop)
+
+On Windows, Linux and macOS, **Tools → Settings → Flutter SDK** accepts the absolute SDK folder path. **Test Flutter** runs `flutter --version --machine`, displays SDK versions and discovers devices with `flutter devices --machine`. It verifies CLI communication, not the complete build toolchain. Settings are saved for the user; the default entry point is `lib/main.dart` and the default target is the current desktop. Initialize a Windows SDK with `flutter --version` once before using it here.
+
+Open a local Flutter project containing `pubspec.yaml`. The toolbar and **Run** menu provide Run, Debug, Stop, Hot reload and Hot restart. Modified documents are saved first; cancelling a save cancels the launch/update. **View → Debug** provides Pause, Continue, Step over/into/out, call stacks and variables. Use **Run → Toggle breakpoint at cursor** in a saved `.dart` file to add/remove a breakpoint. Breakpoints currently last for the window session. Build output and application logs appear in Output.
+
+Tamtoot uses `flutter debug-adapter` from your SDK; no editor plugin is needed. Controls are hidden on Android, iOS and Web. Native platform build dependencies are still required. **The current macOS App Sandbox remains enabled and may prevent external SDK execution/cache access; changing those permissions requires separate approval.** Native code debugging, attach, conditional breakpoints, watches and Flutter Inspector are not included.
+
+[Detailed setup and usage in Russian](docs/ru/flutter-run-and-debug.md). Protocol reference: [Flutter DAP](https://github.com/flutter/flutter/blob/main/packages/flutter_tools/lib/src/debug_adapters/README.md).
+
 ## Agent, YOLO and headless mode
 
 Open **Tools → Agent…**, choose a saved model profile, enter a task and run it.
@@ -252,7 +266,7 @@ Git exclude file.
 
 ## Current limitations
 
-This is an actively developed foundation, not a production compiler/debugger environment. Full LSP integration, PTY terminals, debugging, executable third-party extension hosting, advanced docking/drag-and-drop, and independent split editor groups are still future work. Placeholder panels identify unavailable providers explicitly.
+This is an actively developed foundation, not a production compiler/debugger environment. Full LSP integration, PTY terminals, native code debugging, executable third-party extension hosting, advanced docking/drag-and-drop, and independent split editor groups are still future work. Placeholder panels identify unavailable providers explicitly.
 
 The editor virtualizes visible lines with overscan. Storage currently uses an indexed string with O(n) edits. IME and session persistence still transfer the full document. Syntax highlighting is lexical, with cached continuation states for multiline comments and strings. Folding, diagnostics, snippets and multiple cursors have extension/model boundaries, while their complete UI is not implemented.
 

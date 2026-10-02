@@ -3,6 +3,7 @@ import 'dart:convert';
 
 import '../git/git_service.dart';
 import '../git/git_store.dart';
+import '../git/multi_root_store.dart';
 import 'model_attachment.dart';
 import 'model_client.dart';
 import 'model_profile.dart';
@@ -17,9 +18,9 @@ class AgentRunOptions {
     this.timeout = const Duration(minutes: 10),
     this.maxConsecutiveMistakes = 3,
     this.maxIterations = 40,
-    this.maxSearchesBeforeFirstEdit = 3,
-    this.maxReadsBeforeFirstEdit = 3,
-    this.maxInvestigationIterationsBeforeFirstEdit = 6,
+    this.maxSearchesBeforeFirstEdit = 5,
+    this.maxReadsBeforeFirstEdit = 8,
+    this.maxInvestigationIterationsBeforeFirstEdit = 12,
   });
 
   final bool yolo;
@@ -74,6 +75,7 @@ class AgentTaskEngine {
     AgentHookRunner? hooks,
     AgentCommandRunner? commands,
     this.mcp,
+    this.workspaceRoots = const [],
   }) : hooks = hooks ?? AgentHookRunner(root),
        commands = commands ?? AgentCommandRunner(root);
 
@@ -89,6 +91,7 @@ class AgentTaskEngine {
   final AgentHookRunner hooks;
   final AgentCommandRunner commands;
   final McpRegistry? mcp;
+  final List<Uri> workspaceRoots;
   bool _stopped = false;
   ModelClient? _active;
 
@@ -169,21 +172,21 @@ Reuse retained excerpts — do not re-read unchanged files.
   static const int agentRecoveryTokens = 800;
 
   /// Default window when the model does not specify a range.
-  static const int defaultReadLineCount = 70;
+  static const int defaultReadLineCount = 160;
 
   /// Lines kept around each search hit when auto-focusing a read.
-  static const int matchContextRadius = 20;
+  static const int matchContextRadius = 35;
 
-  static const int maxActiveFiles = 2;
-  static const int maxActiveCharacters = 8000;
-  static const int maxExcerptCharacters = 3000;
+  static const int maxActiveFiles = 6;
+  static const int maxActiveCharacters = 48000;
+  static const int maxExcerptCharacters = 8000;
 
   /// Soft cap so replace_in_file JSON cannot burn the whole completion budget.
-  static const int maxReplaceFragmentCharacters = 1200;
+  static const int maxReplaceFragmentCharacters = 4000;
 
   /// Shape of the single targeted read still allowed once the budget is spent.
-  static const int maxFinalReadFiles = 2;
-  static const int maxFinalReadLines = 60;
+  static const int maxFinalReadFiles = 3;
+  static const int maxFinalReadLines = 160;
 
   static const investigationBudgetPrompt =
       'Investigation budget reached. You have enough context.\n'
@@ -199,11 +202,15 @@ Reuse retained excerpts — do not re-read unchanged files.
       throw const ModelApiException('Agent limits must be positive.');
     }
     if (options.yolo) {
-      final changes = await git.statusEntries(root);
-      if (changes.isNotEmpty) {
-        throw const ModelApiException(
-          'YOLO Mode requires a clean Git working tree. Commit or discard changes first.',
-        );
+      final roots = workspaceRoots.isEmpty ? [root] : workspaceRoots;
+      for (final workspace in roots) {
+        if (!await git.isRepository(workspace)) continue;
+        final changes = await git.statusEntries(workspace);
+        if (changes.isNotEmpty) {
+          throw ModelApiException(
+            'YOLO Mode requires a clean Git working tree. Commit or discard changes in $workspace first.',
+          );
+        }
       }
     }
     final startHook = await _hook('TaskStart', {
@@ -1309,10 +1316,7 @@ Reuse retained excerpts — do not re-read unchanged files.
   }
 
   bool _allowed(String path) =>
-      path != '.git' &&
-      !path.startsWith('.git/') &&
-      path != '.tamtoot' &&
-      !path.startsWith('.tamtoot/');
+      !path.split('/').any((part) => part == '.git' || part == '.tamtoot');
 
   bool _useful(String path) {
     if (!_allowed(path)) return false;
@@ -1362,11 +1366,19 @@ Reuse retained excerpts — do not re-read unchanged files.
 
   Future<String> _projectIndex() async {
     final paths = (await store.listFiles('')).where(_useful).toList()..sort();
-    const maxPaths = 120;
-    const maxCharacters = 3500;
+    const maxPaths = 240;
+    const maxCharacters = 8000;
     final out = StringBuffer(
       'Project file index (one-time). Prefer literal search_files for symbols, then read_files:\n',
     );
+    final multi = store is MultiRootGitRepositoryStore
+        ? store as MultiRootGitRepositoryStore
+        : null;
+    if (multi != null) {
+      out
+        ..writeln('Primary project paths are unprefixed.')
+        ..writeln(multi.mountDescription);
+    }
     var included = 0;
     for (final path in paths.take(maxPaths)) {
       if (out.length + path.length + 1 > maxCharacters) break;

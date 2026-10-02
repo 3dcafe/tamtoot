@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:crypto/crypto.dart';
 import '../core/commands/commands.dart';
+import '../core/flutter/flutter_runner.dart';
 import '../core/completion/project_completion.dart';
 import '../core/filesystem/filesystem.dart';
 import '../core/git/git_service.dart';
@@ -25,6 +26,10 @@ class IdeSession {
   final DocumentService documents;
   final GitService git;
   final commands = CommandRegistry();
+  late final flutter = FlutterRunner(
+    log: (text) => log(text),
+    changed: () => changed(persist: false),
+  );
   KeybindingRegistry keys = KeybindingRegistry();
   final settings = SettingsService();
   final languages = LanguageRegistry();
@@ -37,6 +42,31 @@ class IdeSession {
   final List<String> errors = [];
   final List<String> recentWorkspaces = [];
   Uri? workspaceRoot;
+  final List<Uri> additionalWorkspaceRoots = [];
+  List<Uri> get workspaceRoots => [
+    if (workspaceRoot != null) workspaceRoot!,
+    ...additionalWorkspaceRoots,
+  ];
+
+  Map<Uri, String> get workspaceRootAliases {
+    final used = <String>{};
+    final result = <Uri, String>{};
+    for (final root in workspaceRoots) {
+      final raw = root.pathSegments.where((part) => part.isNotEmpty).lastOrNull;
+      final base = Uri.decodeComponent(raw ?? 'folder')
+          .replaceAll(RegExp(r'[^A-Za-z0-9._-]+'), '-')
+          .replaceAll(RegExp(r'^-+|-+$'), '');
+      final stem = base.isEmpty ? 'folder' : base;
+      var alias = stem;
+      var suffix = 2;
+      while (!used.add(alias)) {
+        alias = '$stem-${suffix++}';
+      }
+      result[root] = alias;
+    }
+    return result;
+  }
+
   ProjectCompletionIndex? completionIndex;
   late final explorer = ExplorerTree(
     documents.files.list,
@@ -283,12 +313,13 @@ class IdeSession {
       );
     }
     root = Uri.parse('${root.toString().replaceAll(RegExp(r'/+$'), '')}/');
-    final previous = workspaceRoot;
-    if (previous != null && previous != root) {
+    final previousRoots = workspaceRoots;
+    await SecurityScopedRoots.ensureAccess(root);
+    for (final previous in previousRoots.where((item) => item != root)) {
       await SecurityScopedRoots.release(previous);
     }
-    await SecurityScopedRoots.ensureAccess(root);
     workspaceRoot = root;
+    additionalWorkspaceRoots.clear();
     completionIndex = null;
     _gitEntries = {};
     _unpublished = {};
@@ -369,6 +400,34 @@ class IdeSession {
     changed();
   }
 
+  Future<void> addWorkspaceFolder(Uri root) async {
+    if (workspaceRoot == null) {
+      await openWorkspaceFolder(root);
+      return;
+    }
+    root = Uri.parse('${root.toString().replaceAll(RegExp(r'/+$'), '')}/');
+    if (workspaceRoots.contains(root)) return;
+    await SecurityScopedRoots.ensureAccess(root);
+    await explorer.addRoot(root);
+    final error = explorer.errors[root];
+    if (error != null) {
+      explorer.removeRoot(root);
+      await SecurityScopedRoots.release(root);
+      throw StateError(error);
+    }
+    additionalWorkspaceRoots.add(root);
+    log('Added workspace folder ${root.path}');
+    changed();
+  }
+
+  Future<void> removeWorkspaceFolder(Uri root) async {
+    if (!additionalWorkspaceRoots.remove(root)) return;
+    explorer.removeRoot(root);
+    await SecurityScopedRoots.release(root);
+    log('Removed workspace folder ${root.path}');
+    changed();
+  }
+
   void observe(OpenDocument doc) {
     if (_subscriptions.containsKey(doc.id)) return;
     configure(doc);
@@ -407,6 +466,7 @@ class IdeSession {
   }
 
   Future<void> restore() async {
+    final restoredWorkspaceFolders = <Uri>[];
     Future<void> load(String key, void Function(String) apply) async {
       try {
         final data = await store.read(key);
@@ -477,6 +537,17 @@ class IdeSession {
         data['recentWorkspaces'] ?? [],
         'recentWorkspaces',
       );
+      final folders = stringList(
+        data['workspaceFolders'] ?? [],
+        'workspaceFolders',
+      );
+      for (final value in folders) {
+        final uri = Uri.tryParse(value);
+        if (uri == null || !uri.hasScheme) {
+          throw const SchemaException('Invalid workspace folder URI');
+        }
+        restoredWorkspaceFolders.add(uri);
+      }
       final active = data['activeIndex'];
       String? restoredActive;
       final pendingImageReloads = <OpenDocument>[];
@@ -484,7 +555,8 @@ class IdeSession {
         final d = normalized[i];
         if (_isLegacyExample(d)) continue;
         final kindName = d['kind'] as String?;
-        final kind = DocumentKind.values.where((k) => k.name == kindName).firstOrNull ??
+        final kind =
+            DocumentKind.values.where((k) => k.name == kindName).firstOrNull ??
             DocumentService.kindForName(d['name'] as String);
         final doc = documents.create(
           d['name'] as String,
@@ -516,6 +588,17 @@ class IdeSession {
           throw const FormatException('Invalid project URI');
         }
         await openWorkspaceFolder(root);
+        for (final folder in restoredWorkspaceFolders) {
+          if (folder == root) continue;
+          try {
+            await addWorkspaceFolder(folder);
+          } catch (error) {
+            log(
+              'Additional workspace folder is unavailable: $error',
+              error: true,
+            );
+          }
+        }
       } catch (error) {
         workspaceRoot = null;
         workspaceHasGit = false;
@@ -573,6 +656,9 @@ class IdeSession {
           (d) => d.id == documents.activeId,
         ),
         'recentWorkspaces': recentWorkspaces,
+        'workspaceFolders': [
+          for (final root in additionalWorkspaceRoots) root.toString(),
+        ],
         'documents': [
           for (final d in documents.documents)
             {
@@ -602,6 +688,10 @@ class IdeSession {
     _gitTimer?.cancel();
     _saveTimer?.cancel();
     await persistNow();
+    await flutter.dispose();
+    for (final root in workspaceRoots) {
+      await SecurityScopedRoots.release(root);
+    }
     _disposed = true;
     _modelApiKeys.clear();
     _gitCredentials.clear();

@@ -17,6 +17,8 @@ import 'git_diff.dart';
 import 'http_requests_dialog.dart';
 import 'dock_view.dart';
 import 'media_document_view.dart';
+import 'flutter_debug_panel.dart';
+import '../core/flutter/flutter_runner.dart';
 
 class IdeShell extends ConsumerStatefulWidget {
   const IdeShell({super.key});
@@ -121,7 +123,9 @@ class _IdeShellState extends ConsumerState<IdeShell> {
       'file.new',
       'file.open',
       '—',
+      'workspace.newProject',
       'workspace.open',
+      'workspace.addFolder',
       'workspace.openProject',
       'git.clone',
       '—',
@@ -150,6 +154,21 @@ class _IdeShellState extends ConsumerState<IdeShell> {
       'layout.reset',
       'view.commands',
     ],
+    'Run': [
+      'flutter.run',
+      'flutter.debug',
+      'flutter.stop',
+      '—',
+      'flutter.hotReload',
+      'flutter.hotRestart',
+      '—',
+      'flutter.breakpoint',
+      'flutter.pause',
+      'flutter.continue',
+      'flutter.next',
+      'flutter.stepIn',
+      'flutter.stepOut',
+    ],
     'Git': ['git.changes', 'git.clone'],
     'Tools': [
       'requests.open',
@@ -160,6 +179,9 @@ class _IdeShellState extends ConsumerState<IdeShell> {
     ],
     'Help': ['help.privacy'],
   };
+
+  Iterable<MapEntry<String, List<String>>> get _menuEntries => _menus.entries
+      .where((menu) => menu.value.any(session.commands.isVisible));
 
   bool get _nativeMenu =>
       !kIsWeb && defaultTargetPlatform == TargetPlatform.macOS;
@@ -194,7 +216,7 @@ class _IdeShellState extends ConsumerState<IdeShell> {
         ),
       ],
     ),
-    for (final menu in _menus.entries)
+    for (final menu in _menuEntries)
       PlatformMenu(label: menu.key, menus: _platformItems(menu.value)),
     const PlatformMenu(
       label: 'Window',
@@ -250,7 +272,7 @@ class _IdeShellState extends ConsumerState<IdeShell> {
               scrollDirection: Axis.horizontal,
               child: Row(
                 children: [
-                  for (final menu in _menus.entries)
+                  for (final menu in _menuEntries)
                     _menuItem(menu.key, menu.value),
                 ],
               ),
@@ -404,6 +426,13 @@ class _IdeShellState extends ConsumerState<IdeShell> {
         action(Icons.undo, 'Undo', 'editor.undo'),
         action(Icons.redo, 'Redo', 'editor.redo'),
         const VerticalDivider(indent: 10, endIndent: 10),
+        if (supportsFlutterTools) ...[
+          action(Icons.play_arrow, 'Run Flutter', 'flutter.run'),
+          action(Icons.bug_report_outlined, 'Debug Flutter', 'flutter.debug'),
+          action(Icons.stop, 'Stop Flutter', 'flutter.stop'),
+          action(Icons.bolt, 'Hot reload', 'flutter.hotReload'),
+          action(Icons.restart_alt, 'Hot restart', 'flutter.hotRestart'),
+        ],
         Expanded(child: _pathBar()),
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 14),
@@ -603,6 +632,9 @@ class _IdeShellState extends ConsumerState<IdeShell> {
   );
   Widget _panel(String id) {
     if (id == 'explorer') return _explorer();
+    if (id == 'debug' && supportsFlutterTools) {
+      return FlutterDebugPanel(session: session);
+    }
     if (id == 'output') {
       return ColoredBox(
         color: color('panel'),
@@ -758,6 +790,12 @@ class _IdeShellState extends ConsumerState<IdeShell> {
               ),
               if (_sidebar == 0)
                 action(
+                  Icons.create_new_folder_outlined,
+                  'Add folder to workspace',
+                  'workspace.addFolder',
+                ),
+              if (_sidebar == 0)
+                action(
                   Icons.refresh,
                   'Refresh project tree and Git status',
                   'workspace.refresh',
@@ -863,46 +901,35 @@ class _IdeShellState extends ConsumerState<IdeShell> {
                       style: TextStyle(color: color('error')),
                     ),
                   ),
-                for (final row in session.explorer.rows) ...[
-                  _entry(
-                    row.entry.name,
-                    row.entry.directory
-                        ? (session.explorer.expanded.contains(row.entry.uri)
-                              ? Icons.folder_open_outlined
-                              : Icons.folder_outlined)
-                        : Icons.description_outlined,
-                    () => session.run(
-                      row.entry.directory
-                          ? 'workspace.toggleFolder'
-                          : 'file.openEntry',
-                      row.entry.directory ? row.entry.uri : row.entry,
+                if (session.workspaceRoots.length == 1)
+                  ..._explorerRows(session.workspaceRoot!)
+                else
+                  for (final root in session.workspaceRoots) ...[
+                    _entry(
+                      _workspaceFolderName(root),
+                      session.explorer.expanded.contains(root)
+                          ? Icons.folder_open_outlined
+                          : Icons.folder_outlined,
+                      () => session.run('workspace.toggleFolder', root),
+                      entryKey: ValueKey('explorer-root-$root'),
+                      directory: true,
+                      expanded: session.explorer.expanded.contains(root),
+                      loading: session.explorer.loading.contains(root),
+                      onRemove: root == session.workspaceRoot
+                          ? null
+                          : () => session.removeWorkspaceFolder(root),
                     ),
-                    entryKey: ValueKey('explorer-${row.entry.uri}'),
-                    fileUri: row.entry.directory ? null : row.entry.uri,
-                    depth: row.depth,
-                    directory: row.entry.directory,
-                    expanded: session.explorer.expanded.contains(row.entry.uri),
-                    loading: session.explorer.loading.contains(row.entry.uri),
-                    selected:
-                        !row.entry.directory &&
-                        session.documents.active?.uri == row.entry.uri,
-                    indicators: session.indicators(
-                      row.entry.uri,
-                      directory: row.entry.directory,
-                    ),
-                  ),
-                  if (session.explorer.errors[row.entry.uri] != null)
-                    Padding(
-                      padding: EdgeInsets.only(
-                        left: 28 + row.depth * 14.0,
-                        right: 8,
+                    if (session.explorer.errors[root] != null)
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(28, 2, 8, 6),
+                        child: Text(
+                          session.explorer.errors[root]!,
+                          style: TextStyle(fontSize: 11, color: color('error')),
+                        ),
                       ),
-                      child: Text(
-                        session.explorer.errors[row.entry.uri]!,
-                        style: TextStyle(fontSize: 11, color: color('error')),
-                      ),
-                    ),
-                ],
+                    if (session.explorer.expanded.contains(root))
+                      ..._explorerRows(root, depthOffset: 1),
+                  ],
               ],
             ],
           ),
@@ -910,6 +937,54 @@ class _IdeShellState extends ConsumerState<IdeShell> {
       ],
     ),
   );
+
+  List<Widget> _explorerRows(Uri root, {int depthOffset = 0}) => [
+    for (final row in session.explorer.rowsFor(root)) ...[
+      _entry(
+        row.entry.name,
+        row.entry.directory
+            ? (session.explorer.expanded.contains(row.entry.uri)
+                  ? Icons.folder_open_outlined
+                  : Icons.folder_outlined)
+            : Icons.description_outlined,
+        () => session.run(
+          row.entry.directory ? 'workspace.toggleFolder' : 'file.openEntry',
+          row.entry.directory ? row.entry.uri : row.entry,
+        ),
+        entryKey: ValueKey('explorer-${row.entry.uri}'),
+        fileUri: row.entry.directory ? null : row.entry.uri,
+        depth: row.depth + depthOffset,
+        directory: row.entry.directory,
+        expanded: session.explorer.expanded.contains(row.entry.uri),
+        loading: session.explorer.loading.contains(row.entry.uri),
+        selected:
+            !row.entry.directory &&
+            session.documents.active?.uri == row.entry.uri,
+        indicators: session.indicators(
+          row.entry.uri,
+          directory: row.entry.directory,
+        ),
+      ),
+      if (session.explorer.errors[row.entry.uri] != null)
+        Padding(
+          padding: EdgeInsets.only(
+            left: 28 + (row.depth + depthOffset) * 14.0,
+            right: 8,
+          ),
+          child: Text(
+            session.explorer.errors[row.entry.uri]!,
+            style: TextStyle(fontSize: 11, color: color('error')),
+          ),
+        ),
+    ],
+  ];
+
+  String _workspaceFolderName(Uri root) {
+    final segment = root.pathSegments
+        .where((part) => part.isNotEmpty)
+        .lastOrNull;
+    return Uri.decodeComponent(segment ?? root.toString());
+  }
 
   String get _workspaceDescription {
     final root = session.workspaceRoot;
@@ -923,7 +998,9 @@ class _IdeShellState extends ConsumerState<IdeShell> {
     name ??= root.pathSegments.where((part) => part.isNotEmpty).lastOrNull;
     name = (name ?? root.toString()).replaceFirst(RegExp(r'\.git$'), '');
     final branch = session.projectMeta?.branch;
-    return 'Repository: $name${branch == null ? '' : '\nBranch: $branch'}\n$root';
+    final folders = session.additionalWorkspaceRoots.length;
+    return 'Repository: $name${branch == null ? '' : '\nBranch: $branch'}\n$root'
+        '${folders == 0 ? '' : '\n+$folders additional workspace folder${folders == 1 ? '' : 's'}'}';
   }
 
   void _dismissKeyboard() {
@@ -942,6 +1019,7 @@ class _IdeShellState extends ConsumerState<IdeShell> {
     bool directory = false,
     bool expanded = false,
     bool loading = false,
+    Future<void> Function()? onRemove,
     FileIndicators indicators = const FileIndicators(),
   }) => GestureDetector(
     onSecondaryTapDown: fileUri == null
@@ -1012,6 +1090,13 @@ class _IdeShellState extends ConsumerState<IdeShell> {
                           color: color(indicators.colorToken),
                         ),
                       ),
+                    ),
+                  if (onRemove != null)
+                    IconButton(
+                      visualDensity: VisualDensity.compact,
+                      tooltip: 'Remove folder from workspace',
+                      onPressed: onRemove,
+                      icon: const Icon(Icons.close, size: 14),
                     ),
                 ],
               ),

@@ -166,7 +166,7 @@ calls since the last read/edit, soft-rejects duplicate/similar queries under
 overlapping paths (returning known matches without counting a mistake), and
 after ≤4 implementation-file hits requires `read_file` / `read_files` before
 another search. Reads without an explicit range focus ~40 lines around prior
-search hits instead of lines 1–N. Active file context keeps at most two compact
+search hits instead of lines 1–N. Active file context keeps up to six larger
 excerpts. Prefer `read_files` only when several files are necessary. Recent
 search results and listings remain in a bounded investigation history. Small
 edits use `replace_in_file`, so the model can change a verified fragment without
@@ -174,8 +174,14 @@ reconstructing an entire large file. Older context is still evicted when the
 combined limits are reached, preventing every iteration from resending all
 attachments and every file inspected earlier.
 
-Before the first edit, a small-task investigation budget applies by default: at
-most three `search_files`, three file reads, and six model iterations. After two
+Desktop multi-root workspaces are visible to Agent. Paths in the primary
+project remain ordinary relative paths. Every additional Solution folder is
+mounted below a unique `@folder/` prefix shown in the project index. Agent
+writes keep the same approval rules, and YOLO checks every attached Git working
+tree before allowing edits.
+
+Before the first edit, an investigation budget applies by default: at most five
+`search_files`, eight file reads, and twelve model iterations. After two
 searches and two reads without an edit, the host injects a progress note urging
 `replace_in_file`, `write_file`, or one final targeted read. When the budget is
 exhausted, `search_files`, `list_files` and `say` are soft-rejected, while reads

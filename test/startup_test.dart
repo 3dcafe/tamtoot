@@ -7,12 +7,14 @@ import 'legacy_examples.dart';
 
 MemoryStore savedSession({
   List<String> recent = const [],
+  List<String> folders = const [],
   List<Map<String, Object?>> docs = const [],
   int active = 0,
 }) => MemoryStore()
   ..data['session'] = jsonEncode({
     'schemaVersion': 1,
     'recentWorkspaces': recent,
+    'workspaceFolders': folders,
     'documents': docs,
     'activeIndex': active,
   });
@@ -54,6 +56,25 @@ void main() {
       await session.dispose();
     },
   );
+  test('startup restores additional workspace folders', () async {
+    final first = await Directory.systemTemp.createTemp('tamtoot-root-a-');
+    final second = await Directory.systemTemp.createTemp('tamtoot-root-b-');
+    addTearDown(() => first.delete(recursive: true));
+    addTearDown(() => second.delete(recursive: true));
+    await File('${first.path}/a.dart').writeAsString('a');
+    await File('${second.path}/b.dart').writeAsString('b');
+    final store = savedSession(
+      recent: [first.uri.toString()],
+      folders: [second.uri.toString()],
+    );
+
+    final session = await testSession(store: store, files: PlatformFiles());
+
+    expect(session.workspaceRoots, [first.uri, second.uri]);
+    expect(session.explorer.rowsFor(first.uri).single.entry.name, 'a.dart');
+    expect(session.explorer.rowsFor(second.uri).single.entry.name, 'b.dart');
+    await session.dispose();
+  });
   test(
     'missing last project stays closed without falling back to older project',
     () async {

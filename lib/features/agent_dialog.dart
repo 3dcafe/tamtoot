@@ -12,6 +12,7 @@ import '../core/agents/model_profile.dart';
 import '../core/agents/mcp_client.dart';
 import '../core/agents/profile_store.dart';
 import '../core/git/http_git_service.dart';
+import '../core/git/multi_root_store.dart';
 
 class AgentDialog extends StatelessWidget {
   const AgentDialog({super.key, required this.session});
@@ -345,9 +346,16 @@ class _AgentPanelState extends State<AgentPanel> {
     }
     final runner = AgentTaskEngine(
       profile: profile,
-      store: git.openStore(root!),
+      store: MultiRootGitRepositoryStore(
+        primary: git.openStore(root!),
+        additional: {
+          for (final folder in widget.session.additionalWorkspaceRoots)
+            widget.session.workspaceRootAliases[folder]!: git.openStore(folder),
+        },
+      ),
       git: git,
       root: root!,
+      workspaceRoots: List.unmodifiable(widget.session.workspaceRoots),
       apiKey: apiKey.text.trim(),
       attachments: runAttachments,
       onEvent: (event) {

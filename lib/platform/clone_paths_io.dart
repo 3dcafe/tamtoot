@@ -1,4 +1,7 @@
 import 'dart:io';
+import 'dart:convert';
+
+import 'project_storage.dart';
 
 import 'package:path_provider/path_provider.dart';
 
@@ -36,11 +39,15 @@ Future<String?> defaultCloneParentPath() async {
 }
 
 String joinClonePath(String parent, String name) =>
-    '$parent${Platform.pathSeparator}$name';
+    parent.endsWith('/') || parent.endsWith(r'\')
+    ? '$parent$name'
+    : '$parent${Platform.pathSeparator}$name';
 
 Future<bool> cloneTargetBusy(String path) async {
+  final type = await FileSystemEntity.type(path, followLinks: false);
+  if (type == FileSystemEntityType.notFound) return false;
+  if (type != FileSystemEntityType.directory) return true;
   final dir = Directory(path);
-  if (!await dir.exists()) return false;
   return !(await dir.list().isEmpty);
 }
 
@@ -49,7 +56,9 @@ Future<bool> looksLikeManagedWorkspace(String path) async {
   final meta = File(
     '$path${Platform.pathSeparator}${TamtootProjectMeta.relativePath}',
   );
-  return await git.exists() || await meta.exists();
+  return await git.exists() ||
+      await meta.exists() ||
+      await File(joinClonePath(path, '.tamtoot/project.json')).exists();
 }
 
 /// Prefer [preferred]; if taken, return `preferred-2`, `preferred-3`, …
@@ -111,3 +120,28 @@ Future<List<ClonedProjectRef>> listClonedProjects() async {
 bool get webDirectoryPickerSupported => false;
 
 Future<Uri?> pickCloneDestination({String? folderName}) async => null;
+
+/// Creates a fresh project without reusing or overwriting an existing directory.
+Future<Uri> createProjectDirectory(String parent, String name) async {
+  final error = projectNameError(name);
+  if (error != null) throw ArgumentError(error);
+  final path = joinClonePath(parent, name);
+  if (await FileSystemEntity.type(path, followLinks: false) !=
+      FileSystemEntityType.notFound) {
+    throw StateError('“$name” already exists. Choose another project name.');
+  }
+  await Directory(path).create(recursive: true);
+  final metadata = File.fromUri(
+    Uri.directory(path).resolve('.tamtoot/project.json'),
+  );
+  await metadata.parent.create(recursive: true);
+  await metadata.writeAsString(
+    jsonEncode({
+      'schemaVersion': 1,
+      'name': name,
+      'createdAt': DateTime.now().toUtc().toIso8601String(),
+    }),
+    flush: true,
+  );
+  return Uri.directory(path);
+}

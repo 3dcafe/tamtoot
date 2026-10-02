@@ -15,6 +15,11 @@ import '../app/ide_session.dart';
 import '../app/session_commands.dart';
 import '../core/git/git_service.dart';
 import '../platform/clone_paths.dart';
+import '../platform/project_storage.dart';
+import '../platform/security_scoped_roots.dart';
+import 'new_project_dialog.dart';
+import 'flutter_settings.dart';
+import '../core/flutter/flutter_runner.dart';
 
 class ShellActions implements PresentationActions {
   ShellActions(this.context, this.session);
@@ -184,6 +189,13 @@ class ShellActions implements PresentationActions {
   );
 
   @override
+  Future<void> showNewProject() => showDialog<void>(
+    context: context(),
+    barrierDismissible: false,
+    builder: (_) => NewProjectDialog(session: session),
+  );
+
+  @override
   Future<void> showOpenProject() => showDialog<void>(
     context: context(),
     builder: (ctx) => OpenProjectDialog(session: session),
@@ -303,6 +315,8 @@ class _SettingsDialogState extends State<SettingsDialog> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
+              if (supportsFlutterTools)
+                FlutterSettings(session: widget.session),
               Row(
                 children: [
                   const Text('IDE theme'),
@@ -549,7 +563,7 @@ class _CloneRepositoryDialogState extends State<CloneRepositoryDialog> {
       webDirectoryPickerSupported;
 
   /// iPhone/Android: clones go into app documents — no raw path UI.
-  bool get managedDestination => !canBrowse;
+  bool get managedDestination => usesManagedProjectStorage;
 
   @override
   void initState() {
@@ -559,10 +573,15 @@ class _CloneRepositoryDialogState extends State<CloneRepositoryDialog> {
   }
 
   Future<void> _prepareDefaultDestination() async {
-    final path = await defaultCloneParentPath();
-    if (!mounted) return;
-    setState(() => destinationPath = path);
-    await _ensureUniqueFolderName();
+    if (!managedDestination) return;
+    try {
+      final path = await defaultCloneParentPath();
+      if (!mounted) return;
+      setState(() => destinationPath = path);
+      await _ensureUniqueFolderName();
+    } catch (e) {
+      if (mounted) setState(() => error = '$e');
+    }
   }
 
   Future<void> _ensureUniqueFolderName() async {
@@ -571,6 +590,7 @@ class _CloneRepositoryDialogState extends State<CloneRepositoryDialog> {
     final preferred = folder.text.trim().isEmpty
         ? (_repoNameFromUrl(url.text) ?? 'repo')
         : folder.text.trim();
+    if (projectNameError(preferred) != null) return;
     final unique = await uniqueCloneFolderName(parent, preferred);
     if (!mounted) return;
     if (unique != preferred) {
@@ -617,7 +637,15 @@ class _CloneRepositoryDialogState extends State<CloneRepositoryDialog> {
   }
 
   Future<void> _browse() async {
-    if (widget.session.documents.dialogs.supportsDirectories) {
+    try {
+      await _pickDestination();
+    } catch (e) {
+      if (mounted) setState(() => error = '$e');
+    }
+  }
+
+  Future<void> _pickDestination() async {
+    if (!kIsWeb && widget.session.documents.dialogs.supportsDirectories) {
       final picked = await widget.session.documents.dialogs.openWorkspace();
       if (picked == null || !mounted) return;
       setState(() {
@@ -672,6 +700,12 @@ class _CloneRepositoryDialogState extends State<CloneRepositoryDialog> {
       return;
     }
 
+    final nameError = projectNameError(name);
+    if (nameError != null) {
+      setState(() => error = nameError);
+      return;
+    }
+
     GitCredentials? credentials;
     final tokenValue = token.text.trim();
     final userValue = username.text.trim();
@@ -706,11 +740,17 @@ class _CloneRepositoryDialogState extends State<CloneRepositoryDialog> {
         selectedWebRoot = webRoot;
         targetUri = webRoot;
       } else {
+        if (!managedDestination && destinationPath == null) {
+          await _browse();
+          if (!mounted) return;
+        }
         final parent = destinationPath;
         if (parent == null || parent.isEmpty) {
           setState(() {
             busy = false;
-            error = 'App documents folder is unavailable';
+            error = managedDestination
+                ? 'App documents folder is unavailable'
+                : 'Choose a parent folder on disk using Browse';
           });
           return;
         }
@@ -737,6 +777,7 @@ class _CloneRepositoryDialogState extends State<CloneRepositoryDialog> {
         }
         await ensureCloneDirectory(targetPath);
         targetUri = cloneDirectoryUri(targetPath);
+        await SecurityScopedRoots.rememberPickedFolder(targetUri);
       }
 
       final result = await widget.session.git.clone(
@@ -826,7 +867,7 @@ class _CloneRepositoryDialogState extends State<CloneRepositoryDialog> {
                               destinationPath ??
                               (webDirectoryPickerSupported
                                   ? 'Press Browse to choose a folder on disk…'
-                                  : 'Resolving app documents…'),
+                                  : 'Press Browse to choose a folder on disk…'),
                           maxLines: 2,
                           overflow: TextOverflow.ellipsis,
                           style: Theme.of(context).textTheme.bodySmall,
@@ -1046,7 +1087,7 @@ class _OpenProjectDialogState extends State<OpenProjectDialog> {
             if (items.isEmpty) {
               return const Center(
                 child: Text(
-                  'No projects yet.\n\nFile → Clone repository… to download one,\nor Choose folder… below.',
+                  'No projects yet.\n\nFile → New project… to create one,\nor Clone repository… to download one,\nor Choose folder… below.',
                   textAlign: TextAlign.center,
                 ),
               );

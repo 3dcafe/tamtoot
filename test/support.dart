@@ -33,10 +33,14 @@ Future<IdeSession> testSession({
   MemoryStore? store,
   GitService? git,
   FileSystemProvider? files,
+  FileDialogs? dialogs,
 }) async {
   final session = IdeSession(
     store: store ?? MemoryStore(),
-    documents: DocumentService(files ?? MemoryFileSystem(), FakeDialogs()),
+    documents: DocumentService(
+      files ?? MemoryFileSystem(),
+      dialogs ?? FakeDialogs(),
+    ),
     git: git ?? createGitService(),
   );
   for (final id in ['night', 'day']) {

@@ -8,6 +8,7 @@ import 'package:tamtoot/core/git/git_objects.dart';
 import 'package:tamtoot/core/git/git_publication.dart';
 import 'package:tamtoot/core/git/git_service.dart';
 import 'package:tamtoot/core/git/git_store.dart';
+import 'package:tamtoot/core/git/multi_root_store.dart';
 import 'package:tamtoot/platform/workspace_roots.dart';
 import 'package:tamtoot/workspace/explorer/explorer_tree.dart';
 import 'support.dart';
@@ -110,6 +111,48 @@ void main() {
       expect(calls, 2);
     },
   );
+  test('explorer keeps multiple workspace roots independently', () async {
+    final first = Uri.parse('memory:///first/');
+    final second = Uri.parse('memory:///second/');
+    final tree = ExplorerTree((uri) async {
+      if (uri == first) {
+        return [FileEntry(first.resolve('a.dart'), 'a.dart')];
+      }
+      if (uri == second) {
+        return [FileEntry(second.resolve('b.dart'), 'b.dart')];
+      }
+      return const [];
+    }, () {});
+
+    await tree.open(first);
+    await tree.addRoot(second);
+
+    expect(tree.roots, [first, second]);
+    expect(tree.rowsFor(first).single.entry.name, 'a.dart');
+    expect(tree.rowsFor(second).single.entry.name, 'b.dart');
+    tree.removeRoot(second);
+    expect(tree.roots, [first]);
+  });
+
+  test('multi-root agent store mounts additional folders by alias', () async {
+    final primary = RepositoryMemory();
+    final backend = RepositoryMemory();
+    await primary.writeText('lib/main.dart', 'primary');
+    await backend.writeText('src/server.dart', 'backend');
+    final store = MultiRootGitRepositoryStore(
+      primary: primary,
+      additional: {'backend': backend},
+    );
+
+    expect(await store.readText('lib/main.dart'), 'primary');
+    expect(await store.readText('@backend/src/server.dart'), 'backend');
+    expect(
+      await store.listFiles(''),
+      containsAll(['lib/main.dart', '@backend/src/server.dart']),
+    );
+    await store.writeText('@backend/src/server.dart', 'changed');
+    expect(await backend.readText('src/server.dart'), 'changed');
+  });
   test('late directory result cannot replace a newly opened project', () async {
     final pending = Completer<List<FileEntry>>();
     final a = Uri.parse('memory:///a/'), b = Uri.parse('memory:///b/');

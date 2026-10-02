@@ -54,3 +54,6 @@ bool get webDirectoryPickerSupported => web_fs.webDirectoryPickerSupported;
 
 Future<Uri?> pickCloneDestination({String? folderName}) =>
     web_fs.pickWebWorkspaceDirectory(createChild: folderName);
+
+Future<Uri> createProjectDirectory(String parent, String name) async =>
+    throw UnsupportedError('Choose a local folder in the browser');

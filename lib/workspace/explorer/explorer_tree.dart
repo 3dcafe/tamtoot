@@ -12,6 +12,7 @@ class ExplorerTree {
   final Future<List<FileEntry>> Function(Uri) list;
   final void Function() notify;
   Uri? root;
+  final List<Uri> roots = [];
   int _generation = 0;
   final Map<Uri, List<FileEntry>> children = {};
   final Set<Uri> expanded = {}, loading = {};
@@ -20,6 +21,7 @@ class ExplorerTree {
   void clear() {
     _generation++;
     root = null;
+    roots.clear();
     children.clear();
     expanded.clear();
     loading.clear();
@@ -30,12 +32,32 @@ class ExplorerTree {
   Future<void> open(Uri uri) async {
     _generation++;
     root = uri;
+    roots
+      ..clear()
+      ..add(uri);
     children.clear();
     expanded.clear();
     loading.clear();
     errors.clear();
     expanded.add(uri);
     await _load(uri);
+  }
+
+  Future<void> addRoot(Uri uri) async {
+    if (roots.contains(uri)) return;
+    roots.add(uri);
+    expanded.add(uri);
+    await _load(uri);
+  }
+
+  void removeRoot(Uri uri) {
+    if (uri == root) return;
+    roots.remove(uri);
+    children.removeWhere((key, _) => _isUnder(uri, key));
+    expanded.removeWhere((key) => _isUnder(uri, key));
+    loading.removeWhere((key) => _isUnder(uri, key));
+    errors.removeWhere((key, _) => _isUnder(uri, key));
+    notify();
   }
 
   Future<void> _load(Uri uri) async {
@@ -46,7 +68,10 @@ class ExplorerTree {
     notify();
     try {
       final entries = await list(uri);
-      if (generation != _generation) return;
+      if (generation != _generation ||
+          !roots.any((root) => _isUnder(root, uri))) {
+        return;
+      }
       children[uri] = [...entries]
         ..sort(
           (a, b) => a.directory == b.directory
@@ -56,17 +81,23 @@ class ExplorerTree {
               : 1,
         );
     } catch (error) {
-      if (generation == _generation) errors[uri] = '$error';
+      if (generation == _generation &&
+          roots.any((root) => _isUnder(root, uri))) {
+        errors[uri] = '$error';
+      }
     } finally {
+      loading.remove(uri);
       if (generation == _generation) {
-        loading.remove(uri);
         notify();
       }
     }
   }
 
   Future<void> toggle(Uri uri) async {
-    if (!rows.any((row) => row.entry.uri == uri && row.entry.directory)) return;
+    if (!roots.contains(uri) &&
+        !rows.any((row) => row.entry.uri == uri && row.entry.directory)) {
+      return;
+    }
     if (!expanded.remove(uri)) {
       expanded.add(uri);
       if (!children.containsKey(uri) || errors.containsKey(uri)) {
@@ -77,19 +108,21 @@ class ExplorerTree {
   }
 
   Future<void> refresh() async {
-    final uri = root;
-    if (uri == null) return;
+    if (roots.isEmpty) return;
     final generation = _generation;
-    await _load(uri);
+    for (final uri in roots.toList()) {
+      await _load(uri);
+      if (generation != _generation) return;
+    }
     for (final dir in expanded.toList()) {
       if (generation != _generation) return;
-      if (dir != uri && rows.any((row) => row.entry.uri == dir)) {
+      if (!roots.contains(dir) && rows.any((row) => row.entry.uri == dir)) {
         await _load(dir);
       }
     }
   }
 
-  List<ExplorerRow> get rows {
+  List<ExplorerRow> rowsFor(Uri root) {
     final result = <ExplorerRow>[];
     void visit(Uri directory, int depth) {
       if (depth > 64) return;
@@ -101,7 +134,15 @@ class ExplorerTree {
       }
     }
 
-    if (root != null) visit(root!, 0);
+    if (expanded.contains(root)) visit(root, 0);
     return result;
   }
+
+  List<ExplorerRow> get rows => [for (final root in roots) ...rowsFor(root)];
+}
+
+bool _isUnder(Uri root, Uri child) {
+  final parent = root.toString().replaceAll(RegExp(r'/+$'), '');
+  final value = child.toString();
+  return value == parent || value.startsWith('$parent/');
 }

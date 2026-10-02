@@ -1,4 +1,5 @@
 import '../core/commands/commands.dart';
+import '../core/flutter/flutter_runner.dart';
 import '../core/filesystem/filesystem.dart';
 import '../workspace/layout/dock_layout.dart';
 import 'ide_session.dart';
@@ -16,6 +17,7 @@ abstract interface class PresentationActions {
   Future<void> showHttpRequests();
   Future<void> showProjectSearch();
   Future<void> showOpenProject();
+  Future<void> showNewProject();
   Future<void> showAgent();
   Future<void> showKanban();
   Future<void> showPrivacyPolicy();
@@ -41,6 +43,96 @@ void registerSessionCommands(IdeSession s, PresentationActions ui) {
         return result;
       },
     ),
+  );
+  bool flutterReady() =>
+      supportsFlutterTools &&
+      !s.flutter.active &&
+      !s.flutter.checking &&
+      (s.settings.get('flutterSdkPath') as String).trim().isNotEmpty &&
+      s.workspaceRoot?.scheme == 'file';
+  Future<void> launchFlutter(bool debug) async {
+    for (final doc in s.documents.documents.where((doc) => doc.dirty)) {
+      if (!await s.documents.save(doc)) return;
+    }
+    final panel = debug ? 'debug' : 'output';
+    if (s.layout.hidden.contains(panel)) s.layout = s.layout.toggle(panel);
+    s.layout = s.layout.map(
+      (node) => node is TabNode && node.panels.contains(panel)
+          ? TabNode(node.id, node.panels, panel)
+          : node,
+    );
+    s.changed();
+    await s.flutter.start(
+      sdk: s.settings.get('flutterSdkPath') as String,
+      root: s.workspaceRoot!,
+      entryPoint: s.settings.get('flutterEntryPoint') as String,
+      device: s.settings.get('flutterDeviceId') as String,
+      debug: debug,
+    );
+  }
+
+  add(
+    'flutter.run',
+    'Run Flutter',
+    (_) => launchFlutter(false),
+    enabled: flutterReady,
+    visible: () => supportsFlutterTools,
+  );
+  add(
+    'flutter.debug',
+    'Debug Flutter',
+    (_) => launchFlutter(true),
+    enabled: flutterReady,
+    visible: () => supportsFlutterTools,
+  );
+  add(
+    'flutter.stop',
+    'Stop Flutter',
+    (_) => s.flutter.stop(),
+    enabled: () => s.flutter.active,
+    visible: () => supportsFlutterTools,
+  );
+  for (final entry in const {
+    'hotReload': 'Hot reload',
+    'hotRestart': 'Hot restart',
+    'continue': 'Continue',
+    'pause': 'Pause',
+    'next': 'Step over',
+    'stepIn': 'Step into',
+    'stepOut': 'Step out',
+  }.entries) {
+    add(
+      'flutter.${entry.key}',
+      entry.value,
+      (_) async {
+        if (entry.key == 'hotReload' || entry.key == 'hotRestart') {
+          for (final doc in s.documents.documents.where((doc) => doc.dirty)) {
+            if (!await s.documents.save(doc)) return;
+          }
+        }
+        await s.flutter.control(entry.key);
+      },
+      visible: () => supportsFlutterTools,
+      enabled: () => entry.key == 'hotReload' || entry.key == 'hotRestart'
+          ? s.flutter.state == FlutterRunState.running
+          : entry.key == 'pause'
+          ? s.flutter.debugging && s.flutter.state == FlutterRunState.running
+          : s.flutter.paused,
+    );
+  }
+  add(
+    'flutter.breakpoint',
+    'Toggle breakpoint at cursor',
+    (_) async {
+      final doc = s.documents.active!;
+      final line =
+          doc.editor.buffer.positionAt(doc.editor.selection.extent).line + 1;
+      await s.flutter.toggleBreakpoint(doc.uri!.toFilePath(), line);
+    },
+    visible: () => supportsFlutterTools,
+    enabled: () =>
+        s.documents.active?.uri?.scheme == 'file' &&
+        (s.documents.active?.name.endsWith('.dart') ?? false),
   );
   bool editor() => s.documents.active != null;
   add(
@@ -107,17 +199,22 @@ void registerSessionCommands(IdeSession s, PresentationActions ui) {
     enabled: () => s.documents.dialogs.supportsDirectories,
     visible: () => s.documents.dialogs.supportsDirectories,
   );
+  add(
+    'workspace.addFolder',
+    'Add folder to workspace…',
+    (_) async {
+      final root = await s.documents.dialogs.openWorkspace();
+      if (root == null) return;
+      await s.addWorkspaceFolder(root);
+    },
+    enabled: () =>
+        s.workspaceRoot != null && s.documents.dialogs.supportsDirectories,
+    visible: () => s.documents.dialogs.supportsDirectories,
+  );
+  add('workspace.newProject', 'New project…', (_) => ui.showNewProject());
   add('workspace.openProject', 'Open project…', (_) => ui.showOpenProject());
-  add(
-    'agent.open',
-    'Agent…',
-    (_) => ui.showAgent(),
-  );
-  add(
-    'agent.kanban',
-    'Agent Kanban…',
-    (_) => ui.showKanban(),
-  );
+  add('agent.open', 'Agent…', (_) => ui.showAgent());
+  add('agent.kanban', 'Agent Kanban…', (_) => ui.showKanban());
   add(
     'git.clone',
     'Clone repository…',
@@ -132,11 +229,7 @@ void registerSessionCommands(IdeSession s, PresentationActions ui) {
     enabled: () => s.git.available && s.workspaceHasGit,
     visible: () => s.git.available,
   );
-  add(
-    'requests.open',
-    'HTTP Requests…',
-    (_) => ui.showHttpRequests(),
-  );
+  add('requests.open', 'HTTP Requests…', (_) => ui.showHttpRequests());
   add('editor.undo', 'Undo', (_) {
     s.documents.active!.editor.undo();
   }, enabled: () => s.documents.active?.editor.canUndo ?? false);
