@@ -82,7 +82,7 @@ Model server: Custom compatible API
 Server URL: https://ai.qird.ru/v1/models
 API format: Chat Completions
 Model: /home/latin/models/bonsai/Ternary-Bonsai-2-27B-PQ2_0.gguf
-API parameters: {"temperature": 0.2, "max_tokens": 4096}
+API parameters: {"temperature": 0.2, "max_tokens": 1200}
 ```
 
 The template variables are `{{task}}`, `{{file_path}}`, `{{file}}` and
@@ -153,23 +153,24 @@ or test runner. The agent must inspect changed files and finish without trying t
 execute tests or other commands. If a model still emits `run_command`, the host
 skips it and reminds the model about the mobile runtime limit.
 
-Each task starts with a separate analysis turn. The model first posts a concise
-plan through `say`: the goal, intended inspection, likely files, and relevant
-risks or ambiguities. File and MCP actions begin on the following model request,
-so the plan appears in the Agent conversation before implementation starts.
+Each task begins in implementation mode. The model should start with the most
+useful tool action rather than a separate planning `say`. Optional short status
+messages are allowed, but repeating `say` without tools is rejected.
 
 Agent context is incremental. User attachments are sent only with the first
-analysis request, where the model is instructed to retain their relevant facts.
-The next request receives a compact project file index once. The model then uses
-`search_files`, directory listing and ranged reads to select relevant content.
-After a search, prefer `read_files` to load several matching files in one
-iteration instead of repeating single `read_file` calls. Recent search results
-and listings remain in a bounded investigation history, while a small set of
-recent file excerpts remains in the working set. Small edits use
-`replace_in_file`, so the model can change a verified fragment without
-reconstructing an entire large file. Older context is still evicted when the
-combined limits are reached, preventing every iteration from resending all
-attachments and every file inspected earlier.
+request. The first request also receives a compact project file index once. The
+model then uses literal `search_files` queries (concrete symbols/identifiers,
+not natural-language descriptions), directory listing and ranged reads to select
+relevant content. The host enforces at most two consecutive `search_files`
+calls, rejects near-duplicate search queries, and after implementation-file hits
+requires `read_files` / `read_file` before another search. Prefer `read_files`
+to load several matching files in one iteration instead of repeating single
+`read_file` calls. Recent search results and listings remain in a bounded
+investigation history, while a small set of recent file excerpts remains in the
+working set. Small edits use `replace_in_file`, so the model can change a
+verified fragment without reconstructing an entire large file. Older context is
+still evicted when the combined limits are reached, preventing every iteration
+from resending all attachments and every file inspected earlier.
 
 ## YOLO Mode
 

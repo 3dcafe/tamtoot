@@ -72,9 +72,7 @@ ModelClient queueClient(List<String> actions) => ModelClient(
 
 void main() {
   final root = Uri.parse('memory:///project/');
-  test(
-    'agent sends attachments once and retains investigation context',
-    () async {
+  test('agent sends attachments once and retains investigation context', () async {
       final store = RepositoryMemory();
       await store.writeText(
         'lib/target.dart',
@@ -83,7 +81,6 @@ void main() {
       await store.writeText('lib/unrelated.dart', 'const other = 1;');
       final bodies = <Map<String, dynamic>>[];
       final actions = [
-        '{"action":"say","text":"I will locate needle and inspect its file."}',
         '{"action":"search_files","query":"needle","path":"lib"}',
         '{"action":"read_file","path":"lib/target.dart"}',
         '{"action":"finish","summary":"Inspected the relevant file."}',
@@ -134,16 +131,17 @@ void main() {
       );
 
       expect(result.success, isTrue);
-      expect(bodies, hasLength(4));
+      expect(bodies, hasLength(3));
       expect(jsonEncode(bodies[0]), contains('unique-attachment-context'));
+      expect(jsonEncode(bodies[0]), contains('Project file index'));
       expect(
         jsonEncode(bodies[1]),
         isNot(contains('unique-attachment-context')),
       );
-      expect(jsonEncode(bodies[1]), contains('Project file index'));
-      expect(jsonEncode(bodies[2]), contains('lib/target.dart:1'));
-      expect(jsonEncode(bodies[3]), contains('project-value'));
-      expect(jsonEncode(bodies[3]), contains('Search lib::needle'));
+      expect(jsonEncode(bodies[1]), contains('lib/target.dart:1'));
+      expect(jsonEncode(bodies[1]), contains('already provided once'));
+      expect(jsonEncode(bodies[2]), contains('project-value'));
+      expect(jsonEncode(bodies[2]), contains('Search lib::needle'));
     },
   );
 
@@ -182,7 +180,7 @@ void main() {
 
       final result = await engine.run(
         'Change the value',
-        const AgentRunOptions(),
+        const AgentRunOptions(yolo: false),
       );
 
       expect(result.success, isTrue);
@@ -337,7 +335,10 @@ void main() {
       hooks: NoHooks(),
       commands: FakeCommands(),
     );
-    final result = await engine.run('Update it', const AgentRunOptions());
+    final result = await engine.run(
+      'Update it',
+      const AgentRunOptions(yolo: false),
+    );
     expect(result.success, isTrue);
     expect(await store.readText('a.txt'), 'after');
     expect(approvals, 1);
@@ -492,7 +493,6 @@ void main() {
     await store.writeText('lib/a.dart', 'const needle = 1;');
     final bodies = <String>[];
     final actions = [
-      '{"action":"say","text":"Find needle"}',
       '{"action":"search_files","query":"needle","path":"lib"}',
       '{"action":"finish","summary":"done"}',
     ];
@@ -525,8 +525,157 @@ void main() {
       commands: FakeCommands(),
     );
     await engine.run('Find', const AgentRunOptions());
-    expect(bodies[1], contains('Project file index'));
-    expect(bodies[1], isNot(contains('already provided once')));
-    expect(bodies[2], contains('already provided once'));
+    expect(bodies[0], contains('Project file index'));
+    expect(bodies[0], isNot(contains('already provided once')));
+    expect(bodies[1], contains('already provided once'));
+  });
+
+  test('agent blocks a third consecutive search_files', () async {
+    final store = RepositoryMemory();
+    await store.writeText('lib/a.dart', 'const alpha = 1;');
+    final events = <AgentEvent>[];
+    final actions = [
+      '{"action":"search_files","query":"zzzone","path":"lib"}',
+      '{"action":"search_files","query":"zzztwo","path":"lib"}',
+      '{"action":"search_files","query":"zzzthree","path":"lib"}',
+      '{"action":"list_files","path":"lib"}',
+      '{"action":"finish","summary":"done"}',
+    ];
+    final engine = AgentTaskEngine(
+      profile: agentProfile(),
+      store: store,
+      git: AgentGit(),
+      root: root,
+      apiKey: '',
+      onEvent: events.add,
+      approve: (_, _) async => true,
+      clientFactory: () => queueClient(actions),
+      hooks: NoHooks(),
+      commands: FakeCommands(),
+    );
+    final result = await engine.run(
+      'Find symbols',
+      const AgentRunOptions(maxConsecutiveMistakes: 3, maxIterations: 10),
+    );
+    expect(result.success, isTrue);
+    expect(
+      events.where((event) => event.type == 'error').map((e) => e.text),
+      anyElement(contains('Stop searching')),
+    );
+  });
+
+  test('agent rejects similar search queries', () async {
+    final store = RepositoryMemory();
+    await store.writeText('lib/a.dart', 'const x = 1;');
+    final events = <AgentEvent>[];
+    final actions = [
+      '{"action":"search_files","query":"locked input","path":"lib"}',
+      '{"action":"search_files","query":"locked input field","path":"lib"}',
+      '{"action":"finish","summary":"done"}',
+    ];
+    final engine = AgentTaskEngine(
+      profile: agentProfile(),
+      store: store,
+      git: AgentGit(),
+      root: root,
+      apiKey: '',
+      onEvent: events.add,
+      approve: (_, _) async => true,
+      clientFactory: () => queueClient(actions),
+      hooks: NoHooks(),
+      commands: FakeCommands(),
+    );
+    final result = await engine.run(
+      'Find lock',
+      const AgentRunOptions(maxConsecutiveMistakes: 3, maxIterations: 10),
+    );
+    expect(result.success, isTrue);
+    expect(
+      events.where((event) => event.type == 'error').map((e) => e.text),
+      anyElement(contains('too similar')),
+    );
+  });
+
+  test('agent requires read after search hits before another search', () async {
+    final store = RepositoryMemory();
+    await store.writeText('lib/target.dart', 'const TextField = 1;');
+    final events = <AgentEvent>[];
+    final actions = [
+      '{"action":"search_files","query":"TextField","path":"lib"}',
+      '{"action":"search_files","query":"AgentDialog","path":"lib"}',
+      '{"action":"read_file","path":"lib/target.dart"}',
+      '{"action":"finish","summary":"done"}',
+    ];
+    final engine = AgentTaskEngine(
+      profile: agentProfile(),
+      store: store,
+      git: AgentGit(),
+      root: root,
+      apiKey: '',
+      onEvent: events.add,
+      approve: (_, _) async => true,
+      clientFactory: () => queueClient(actions),
+      hooks: NoHooks(),
+      commands: FakeCommands(),
+    );
+    final result = await engine.run(
+      'Inspect TextField',
+      const AgentRunOptions(maxConsecutiveMistakes: 3, maxIterations: 10),
+    );
+    expect(result.success, isTrue);
+    expect(
+      events.where((event) => event.type == 'error').map((e) => e.text),
+      anyElement(contains('Stop searching')),
+    );
+  });
+
+  test('agent caps max_tokens for JSON actions', () async {
+    final store = RepositoryMemory();
+    await store.writeText('lib/a.dart', 'const x = 1;');
+    final bodies = <Map<String, dynamic>>[];
+    final actions = [
+      '{"action":"finish","summary":"done"}',
+    ];
+    ModelClient client() => ModelClient(
+      client: MockClient((request) async {
+        bodies.add(
+          Map<String, dynamic>.from(
+            jsonDecode(request.body) as Map<String, dynamic>,
+          ),
+        );
+        return http.Response(
+          jsonEncode({
+            'choices': [
+              {
+                'message': {'content': actions.removeAt(0)},
+                'finish_reason': 'stop',
+              },
+            ],
+          }),
+          200,
+        );
+      }),
+    );
+    final engine = AgentTaskEngine(
+      profile: ModelProfile(
+        id: 'agent',
+        name: 'Agent',
+        provider: 'test',
+        model: 'model',
+        endpoint: 'https://example.test/v1/chat/completions',
+        parameters: const {'temperature': 0.1, 'max_tokens': 8192},
+      ),
+      store: store,
+      git: AgentGit(),
+      root: root,
+      apiKey: '',
+      onEvent: (_) {},
+      approve: (_, _) async => true,
+      clientFactory: client,
+      hooks: NoHooks(),
+      commands: FakeCommands(),
+    );
+    await engine.run('Done', const AgentRunOptions());
+    expect(bodies.single['max_tokens'], AgentTaskEngine.agentMaxTokens);
   });
 }

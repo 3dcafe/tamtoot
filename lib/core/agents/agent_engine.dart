@@ -95,14 +95,23 @@ class AgentTaskEngine {
   static const protocol = '''
 You are an autonomous coding agent in Tamtoot (mobile IDE: no terminal, builds, tests, or shell).
 Never run or ask for runtime checks; verify by reading files and say so in the finish summary.
-FIRST RESPONSE: one say with a short plan only (goal, files to inspect, risks). No tools yet.
-After that, use tools. Do not emit another say until after a tool result, and only for a short status.
-Repeating say without a tool wastes tokens and is a mistake — prefer read_files / read_file / search_files / replace_in_file / finish.
+Work quickly and make progress every iteration.
+Do not spend an iteration explaining a plan. Start with the most useful tool action.
 Reply with exactly ONE JSON object. No markdown fences, no commentary outside JSON.
+
+Investigation rules:
+- search_files is literal text search. Search concrete symbols/identifiers ("TextField", "AgentDialog", "_running"), not natural-language descriptions.
+- Maximum 2 consecutive search_files calls.
+- When a search returns plausible implementation files, READ THEM NEXT.
+- Prefer read_files with up to 4 files.
+- Never repeat a search with slightly different wording.
+- If you already have the edit location, edit immediately.
+- After editing, read the changed area once and finish.
+
 Actions:
 - say: {"action":"say","text":"..."}
 - list_files: {"action":"list_files","path":"relative/folder"}
-- search_files: {"action":"search_files","query":"symbol or text","path":"optional/relative/folder"}
+- search_files: {"action":"search_files","query":"literal symbol or text","path":"optional/relative/folder"}
 - read_file: {"action":"read_file","path":"relative/file","startLine":1,"lineCount":160}
 - read_files: {"action":"read_files","paths":["a.dart","b.dart"],"startLine":1,"lineCount":160}
 - replace_in_file: {"action":"replace_in_file","path":"relative/file","oldText":"exact existing text","newText":"replacement text"}
@@ -110,11 +119,11 @@ Actions:
 - mcp_call: {"action":"mcp_call","server":"name","tool":"tool_name","arguments":{}}
 - finish: {"action":"finish","summary":"..."}
 Relative paths only. Never touch .git or .tamtoot.
-Use the one-time project index + search_files; then batch relevant files with read_files (up to 4) instead of many single read_file calls.
 Reuse retained excerpts — do not re-read unchanged files.
-When Active file context already has the edit site, call replace_in_file immediately.
-After a small edit, re-read the changed area, then finish.
 ''';
+
+  /// Agent replies are one JSON action; large completion budgets only waste latency.
+  static const int agentMaxTokens = 1200;
 
   Future<AgentRunResult> run(String task, AgentRunOptions options) async {
     if (task.trim().isEmpty) {
@@ -173,13 +182,22 @@ After a small edit, re-read the changed area, then finish.
     }
     final transcript = <String>[
       'Task: $task',
-      'Phase: analysis. Your first response must be a say action containing only the task analysis and implementation plan. Do not use a tool yet.',
+      'Phase: implementation. Start with the most useful tool action. Prefer tools over say.',
       if (promptHook.context.isNotEmpty) 'Hook context:\n${promptHook.context}',
     ];
     final activeFiles = <String, String>{};
     final observations = <String, String>{};
+    _rememberObservation(
+      observations,
+      'Project index',
+      await _projectIndex(),
+    );
     var mistakes = 0;
     var consecutiveSays = 0;
+    var consecutiveSearches = 0;
+    var requireReadAfterSearch = false;
+    final recentSearchQueries = <String>[];
+    final agentProfile = _withAgentTokenBudget(profile);
     for (var iteration = 1; iteration <= options.maxIterations; iteration++) {
       if (_stopped) {
         throw const ModelApiException('Agent stopped.');
@@ -192,10 +210,10 @@ After a small edit, re-read the changed area, then finish.
       try {
         final userPrompt = _buildPrompt(transcript, activeFiles, observations);
         reply = await client.send(
-          profile,
+          agentProfile,
           {
             'systemPrompt': [
-              profile.systemPrompt,
+              agentProfile.systemPrompt,
               protocol,
               if (mcp != null && mcp!.tools.isNotEmpty)
                 'Available MCP tools:\n${mcp!.describe()}',
@@ -247,44 +265,27 @@ After a small edit, re-read the changed area, then finish.
         switch (name) {
           case 'say':
             final text = _string(action, 'text');
-            if (iteration > 1) {
-              consecutiveSays++;
-              if (consecutiveSays >= 2) {
-                throw const ModelApiException(
-                  'Repeated say without tools wastes tokens. '
-                  'Emit read_files, read_file, search_files, replace_in_file, write_file, or finish now.',
-                );
-              }
+            consecutiveSays++;
+            if (consecutiveSays >= 2) {
+              throw const ModelApiException(
+                'Repeated say without tools wastes tokens. '
+                'Emit read_files, read_file, search_files, replace_in_file, write_file, or finish now.',
+              );
             }
             onEvent(AgentEvent('say', text));
-            if (iteration == 1) {
-              _replaceNote(
-                transcript,
-                'Assistant analysis:',
-                'Assistant analysis: ${_bounded(text, 1200)}',
-              );
-              transcript[1] =
-                  'Phase: implementation. Prefer tools over say. '
-                  'Select only relevant files; inspect before editing.';
-              _rememberObservation(
-                observations,
-                'Project index',
-                await _projectIndex(),
-              );
-            } else {
-              _replaceNote(
-                transcript,
-                'Assistant update:',
-                'Assistant update: ${_bounded(text, 600)}',
-              );
-              _replaceNote(
-                transcript,
-                'Host note:',
-                'Host note: Next step must be a tool or finish — not another say.',
-              );
-            }
+            _replaceNote(
+              transcript,
+              'Assistant update:',
+              'Assistant update: ${_bounded(text, 600)}',
+            );
+            _replaceNote(
+              transcript,
+              'Host note:',
+              'Host note: Next step must be a tool or finish — not another say.',
+            );
           case 'list_files':
             consecutiveSays = 0;
+            consecutiveSearches = 0;
             final path = _path(action['path'] ?? '', allowEmpty: true);
             final files = await store.listFiles(path);
             final visible = files.where(_useful).take(120).join('\n');
@@ -297,14 +298,30 @@ After a small edit, re-read the changed area, then finish.
             _compactProjectIndex(observations);
           case 'search_files':
             consecutiveSays = 0;
+            if (requireReadAfterSearch || consecutiveSearches >= 2) {
+              throw const ModelApiException(
+                'Stop searching. Read the most relevant files from previous '
+                'results with read_files (up to 4 paths), or list_files / edit / finish.',
+              );
+            }
             final query = _string(action, 'query').trim();
             if (query.length < 2) {
               throw const ModelApiException(
                 'search_files query must contain at least 2 characters.',
               );
             }
+            if (recentSearchQueries.any(
+              (previous) => _similarSearchQuery(previous, query),
+            )) {
+              throw const ModelApiException(
+                'Stop searching. That query is too similar to a previous search. '
+                'Read the most relevant files from previous results.',
+              );
+            }
             final path = _path(action['path'] ?? '', allowEmpty: true);
             final result = await _searchFiles(query, path);
+            recentSearchQueries.add(query);
+            consecutiveSearches++;
             onEvent(AgentEvent('tool', 'Searched project for “$query”'));
             _rememberObservation(
               observations,
@@ -312,14 +329,28 @@ After a small edit, re-read the changed area, then finish.
               'Tool search_files result for "$query":\n$result',
             );
             _compactProjectIndex(observations);
-            _replaceNote(
-              transcript,
-              'Host note:',
-              'Host note: After search, batch relevant files with read_files '
-                  '(up to 4 paths) instead of many single read_file calls.',
-            );
+            final hits = _implementationPathsFromSearch(result);
+            if (hits.isNotEmpty) {
+              requireReadAfterSearch = true;
+              _replaceNote(
+                transcript,
+                'Host note:',
+                'Host note: Search returned implementation files '
+                    '(${hits.join(', ')}). READ THEM NEXT with read_files. '
+                    'Do not refine the search.',
+              );
+            } else {
+              _replaceNote(
+                transcript,
+                'Host note:',
+                'Host note: After search, batch relevant files with read_files '
+                    '(up to 4 paths) instead of many single read_file calls.',
+              );
+            }
           case 'read_file':
             consecutiveSays = 0;
+            consecutiveSearches = 0;
+            requireReadAfterSearch = false;
             final path = _path(action['path']);
             final bytes = await store.readBytes(path);
             if (bytes.length > 1024 * 1024) {
@@ -351,6 +382,8 @@ After a small edit, re-read the changed area, then finish.
             }
           case 'read_files':
             consecutiveSays = 0;
+            consecutiveSearches = 0;
+            requireReadAfterSearch = false;
             final rawPaths = action['paths'];
             if (rawPaths is! List || rawPaths.isEmpty) {
               throw const ModelApiException(
@@ -400,6 +433,7 @@ After a small edit, re-read the changed area, then finish.
             );
           case 'replace_in_file':
             consecutiveSays = 0;
+            consecutiveSearches = 0;
             final path = _path(action['path']);
             final oldText = _string(action, 'oldText');
             final newText = action['newText'];
@@ -447,6 +481,7 @@ After a small edit, re-read the changed area, then finish.
             );
           case 'write_file':
             consecutiveSays = 0;
+            consecutiveSearches = 0;
             final path = _path(action['path']);
             final content = _string(action, 'content');
             if (utf8.encode(content).length > 1024 * 1024) {
@@ -483,6 +518,7 @@ After a small edit, re-read the changed area, then finish.
             );
           case 'mcp_call':
             consecutiveSays = 0;
+            consecutiveSearches = 0;
             final registry = mcp;
             if (registry == null) {
               throw const ModelApiException('No MCP servers are connected.');
@@ -676,7 +712,7 @@ After a small edit, re-read the changed area, then finish.
     const maxPaths = 120;
     const maxCharacters = 3500;
     final out = StringBuffer(
-      'Project file index (one-time). Prefer search_files afterward:\n',
+      'Project file index (one-time). Prefer literal search_files for symbols, then read_files:\n',
     );
     var included = 0;
     for (final path in paths.take(maxPaths)) {
@@ -702,7 +738,62 @@ After a small edit, re-read the changed area, then finish.
         .length;
     observations['Project index'] =
         'Project file index already provided once (~$lines paths). '
-        'Prefer search_files or list_files; do not re-list the tree.';
+        'Prefer literal search_files or list_files; do not re-list the tree.';
+  }
+
+  ModelProfile _withAgentTokenBudget(ModelProfile source) {
+    final params = Map<String, dynamic>.from(source.parameters);
+    final existing = params['max_tokens'];
+    final capped = existing is num
+        ? existing.clamp(1, agentMaxTokens).toInt()
+        : agentMaxTokens;
+    params['max_tokens'] = capped;
+    return ModelProfile(
+      id: source.id,
+      name: source.name,
+      provider: source.provider,
+      model: source.model,
+      systemPrompt: source.systemPrompt,
+      userTemplate: source.userTemplate,
+      parameters: params,
+      apiFormat: source.apiFormat,
+      endpoint: source.endpoint,
+    );
+  }
+
+  static String _normalizeSearchQuery(String query) => query
+      .toLowerCase()
+      .replaceAll(RegExp(r'[^a-z0-9_\.]+'), ' ')
+      .replaceAll(RegExp(r'\s+'), ' ')
+      .trim();
+
+  static bool _similarSearchQuery(String a, String b) {
+    final na = _normalizeSearchQuery(a);
+    final nb = _normalizeSearchQuery(b);
+    if (na.isEmpty || nb.isEmpty) return false;
+    if (na == nb) return true;
+    if (na.contains(nb) || nb.contains(na)) return true;
+    final ta = na.split(' ').where((token) => token.length >= 2).toSet();
+    final tb = nb.split(' ').where((token) => token.length >= 2).toSet();
+    if (ta.isEmpty || tb.isEmpty) return false;
+    final intersection = ta.intersection(tb).length;
+    final smaller = ta.length < tb.length ? ta.length : tb.length;
+    return intersection >= 2 && intersection / smaller >= 0.6;
+  }
+
+  static List<String> _implementationPathsFromSearch(String result) {
+    if (result.startsWith('No matches')) return const [];
+    final found = <String>[];
+    final pattern = RegExp(
+      r'^([\w./+-]+\.(?:dart|kt|swift|ts|tsx|js|jsx|java|go|rs|py|cs|cpp|h|m|mm))(?::|\s|\()',
+      multiLine: true,
+    );
+    for (final match in pattern.allMatches(result)) {
+      final path = match.group(1)!;
+      if (!found.contains(path)) found.add(path);
+      if (found.length >= 4) break;
+    }
+    return found;
   }
 
   Future<String> _searchFiles(String query, String directory) async {

@@ -184,7 +184,7 @@ class ModelClient {
         'stream': false,
       },
       'anthropic' => {
-        'max_tokens': 4096,
+        'max_tokens': 1200,
         ...p.parameters,
         'model': p.model,
         if (system.isNotEmpty) 'system': system,

@@ -273,7 +273,7 @@ class _ModelProfilesDialogState extends State<ModelProfilesDialog> {
         model.text = 'gpt-6.1-sol';
         parameters.text = const JsonEncoder.withIndent(
           '  ',
-        ).convert({'temperature': 0.1, 'max_tokens': 8192});
+        ).convert({'temperature': 0.1, 'max_tokens': 1200});
       }
       detectedModels = const [];
       ollamaModels = const [];

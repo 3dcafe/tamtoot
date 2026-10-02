@@ -213,7 +213,7 @@ void main() {
           expect(request.headers['x-api-key'], 'test-key');
           expect(request.headers['anthropic-version'], '2023-06-01');
           expect(request.headers.containsKey('authorization'), false);
-          expect(jsonDecode(request.body)['max_tokens'], 4096);
+          expect(jsonDecode(request.body)['max_tokens'], 1200);
           return http.Response(
             jsonEncode({
               'content': [
