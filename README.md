@@ -126,7 +126,7 @@ HTTP 401 and 403 responses are reported as authentication or permission errors.
 
 Commit and push are separate operations: a failed push leaves the local commit available for retry. The Git view shows progress and errors; Explorer indicators refresh after successful operations. Push verifies the remote's unpack/ref status, refuses non-fast-forward updates and sets the current branch's upstream after success. No new dependencies or system Git executable are required by the application.
 
-File selection is whole-file staging for one commit, not a persistent staging UI. The client maintains a standard Git v2 index and refuses to overwrite existing staging from another client. Automatic merge covers non-conflicting whole-file changes; an interactive conflict editor is not implemented. Advanced indexes, detached HEAD commits, symlink/submodule edits, hooks, signing and packed object databases are not supported. Private `.tamtoot` metadata is excluded; shared HTTP requests and their project environment are visible to Git. Full `.gitignore` semantics are still not implemented: review new files explicitly before selecting them. Web push additionally depends on the remote host allowing browser requests (CORS).
+File selection is whole-file staging for one commit, not a persistent staging UI. The client reads standard Git v2/v3 indexes and packed object databases produced by Git for Windows and macOS Git, and writes a portable v2 index. Existing staging from another client is never overwritten. Automatic merge covers non-conflicting whole-file changes; an interactive conflict editor is not implemented. Index v4, split/sparse indexes, detached HEAD commits, symlink/submodule edits, hooks and signing are not supported. Repository `.gitignore` files and `.git/info/exclude` filter untracked files; native desktop traversal prunes ignored directories before reading them. Global `core.excludesFile` is not applied. Private `.tamtoot` metadata is excluded; shared HTTP requests and their project environment are visible to Git. Web push additionally depends on the remote host allowing browser requests (CORS).
 
 ## Compare and discard changes
 
@@ -257,7 +257,7 @@ The editor virtualizes visible lines with overscan. Storage currently uses an in
 
 Platform file access differs: desktop supports local files/folders; Android uses system document selection and SAF export; Web file/folder capabilities depend on browser support and permission; the iOS export provider remains incomplete. macOS may require reopening a sandbox-protected folder after restart because security-scoped bookmarks are not implemented.
 
-The existing Git client has limitations around staging, ignore rules, packed/shallow histories and repository layouts. Unsupported Git reads are reported in Explorer; ordinary file browsing remains available. Kanban currently creates and tracks worktrees, but automated dependency scheduling, inline diff review, auto-commit/PR and persistent multi-agent teams remain future work.
+The existing Git client has limitations around advanced staging, ignore rules, shallow histories and linked or bare repository layouts. Unsupported Git reads are reported in Explorer; ordinary file browsing remains available. Kanban currently creates and tracks worktrees, but automated dependency scheduling, inline diff review, auto-commit/PR and persistent multi-agent teams remain future work.
 
 ## Architecture and documentation
 

@@ -402,25 +402,26 @@ class HttpGitService
       final commit = parseCommit((await db.read(head)).content);
       await _walkTree(db, commit.tree, '', headFiles);
     }
-    final workFiles = <String, String>{};
-    final paths = await store.listFiles('');
-    for (final path in paths) {
-      if (_internal(path)) continue;
-      final bytes = await store.readBytes(path);
-      workFiles[path] = hashObject(GitObjectType.blob, bytes);
-    }
     final entries = <GitStatusEntry>[];
-    final all = {...headFiles.keys, ...workFiles.keys};
-    for (final path in all.toList()..sort()) {
+    for (final path in headFiles.keys.toList()..sort()) {
       if (_internal(path)) continue;
       final headHash = headFiles[path];
-      final workHash = workFiles[path];
-      if (headHash == null && workHash != null) {
-        entries.add(GitStatusEntry('?', '?', path));
-      } else if (headHash != null && workHash == null) {
+      if (!await store.exists(path)) {
         entries.add(GitStatusEntry('D', ' ', path));
-      } else if (headHash != workHash) {
+        continue;
+      }
+      final workHash = hashObject(
+        GitObjectType.blob,
+        await store.readBytes(path),
+      );
+      if (headHash != workHash) {
         entries.add(GitStatusEntry(' ', 'M', path));
+      }
+    }
+    final workFiles = await store.listGitWorkFiles();
+    for (final path in workFiles..sort()) {
+      if (!_internal(path) && !headFiles.containsKey(path)) {
+        entries.add(GitStatusEntry('?', '?', path));
       }
     }
     return entries;
@@ -436,7 +437,7 @@ class HttpGitService
     final parent = await db.readHead();
     final files = await _headEntries(db, parent);
     await _checkIndex(store, files);
-    final available = {...files.keys, ...await store.listFiles('')};
+    final available = {...files.keys, ...await store.listGitWorkFiles()};
     for (final path in available) {
       if (_internal(path)) continue;
       if (!paths.any((p) => p == '.' || path == p || path.startsWith('$p/'))) {

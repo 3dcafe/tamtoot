@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'package:http/http.dart' as http;
 
 import '../core/git/git_service.dart';
+import '../core/git/git_ignore.dart';
 import '../core/git/git_store.dart';
 import '../core/git/http_git_service.dart';
 import 'git_shared.dart';
@@ -45,6 +46,20 @@ final class FileGitRepositoryStore extends GitRepositoryStore {
   Future<Uint8List> readBytes(String path) => _file(path).readAsBytes();
 
   @override
+  Future<int> byteLength(String path) => _file(path).length();
+
+  @override
+  Future<Uint8List> readByteRange(String path, int start, int end) async {
+    final input = await _file(path).open();
+    try {
+      await input.setPosition(start);
+      return input.read(end - start);
+    } finally {
+      await input.close();
+    }
+  }
+
+  @override
   Future<void> writeBytes(String path, List<int> bytes) async {
     final file = _file(path);
     await file.parent.create(recursive: true);
@@ -67,12 +82,51 @@ final class FileGitRepositoryStore extends GitRepositoryStore {
     final base = dir.isEmpty ? root : _dir(dir);
     if (!await base.exists()) return const [];
     final out = <String>[];
+    final includeMetadata =
+        dir.startsWith('.git/') || dir.startsWith('.tamtoot/');
     await for (final entity in base.list(recursive: true, followLinks: false)) {
       if (entity is! File) continue;
       final rel = _relative(entity.path);
-      if (rel == '.git' || rel.startsWith('.git/')) continue;
+      if (!includeMetadata && (rel == '.git' || rel.startsWith('.git/'))) {
+        continue;
+      }
       out.add(rel);
     }
+    return out;
+  }
+
+  @override
+  Future<List<String>> listGitWorkFiles() async {
+    final baseIgnore = GitIgnore();
+    final infoExclude = _file('.git/info/exclude');
+    if (await infoExclude.exists()) {
+      baseIgnore.add(await infoExclude.readAsString());
+    }
+    final out = <String>[];
+
+    Future<void> walk(
+      Directory directory,
+      String relative,
+      GitIgnore inherited,
+    ) async {
+      final ignore = inherited.copy();
+      final ignoreFile = File.fromUri(directory.uri.resolve('.gitignore'));
+      if (await ignoreFile.exists()) {
+        ignore.add(await ignoreFile.readAsString(), base: relative);
+      }
+      await for (final entity in directory.list(followLinks: false)) {
+        final path = _relative(entity.path);
+        if (relative.isEmpty && path == '.git') continue;
+        if (entity is Directory) {
+          if (ignore.ignores(path, directory: true)) continue;
+          await walk(entity, path, ignore);
+        } else if (entity is File && !ignore.ignores(path, directory: false)) {
+          out.add(path);
+        }
+      }
+    }
+
+    await walk(root, '', baseIgnore);
     return out;
   }
 

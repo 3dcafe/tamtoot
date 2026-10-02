@@ -3,18 +3,19 @@ import 'dart:typed_data';
 import 'git_objects.dart';
 import 'git_service.dart';
 
-/// Minimal ordinary index v2 support. Refuse specialized indexes rather than
+/// Ordinary index v2/v3 support. Refuse specialized indexes rather than
 /// discarding conflicts, sparse checkout flags or someone else's staging.
 Map<String, TreeEntry> readGitIndex(Uint8List bytes) {
   if (bytes.length < 32 || ascii.decode(bytes.sublist(0, 4)) != 'DIRC') {
     throw GitException('Unsupported Git index');
   }
   final data = ByteData.sublistView(bytes);
-  if (data.getUint32(4) != 2 ||
+  final version = data.getUint32(4);
+  if ((version != 2 && version != 3) ||
       hashHex(bytes.sublist(0, bytes.length - 20)) !=
           bytesToHex(bytes.sublist(bytes.length - 20))) {
     throw GitException(
-      'Unsupported or corrupt Git index. Use a fresh clone in Tamtoot.',
+      'Unsupported or corrupt Git index. Tamtoot supports standard index v2/v3.',
     );
   }
   var offset = 12;
@@ -25,9 +26,11 @@ Map<String, TreeEntry> readGitIndex(Uint8List bytes) {
       throw GitException('Truncated Git index');
     }
     final flags = data.getUint16(offset + 60);
-    if (flags & 0xf000 != 0) {
+    final stage = (flags >> 12) & 0x3;
+    final extended = (flags & 0x4000) != 0;
+    if (stage != 0 || extended) {
       throw GitException(
-        'Resolve staged conflicts or special index flags with your other Git client first.',
+        'Resolve index conflicts, sparse entries or intent-to-add flags with your other Git client first.',
       );
     }
     final mode = data.getUint32(offset + 24).toRadixString(8);

@@ -155,7 +155,12 @@ final class WebDirectoryStore extends GitRepositoryStore {
   Future<List<String>> listFiles(String dir) async {
     final handle = await _dir(dir);
     final out = <String>[];
-    await _walk(handle, dir, out, includeMetadata: dir.startsWith('.tamtoot/'));
+    await _walk(
+      handle,
+      dir,
+      out,
+      includeMetadata: dir.startsWith('.tamtoot/') || dir.startsWith('.git/'),
+    );
     return out;
   }
 

@@ -85,11 +85,43 @@ void main() {
       );
       await service.setIdentity(work.uri, 'Test Author', 'test@example.com');
       final special = 'folder/тест #1%.txt';
+      await store.writeText(
+        '.gitignore',
+        '.dart_tool/\n*.log\n!important.log\n',
+      );
       await store.writeText(special, 'first');
-      (await service.add(work.uri, paths: [special])).ensureOk();
+      (await service.add(work.uri, paths: [special, '.gitignore'])).ensureOk();
       (await service.commit(work.uri, 'Initial')).ensureOk();
       expect(await native(['status', '--porcelain'], at: work.path), isEmpty);
+      await store.writeText('.dart_tool/flutter_build/generated.stamp', 'x');
+      await store.writeText('debug.log', 'x');
+      expect(await service.statusEntries(work.uri), isEmpty);
+      await store.writeText('important.log', 'keep');
+      expect(
+        (await service.statusEntries(work.uri)).map((entry) => entry.path),
+        ['important.log'],
+      );
+      await store.delete('important.log');
       (await service.push(work.uri, setUpstream: true)).ensureOk();
+      // A normal desktop Git client compacts clone history into pack files.
+      // Tamtoot must keep reading HEAD/trees and detecting edits afterwards.
+      await native(['gc', '--prune=now'], at: work.path);
+      await native(['update-index', '--index-version=3'], at: work.path);
+      await store.writeText(special, 'after native gc');
+      expect(
+        await service.statusEntries(work.uri),
+        contains(
+          isA<GitStatusEntry>()
+              .having((entry) => entry.path, 'path', special)
+              .having((entry) => entry.workTree, 'workTree', 'M'),
+        ),
+      );
+      (await service.add(work.uri, paths: [special])).ensureOk();
+      (await service.commit(
+        work.uri,
+        'commit from packed checkout',
+      )).ensureOk();
+      expect(await native(['status', '--porcelain'], at: work.path), isEmpty);
       for (final content in ['second', 'third']) {
         await store.writeText(special, content);
         (await service.add(work.uri, paths: [special])).ensureOk();
@@ -100,7 +132,7 @@ void main() {
       await native(['fsck', '--strict'], at: remote);
       expect(
         (await native(['rev-list', '--count', 'main'], at: remote)).trim(),
-        '3',
+        '4',
       );
       expect(await native(['show', 'main:$special'], at: remote), 'third');
       expect(

@@ -11,6 +11,110 @@ typedef GitInflaterAt =
 
 typedef GitDeflater = Uint8List Function(List<int> data);
 
+/// Version-2 pack index used by ordinary desktop Git clones.
+/// Object names are kept in the original sorted byte table and looked up with
+/// binary search so large repositories do not allocate one String per object.
+final class GitPackIndex {
+  GitPackIndex._(this.bytes, this.count, this._offsets, this.packChecksum);
+
+  final Uint8List bytes;
+  final int count;
+  final List<int> _offsets;
+  final String packChecksum;
+
+  int? offsetForHash(String hash) {
+    final target = hexToBytes(hash);
+    var low = 0, high = count - 1;
+    const namesStart = 8 + 256 * 4;
+    while (low <= high) {
+      final middle = (low + high) >> 1;
+      final start = namesStart + middle * 20;
+      var comparison = 0;
+      for (var i = 0; i < 20; i++) {
+        comparison = bytes[start + i].compareTo(target[i]);
+        if (comparison != 0) break;
+      }
+      if (comparison == 0) return _offsetAt(middle);
+      if (comparison < 0) {
+        low = middle + 1;
+      } else {
+        high = middle - 1;
+      }
+    }
+    return null;
+  }
+
+  int endForOffset(int offset, int packLength) {
+    var low = 0, high = _offsets.length;
+    while (low < high) {
+      final middle = (low + high) >> 1;
+      if (_offsets[middle] <= offset) {
+        low = middle + 1;
+      } else {
+        high = middle;
+      }
+    }
+    return low < _offsets.length ? _offsets[low] : packLength - 20;
+  }
+
+  int _offsetAt(int objectIndex) {
+    const namesStart = 8 + 256 * 4;
+    final offsetsStart = namesStart + count * 20 + count * 4;
+    final data = ByteData.sublistView(bytes);
+    final raw = data.getUint32(offsetsStart + objectIndex * 4);
+    if ((raw & 0x80000000) == 0) return raw;
+    final largeIndex = raw & 0x7fffffff;
+    final largeStart = offsetsStart + count * 4;
+    return data.getUint64(largeStart + largeIndex * 8);
+  }
+}
+
+GitPackIndex readGitPackIndex(Uint8List bytes) {
+  if (bytes.length < 8 + 256 * 4 + 40) {
+    throw const FormatException('Pack index is truncated');
+  }
+  final data = ByteData.sublistView(bytes);
+  if (data.getUint32(0) != 0xff744f63 || data.getUint32(4) != 2) {
+    throw const FormatException('Unsupported Git pack index version');
+  }
+  final count = data.getUint32(8 + 255 * 4);
+  const namesStart = 8 + 256 * 4;
+  final offsetsStart = namesStart + count * 20 + count * 4;
+  if (offsetsStart + count * 4 + 40 > bytes.length) {
+    throw const FormatException('Pack index tables are truncated');
+  }
+  final regularOffsets = <int>[];
+  var largestLargeIndex = -1;
+  for (var i = 0; i < count; i++) {
+    final raw = data.getUint32(offsetsStart + i * 4);
+    if ((raw & 0x80000000) == 0) {
+      regularOffsets.add(raw);
+    } else {
+      final largeIndex = raw & 0x7fffffff;
+      if (largeIndex > largestLargeIndex) largestLargeIndex = largeIndex;
+    }
+  }
+  final largeStart = offsetsStart + count * 4;
+  if (largeStart + (largestLargeIndex + 1) * 8 + 40 > bytes.length) {
+    throw const FormatException('Pack index large offsets are truncated');
+  }
+  for (var i = 0; i <= largestLargeIndex; i++) {
+    regularOffsets.add(data.getUint64(largeStart + i * 8));
+  }
+  regularOffsets.sort();
+  final packChecksumAt = bytes.length - 40;
+  final expectedIndexChecksum = bytesToHex(bytes.sublist(bytes.length - 20));
+  if (hashHex(bytes.sublist(0, bytes.length - 20)) != expectedIndexChecksum) {
+    throw const FormatException('Pack index checksum mismatch');
+  }
+  return GitPackIndex._(
+    bytes,
+    count,
+    regularOffsets,
+    bytesToHex(bytes.sublist(packChecksumAt, packChecksumAt + 20)),
+  );
+}
+
 final class UnpackedObject {
   UnpackedObject(this.type, this.data, this.hash);
   final GitObjectType type;
