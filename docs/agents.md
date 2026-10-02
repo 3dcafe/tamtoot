@@ -174,6 +174,13 @@ reconstructing an entire large file. Older context is still evicted when the
 combined limits are reached, preventing every iteration from resending all
 attachments and every file inspected earlier.
 
+Before the first edit, a small-task investigation budget applies by default: at
+most three `search_files`, three file reads, and six model iterations. After two
+searches and two reads without an edit, the host injects a progress note urging
+`replace_in_file`, `write_file`, or one final targeted `read_file`. When the
+budget is exhausted, further search, list, and batch read actions are
+soft-rejected; targeted reads and edits remain allowed.
+
 ## YOLO Mode
 
 YOLO Mode automatically approves agent writes, commands and MCP tool calls. The

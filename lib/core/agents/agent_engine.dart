@@ -16,11 +16,17 @@ class AgentRunOptions {
     this.timeout = const Duration(minutes: 10),
     this.maxConsecutiveMistakes = 3,
     this.maxIterations = 40,
+    this.maxSearchesBeforeFirstEdit = 3,
+    this.maxReadsBeforeFirstEdit = 3,
+    this.maxInvestigationIterationsBeforeFirstEdit = 6,
   });
 
   final bool yolo;
   final Duration timeout;
   final int maxConsecutiveMistakes, maxIterations;
+  final int maxSearchesBeforeFirstEdit;
+  final int maxReadsBeforeFirstEdit;
+  final int maxInvestigationIterationsBeforeFirstEdit;
 }
 
 class AgentEvent {
@@ -111,6 +117,13 @@ Investigation rules:
 - If you already have the edit location, edit immediately.
 - After editing, read the changed area once and finish.
 
+Implementation rules:
+- Once the root cause is identified, STOP investigating and implement the smallest safe fix.
+- Do not search for alternative implementations after the relevant call chain is understood.
+- Prefer making a reasonable localized fix over fully mapping the architecture.
+- If you have read both the caller and the failing implementation, your next action should normally be replace_in_file.
+- Additional searches after root cause identification are allowed only when required to make the edit safely.
+
 Actions:
 - say: {"action":"say","text":"..."}
 - list_files: {"action":"list_files","path":"relative/folder"}
@@ -137,6 +150,11 @@ Reuse retained excerpts — do not re-read unchanged files.
   static const int maxActiveFiles = 2;
   static const int maxActiveCharacters = 8000;
   static const int maxExcerptCharacters = 3000;
+
+  static const investigationBudgetPrompt =
+      'Investigation budget reached. You have enough context.\n'
+      'Your next action must be replace_in_file, write_file,\n'
+      'or one final targeted read required for the edit.';
 
   Future<AgentRunResult> run(String task, AgentRunOptions options) async {
     if (task.trim().isEmpty) {
@@ -211,12 +229,24 @@ Reuse retained excerpts — do not re-read unchanged files.
     var requireReadAfterSearch = false;
     final completedSearches = <_CompletedSearch>[];
     final focusLinesByPath = <String, List<int>>{};
+    var searchesBeforeEdit = 0;
+    var filesReadBeforeEdit = 0;
+    var hasEdited = false;
     final agentProfile = _withAgentTokenBudget(profile);
     for (var iteration = 1; iteration <= options.maxIterations; iteration++) {
       if (_stopped) {
         throw const ModelApiException('Agent stopped.');
       }
       onEvent(AgentEvent('iteration', 'Iteration $iteration'));
+      if (!hasEdited) {
+        _injectInvestigationBudget(
+          transcript,
+          searches: searchesBeforeEdit,
+          filesRead: filesReadBeforeEdit,
+          iteration: iteration,
+          options: options,
+        );
+      }
       final client =
           clientFactory?.call() ?? ModelClient(timeout: options.timeout);
       _active = client;
@@ -259,6 +289,22 @@ Reuse retained excerpts — do not re-read unchanged files.
       final action = _decodeAction(reply.text);
       final name = action['action'];
       try {
+        if (!hasEdited &&
+            _blocksPreEditInvestigation(
+              name,
+              searches: searchesBeforeEdit,
+              filesRead: filesReadBeforeEdit,
+              iteration: iteration,
+              options: options,
+            )) {
+          _softRejectSearch(
+            transcript,
+            name,
+            'Investigation budget reached ($name blocked).\n'
+                '$investigationBudgetPrompt',
+          );
+          continue;
+        }
         if (name != 'say' && name != 'finish') {
           final pre = await _hook('PreToolUse', {
             'toolName': name,
@@ -408,6 +454,7 @@ Reuse retained excerpts — do not re-read unchanged files.
                     'most relevant 1-2 files. Prefer read_files only when needed.',
               );
             }
+            searchesBeforeEdit++;
           case 'read_file':
             consecutiveSays = 0;
             consecutiveSearches = 0;
@@ -446,6 +493,7 @@ Reuse retained excerpts — do not re-read unchanged files.
                 'Host note: File context is available. Prefer replace_in_file or finish over another say.',
               );
             }
+            filesReadBeforeEdit++;
           case 'read_files':
             consecutiveSays = 0;
             consecutiveSearches = 0;
@@ -502,6 +550,7 @@ Reuse retained excerpts — do not re-read unchanged files.
               'Host note:',
               'Host note: Relevant excerpts are in context. Prefer replace_in_file or finish over another say.',
             );
+            filesReadBeforeEdit += rawPaths.length;
           case 'replace_in_file':
             consecutiveSays = 0;
             consecutiveSearches = 0;
@@ -550,6 +599,7 @@ Reuse retained excerpts — do not re-read unchanged files.
             transcript.add(
               'Tool replace_in_file result: edited $path successfully. Read the changed area before finishing.',
             );
+            hasEdited = true;
           case 'write_file':
             consecutiveSays = 0;
             consecutiveSearches = 0;
@@ -577,6 +627,7 @@ Reuse retained excerpts — do not re-read unchanged files.
             transcript.add(
               'Tool write_file result: wrote $path successfully. Inspect it before finishing.',
             );
+            hasEdited = true;
           case 'run_command':
             transcript.add(
               'run_command is unavailable: Tamtoot is a mobile IDE without a terminal, interpreter, debugger, build runner, or test runner. Inspect changed files and finish without executing commands.',
@@ -909,6 +960,91 @@ Reuse retained excerpts — do not re-read unchanged files.
   ) {
     onEvent(AgentEvent('denied', '$tool blocked'));
     _replaceNote(transcript, 'Host note:', 'Host note: $message');
+  }
+
+  void _injectInvestigationBudget(
+    List<String> transcript, {
+    required int searches,
+    required int filesRead,
+    required int iteration,
+    required AgentRunOptions options,
+  }) {
+    if (!_shouldPromptInvestigationBudget(
+      searches: searches,
+      filesRead: filesRead,
+      iteration: iteration,
+      options: options,
+    )) {
+      return;
+    }
+    _replaceNote(
+      transcript,
+      'Investigation budget:',
+      'Investigation budget: $investigationBudgetPrompt',
+    );
+  }
+
+  static bool _investigationExhausted({
+    required int searches,
+    required int filesRead,
+    required int iteration,
+    required AgentRunOptions options,
+  }) {
+    return searches >= options.maxSearchesBeforeFirstEdit ||
+        filesRead >= options.maxReadsBeforeFirstEdit ||
+        iteration > options.maxInvestigationIterationsBeforeFirstEdit;
+  }
+
+  static bool _shouldPromptInvestigationBudget({
+    required int searches,
+    required int filesRead,
+    required int iteration,
+    required AgentRunOptions options,
+  }) {
+    if (_investigationExhausted(
+      searches: searches,
+      filesRead: filesRead,
+      iteration: iteration,
+      options: options,
+    )) {
+      return true;
+    }
+    return searches >= 2 && filesRead >= 2;
+  }
+
+  static bool _blocksPreEditInvestigation(
+    String action, {
+    required int searches,
+    required int filesRead,
+    required int iteration,
+    required AgentRunOptions options,
+  }) {
+    if (action == 'read_file' ||
+        action == 'replace_in_file' ||
+        action == 'write_file' ||
+        action == 'finish' ||
+        action == 'mcp_call') {
+      return false;
+    }
+    if (action == 'search_files' &&
+        searches >= options.maxSearchesBeforeFirstEdit) {
+      return true;
+    }
+    if (action == 'read_files' && filesRead >= options.maxReadsBeforeFirstEdit) {
+      return true;
+    }
+    if (!_investigationExhausted(
+      searches: searches,
+      filesRead: filesRead,
+      iteration: iteration,
+      options: options,
+    )) {
+      return false;
+    }
+    return action == 'search_files' ||
+        action == 'list_files' ||
+        action == 'read_files' ||
+        action == 'say';
   }
 
   static String _formatKnownMatches(_CompletedSearch search) {

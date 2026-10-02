@@ -782,6 +782,110 @@ void main() {
     expect(events.where((e) => e.type == 'error'), isEmpty);
   });
 
+  test('agent injects investigation budget after two searches and reads', () async {
+    final store = RepositoryMemory();
+    await store.writeText('lib/a.dart', 'const alpha = 1;');
+    await store.writeText('lib/b.dart', 'const beta = 2;');
+    final bodies = <String>[];
+    final actions = [
+      '{"action":"search_files","query":"alpha","path":"lib"}',
+      '{"action":"read_file","path":"lib/a.dart"}',
+      '{"action":"search_files","query":"beta","path":"lib"}',
+      '{"action":"read_file","path":"lib/b.dart"}',
+      '{"action":"replace_in_file","path":"lib/a.dart","oldText":"const alpha = 1;","newText":"const alpha = 2;"}',
+      '{"action":"finish","summary":"done"}',
+    ];
+    ModelClient client() => ModelClient(
+      client: MockClient((request) async {
+        bodies.add(request.body);
+        return http.Response(
+          jsonEncode({
+            'choices': [
+              {
+                'message': {'content': actions.removeAt(0)},
+                'finish_reason': 'stop',
+              },
+            ],
+          }),
+          200,
+        );
+      }),
+    );
+    final engine = AgentTaskEngine(
+      profile: agentProfile(),
+      store: store,
+      git: AgentGit(),
+      root: root,
+      apiKey: '',
+      onEvent: (_) {},
+      approve: (_, _) async => true,
+      clientFactory: client,
+      hooks: NoHooks(),
+      commands: FakeCommands(),
+    );
+    await engine.run(
+      'Fix alpha',
+      const AgentRunOptions(yolo: false),
+    );
+    expect(bodies[4], contains('Investigation budget reached'));
+    expect(bodies[4], contains('replace_in_file'));
+  });
+
+  test('agent blocks fourth search before first edit', () async {
+    final store = RepositoryMemory();
+    await store.writeText('lib/a.dart', 'one two three four');
+    final bodies = <String>[];
+    final events = <AgentEvent>[];
+    final actions = [
+      '{"action":"search_files","query":"one","path":"lib"}',
+      '{"action":"read_file","path":"lib/a.dart"}',
+      '{"action":"search_files","query":"two","path":"lib"}',
+      '{"action":"read_file","path":"lib/a.dart"}',
+      '{"action":"search_files","query":"three","path":"lib"}',
+      '{"action":"search_files","query":"four","path":"lib"}',
+      '{"action":"replace_in_file","path":"lib/a.dart","oldText":"one","newText":"ONE"}',
+      '{"action":"finish","summary":"done"}',
+    ];
+    ModelClient client() => ModelClient(
+      client: MockClient((request) async {
+        bodies.add(request.body);
+        return http.Response(
+          jsonEncode({
+            'choices': [
+              {
+                'message': {'content': actions.removeAt(0)},
+                'finish_reason': 'stop',
+              },
+            ],
+          }),
+          200,
+        );
+      }),
+    );
+    final engine = AgentTaskEngine(
+      profile: agentProfile(),
+      store: store,
+      git: AgentGit(),
+      root: root,
+      apiKey: '',
+      onEvent: events.add,
+      approve: (_, _) async => true,
+      clientFactory: client,
+      hooks: NoHooks(),
+      commands: FakeCommands(),
+    );
+    await engine.run(
+      'Fix',
+      const AgentRunOptions(yolo: false, maxConsecutiveMistakes: 3),
+    );
+    expect(bodies[5], contains('Investigation budget reached'));
+    expect(
+      events.where((event) => event.type == 'denied').map((e) => e.text),
+      anyElement(contains('search_files blocked')),
+    );
+    expect(events.where((e) => e.type == 'error'), isEmpty);
+  });
+
   test('agent caps max_tokens for JSON actions', () async {
     final store = RepositoryMemory();
     await store.writeText('lib/a.dart', 'const x = 1;');
