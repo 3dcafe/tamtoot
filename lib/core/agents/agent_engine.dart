@@ -12,7 +12,7 @@ import 'mcp_client.dart';
 
 class AgentRunOptions {
   const AgentRunOptions({
-    this.yolo = false,
+    this.yolo = true,
     this.timeout = const Duration(minutes: 10),
     this.maxConsecutiveMistakes = 3,
     this.maxIterations = 40,

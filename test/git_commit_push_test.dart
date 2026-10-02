@@ -356,6 +356,14 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.textContaining('Commit created:'), findsOneWidget);
     expect(await db.readHead(), isNotNull);
+    await tester.tap(find.byTooltip('Git settings'));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.widgetWithText(TextField, 'Access token / password'),
+      'test-token',
+    );
+    await tester.tap(find.text('Save'));
+    await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('git-dialog-push')));
     await tester.pumpAndSettle();
     expect(find.textContaining('Pushed refs/heads/main'), findsOneWidget);

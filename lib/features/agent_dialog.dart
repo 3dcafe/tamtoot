@@ -46,7 +46,8 @@ class _AgentPanelState extends State<AgentPanel> {
   final profiles = <String, ModelProfile>{};
   final attachments = <ModelAttachment>[];
   String? selected, error;
-  bool loading = true, running = false, yolo = false, yoloConfirmed = false;
+  bool loading = true, running = false, yolo = true, yoloConfirmed = false;
+  final taskQueue = <String>[];
   int timeoutSeconds = 600, maxMistakes = 3;
   int _catalogRevision = -1;
   StreamSubscription<int>? _sessionSub;
