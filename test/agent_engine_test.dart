@@ -191,6 +191,63 @@ void main() {
     },
   );
 
+  test('agent batches several files with read_files in one iteration', () async {
+    final store = RepositoryMemory();
+    await store.writeText('lib/a.dart', 'const alpha = "A";');
+    await store.writeText('lib/b.dart', 'const beta = "B";');
+    final bodies = <String>[];
+    final events = <AgentEvent>[];
+    final actions = [
+      '{"action":"read_files","paths":["lib/a.dart","lib/b.dart"]}',
+      '{"action":"finish","summary":"Loaded both files."}',
+    ];
+    ModelClient client() => ModelClient(
+      client: MockClient((request) async {
+        bodies.add(request.body);
+        return http.Response(
+          jsonEncode({
+            'choices': [
+              {
+                'message': {'content': actions.removeAt(0)},
+                'finish_reason': 'stop',
+              },
+            ],
+          }),
+          200,
+        );
+      }),
+    );
+    final engine = AgentTaskEngine(
+      profile: agentProfile(),
+      store: store,
+      git: AgentGit(),
+      root: root,
+      apiKey: '',
+      onEvent: events.add,
+      approve: (_, _) async => true,
+      clientFactory: client,
+      hooks: NoHooks(),
+      commands: FakeCommands(),
+    );
+
+    final result = await engine.run(
+      'Read both helpers',
+      const AgentRunOptions(),
+    );
+
+    expect(result.success, isTrue);
+    expect(
+      events.map((event) => event.text),
+      contains(contains('Read 2 files')),
+    );
+    expect(bodies, hasLength(2));
+    expect(bodies[1], contains('lib/a.dart'));
+    expect(bodies[1], contains('const alpha'));
+    expect(bodies[1], contains('lib/b.dart'));
+    expect(bodies[1], contains('const beta'));
+    expect(bodies[1], contains('Active file context'));
+  });
+
   test(
     'agent accepts the first JSON object when the model emits NDJSON',
     () async {

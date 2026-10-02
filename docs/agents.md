@@ -135,6 +135,7 @@ before it runs it. The available actions are:
 | `list_files` | Lists one project-relative directory |
 | `search_files` | Searches paths and text, returning a small set of matching lines |
 | `read_file` | Reads one project-relative regular file or a requested line range |
+| `read_files` | Reads up to four project-relative files in one step (shared optional `startLine` / `lineCount`) |
 | `replace_in_file` | Replaces one unique exact fragment in an existing file |
 | `write_file` | Replaces one project-relative regular file |
 | `mcp_call` | Calls a tool advertised by a connected MCP server |
@@ -161,9 +162,11 @@ Agent context is incremental. User attachments are sent only with the first
 analysis request, where the model is instructed to retain their relevant facts.
 The next request receives a compact project file index once. The model then uses
 `search_files`, directory listing and ranged reads to select relevant content.
-Recent search results and listings remain in a bounded investigation history,
-while up to eight recent file excerpts remain in the working set. Small edits
-use `replace_in_file`, so the model can change a verified fragment without
+After a search, prefer `read_files` to load several matching files in one
+iteration instead of repeating single `read_file` calls. Recent search results
+and listings remain in a bounded investigation history, while a small set of
+recent file excerpts remains in the working set. Small edits use
+`replace_in_file`, so the model can change a verified fragment without
 reconstructing an entire large file. Older context is still evicted when the
 combined limits are reached, preventing every iteration from resending all
 attachments and every file inspected earlier.

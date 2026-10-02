@@ -98,19 +98,20 @@ You are an autonomous coding agent in Tamtoot (mobile IDE: no terminal, builds, 
 Never run or ask for runtime checks; verify by reading files and say so in the finish summary.
 FIRST RESPONSE: one say with a short plan only (goal, files to inspect, risks). No tools yet.
 After that, use tools. Do not emit another say until after a tool result, and only for a short status.
-Repeating say without a tool wastes tokens and is a mistake — prefer read_file / search_files / replace_in_file / finish.
+Repeating say without a tool wastes tokens and is a mistake — prefer read_files / read_file / search_files / replace_in_file / finish.
 Reply with exactly ONE JSON object. No markdown fences, no commentary outside JSON.
 Actions:
 - say: {"action":"say","text":"..."}
 - list_files: {"action":"list_files","path":"relative/folder"}
 - search_files: {"action":"search_files","query":"symbol or text","path":"optional/relative/folder"}
 - read_file: {"action":"read_file","path":"relative/file","startLine":1,"lineCount":160}
+- read_files: {"action":"read_files","paths":["a.dart","b.dart"],"startLine":1,"lineCount":160}
 - replace_in_file: {"action":"replace_in_file","path":"relative/file","oldText":"exact existing text","newText":"replacement text"}
 - write_file: {"action":"write_file","path":"relative/file","content":"..."}
 - mcp_call: {"action":"mcp_call","server":"name","tool":"tool_name","arguments":{}}
 - finish: {"action":"finish","summary":"..."}
 Relative paths only. Never touch .git or .tamtoot.
-Use the one-time project index + search_files; read only needed line ranges.
+Use the one-time project index + search_files; then batch relevant files with read_files (up to 4) instead of many single read_file calls.
 Reuse retained excerpts — do not re-read unchanged files.
 When Active file context already has the edit site, call replace_in_file immediately.
 After a small edit, re-read the changed area, then finish.
@@ -252,7 +253,7 @@ After a small edit, re-read the changed area, then finish.
               if (consecutiveSays >= 2) {
                 throw const ModelApiException(
                   'Repeated say without tools wastes tokens. '
-                  'Emit read_file, search_files, replace_in_file, write_file, or finish now.',
+                  'Emit read_files, read_file, search_files, replace_in_file, write_file, or finish now.',
                 );
               }
             }
@@ -312,6 +313,12 @@ After a small edit, re-read the changed area, then finish.
               'Tool search_files result for "$query":\n$result',
             );
             _compactProjectIndex(observations);
+            _replaceNote(
+              transcript,
+              'Host note:',
+              'Host note: After search, batch relevant files with read_files '
+                  '(up to 4 paths) instead of many single read_file calls.',
+            );
           case 'read_file':
             consecutiveSays = 0;
             final path = _path(action['path']);
@@ -343,6 +350,55 @@ After a small edit, re-read the changed area, then finish.
                 'Host note: File context is available. Prefer replace_in_file or finish over another say.',
               );
             }
+          case 'read_files':
+            consecutiveSays = 0;
+            final rawPaths = action['paths'];
+            if (rawPaths is! List || rawPaths.isEmpty) {
+              throw const ModelApiException(
+                'read_files requires a non-empty paths array.',
+              );
+            }
+            if (rawPaths.length > 4) {
+              throw const ModelApiException(
+                'read_files accepts at most 4 paths per call.',
+              );
+            }
+            final descriptions = <String>[];
+            for (final raw in rawPaths) {
+              final path = _path(raw);
+              final bytes = await store.readBytes(path);
+              if (bytes.length > 1024 * 1024) {
+                throw ModelApiException(
+                  'File exceeds the 1 MiB agent limit: $path',
+                );
+              }
+              final content = utf8.decode(bytes);
+              final excerpt = _fileExcerpt(path, content, action);
+              _rememberFile(
+                activeFiles,
+                excerpt.key,
+                excerpt.content,
+                transcript,
+              );
+              descriptions.add(excerpt.description);
+            }
+            onEvent(
+              AgentEvent(
+                'tool',
+                'Read ${rawPaths.length} files: ${descriptions.join('; ')}',
+              ),
+            );
+            _replaceNote(
+              transcript,
+              'Tool read_files result:',
+              'Tool read_files result: ${descriptions.join('; ')}. Contents are in Active file context.',
+            );
+            _compactProjectIndex(observations);
+            _replaceNote(
+              transcript,
+              'Host note:',
+              'Host note: Multiple files are in context. Prefer replace_in_file or finish over another say.',
+            );
           case 'replace_in_file':
             consecutiveSays = 0;
             final path = _path(action['path']);

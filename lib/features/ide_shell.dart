@@ -3,10 +3,12 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../app/ide_session.dart';
 import '../workspace/explorer/file_indicators.dart';
+import '../workspace/documents/document_service.dart';
 import '../app/providers.dart';
 import '../app/session_commands.dart';
 import '../editor/widgets/code_editor.dart';
 import '../editor/input/keyboard_mapping.dart';
+import '../platform/reveal_path.dart';
 import 'dialogs.dart';
 import 'agent_dialog.dart';
 import 'git_changes_dialog.dart';
@@ -213,6 +215,85 @@ class _IdeShellState extends ConsumerState<IdeShell> {
       child: Text(title, style: const TextStyle(fontSize: 12)),
     ),
   );
+  String _joinPath(String root, String name) {
+    if (root.endsWith('/') || root.endsWith(r'\')) return '$root$name';
+    final sep = root.contains(r'\') ? r'\' : '/';
+    return '$root$sep$name';
+  }
+
+  /// Absolute/local path for clipboard and reveal, or a display fallback.
+  String _documentLocation(OpenDocument doc) {
+    final uri = doc.uri;
+    if (uri != null && uri.scheme == 'file') return uri.toFilePath();
+    if (uri != null) return uri.toString();
+    final root = session.workspaceRoot?.path;
+    if (root == null || root.isEmpty) return doc.name;
+    return _joinPath(root, doc.name);
+  }
+
+  String _pathBarText() {
+    final active = session.documents.active;
+    if (active == null) {
+      return session.workspaceRoot?.path ?? 'Welcome workspace';
+    }
+    final location = _documentLocation(active);
+    if (location == active.name || location.endsWith(active.name)) {
+      return location;
+    }
+    return '$location  ›  ${active.name}';
+  }
+
+  bool _canRevealPath(OpenDocument? doc) =>
+      doc?.uri != null && doc!.uri!.scheme == 'file';
+
+  Future<void> _copyPath(String path) async {
+    await Clipboard.setData(ClipboardData(text: path));
+  }
+
+  Future<void> _showPathMenu(Offset globalPosition, String path, {required bool canReveal}) async {
+    final action = await showMenu<String>(
+      context: context,
+      position: RelativeRect.fromLTRB(
+        globalPosition.dx,
+        globalPosition.dy,
+        globalPosition.dx,
+        globalPosition.dy,
+      ),
+      items: [
+        const PopupMenuItem(value: 'copy', child: Text('Copy path')),
+        if (canReveal)
+          const PopupMenuItem(
+            value: 'reveal',
+            child: Text('Reveal in Finder / Explorer'),
+          ),
+      ],
+    );
+    if (!mounted || action == null) return;
+    if (action == 'copy') await _copyPath(path);
+    if (action == 'reveal') await revealInFileManager(path);
+  }
+
+  Widget _pathBar() {
+    final active = session.documents.active;
+    final text = _pathBarText();
+    final copyTarget = active == null
+        ? (session.workspaceRoot?.path ?? text)
+        : _documentLocation(active);
+    final canReveal = _canRevealPath(active);
+    return GestureDetector(
+      onSecondaryTapUp: (details) => _showPathMenu(
+        details.globalPosition,
+        copyTarget,
+        canReveal: canReveal,
+      ),
+      child: SelectableText(
+        text,
+        maxLines: 1,
+        style: TextStyle(fontSize: 12, color: color('muted')),
+      ),
+    );
+  }
+
   Widget _toolbar() => Container(
     height: 44,
     margin: const EdgeInsets.only(bottom: 8),
@@ -230,13 +311,7 @@ class _IdeShellState extends ConsumerState<IdeShell> {
         action(Icons.undo, 'Undo', 'editor.undo'),
         action(Icons.redo, 'Redo', 'editor.redo'),
         const VerticalDivider(indent: 10, endIndent: 10),
-        Expanded(
-          child: Text(
-            session.workspaceRoot?.path ?? 'Welcome workspace',
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(fontSize: 12, color: color('muted')),
-          ),
-        ),
+        Expanded(child: _pathBar()),
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 14),
           child: Text(
@@ -364,9 +439,17 @@ class _IdeShellState extends ConsumerState<IdeShell> {
               decoration: BoxDecoration(
                 border: Border(bottom: BorderSide(color: color('border'))),
               ),
-              child: Text(
-                'Workspace  ›  ${active.name}',
-                style: TextStyle(fontSize: 11, color: color('muted')),
+              child: GestureDetector(
+                onSecondaryTapUp: (details) => _showPathMenu(
+                  details.globalPosition,
+                  _documentLocation(active),
+                  canReveal: _canRevealPath(active),
+                ),
+                child: SelectableText(
+                  _pathBarText(),
+                  maxLines: 1,
+                  style: TextStyle(fontSize: 11, color: color('muted')),
+                ),
               ),
             ),
           Expanded(
