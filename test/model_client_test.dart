@@ -499,6 +499,57 @@ void main() {
     );
   });
 
+  test('parseReply explains reasoning-only empty content', () {
+    expect(
+      () => ModelClient.parseReply('chat-completions', {
+        'model': 'glm-5.3-flash',
+        'choices': [
+          {
+            'finish_reason': 'length',
+            'message': {
+              'role': 'assistant',
+              'content': '',
+              'reasoning_content':
+                  'The user wants a fix. I should call replace_in_file next…',
+            },
+          },
+        ],
+      }),
+      throwsA(
+        isA<ModelApiException>().having(
+          (e) => e.message,
+          'message',
+          allOf(
+            contains('reasoning_content'),
+            contains('No chain-of-thought'),
+            isNot(contains('not native tool calls')),
+          ),
+        ),
+      ),
+    );
+  });
+
+  test('parseReply extracts JSON action from reasoning_content', () {
+    final reply = ModelClient.parseReply('chat-completions', {
+      'choices': [
+        {
+          'finish_reason': 'stop',
+          'message': {
+            'role': 'assistant',
+            'content': '',
+            'reasoning_content':
+                'I will edit now. {"action":"read_file","path":"lib/a.dart"} done.',
+          },
+        },
+      ],
+    });
+    expect(jsonDecode(reply.text), {
+      'action': 'read_file',
+      'path': 'lib/a.dart',
+    });
+    expect(reply.note, contains('reasoning_content'));
+  });
+
   test('parseReply converts known tool_calls into JSON actions', () {
     final reply = ModelClient.parseReply('chat-completions', {
       'choices': [

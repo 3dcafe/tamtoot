@@ -508,7 +508,7 @@ class ModelClient {
     void content(dynamic value) {
       rawContent ??= value;
       if (value is String) {
-        parts.add(value);
+        if (value.trim().isNotEmpty) parts.add(value);
         return;
       }
       if (value is List) {
@@ -516,16 +516,14 @@ class ModelClient {
           if (block is! Map) continue;
           final type = block['type'];
           if ({'text', 'output_text'}.contains(type) &&
-              block['text'] is String) {
+              block['text'] is String &&
+              (block['text'] as String).trim().isNotEmpty) {
             parts.add(block['text'] as String);
           }
-          if (type == 'refusal' && block['refusal'] is String) {
+          if (type == 'refusal' &&
+              block['refusal'] is String &&
+              (block['refusal'] as String).trim().isNotEmpty) {
             parts.add(block['refusal'] as String);
-          }
-          // Some providers put the answer in reasoning / thinking fields.
-          if (block['text'] is String &&
-              {'reasoning', 'thinking', 'reasoning_text'}.contains(type)) {
-            if (parts.isEmpty) parts.add(block['text'] as String);
           }
           if (type == 'tool_use' || type == 'function_call') {
             final name = '${block['name'] ?? block['call_id'] ?? type}';
@@ -538,6 +536,8 @@ class ModelClient {
         }
       }
     }
+
+    String? reasoningText;
 
     void noteToolCalls(dynamic raw) {
       if (raw == null) return;
@@ -612,12 +612,28 @@ class ModelClient {
         final message = first['message'];
         if (message is Map) {
           content(message['content']);
-          if (message['refusal'] is String) {
+          if (message['refusal'] is String &&
+              (message['refusal'] as String).trim().isNotEmpty) {
             parts.add(message['refusal'] as String);
           }
-          // Some OpenAI-compatible hosts put text here when content is null.
-          if (parts.isEmpty && message['reasoning_content'] is String) {
-            parts.add(message['reasoning_content'] as String);
+          final reasoning = message['reasoning_content'] ?? message['reasoning'];
+          if (reasoning is String && reasoning.trim().isNotEmpty) {
+            reasoningText = reasoning;
+            hints.add('reasoning_content: ${reasoning.length} chars');
+          }
+          // Anthropic-style content blocks may also carry thinking.
+          final blocks = message['content'];
+          if (blocks is List) {
+            for (final block in blocks) {
+              if (block is! Map) continue;
+              if ({'reasoning', 'thinking', 'reasoning_text'}.contains(
+                    block['type'],
+                  ) &&
+                  block['text'] is String &&
+                  (block['text'] as String).trim().isNotEmpty) {
+                reasoningText ??= block['text'] as String;
+              }
+            }
           }
           noteToolCalls(message['tool_calls']);
         }
@@ -643,6 +659,18 @@ class ModelClient {
       }
     }
 
+    // Thinking models may put a JSON action only inside reasoning_content, or
+    // burn the whole budget on reasoning and leave content empty.
+    if (parts.join().trim().isEmpty && reasoningText != null) {
+      final embedded = _embeddedJsonAction(reasoningText);
+      if (embedded != null) {
+        parts.add(embedded);
+        note = note.isEmpty
+            ? 'Extracted JSON action from reasoning_content.'
+            : '$note Extracted JSON action from reasoning_content.';
+      }
+    }
+
     if (parts.join().trim().isEmpty) {
       throw ModelApiException(
         _emptyAnswerMessage(
@@ -651,9 +679,30 @@ class ModelClient {
           toolCalls: rawToolCalls,
           model: responseModel,
           hints: hints,
+          reasoning: reasoningText,
         ),
       );
     }
+    // If content is prose/reasoning but embeds a JSON action, prefer the action.
+    if (!_looksLikeJsonAction(parts.join('\n'))) {
+      final fromParts = _embeddedJsonAction(parts.join('\n'));
+      final fromReasoning =
+          reasoningText == null ? null : _embeddedJsonAction(reasoningText);
+      final embedded = fromParts ?? fromReasoning;
+      if (embedded != null) {
+        return ModelReply(
+          embedded,
+          note: note.isEmpty
+              ? 'Extracted embedded JSON action.'
+              : '$note Extracted embedded JSON action.',
+          usage: _usageFrom(data),
+        );
+      }
+    }
+    return ModelReply(parts.join('\n'), note: note, usage: _usageFrom(data));
+  }
+
+  static Map<String, dynamic> _usageFrom(Map<String, dynamic> data) {
     final rawUsage = data['usage'];
     final usage = <String, dynamic>{};
     if (rawUsage is Map) {
@@ -667,7 +716,59 @@ class ModelClient {
         if (rawUsage[key] is num) usage[key] = rawUsage[key];
       }
     }
-    return ModelReply(parts.join('\n'), note: note, usage: usage);
+    return usage;
+  }
+
+  static bool _looksLikeJsonAction(String text) {
+    final trimmed = text.trim();
+    return trimmed.startsWith('{') && trimmed.contains('"action"');
+  }
+
+  /// Pulls the first complete {"action":...} object out of free-form model text.
+  static String? _embeddedJsonAction(String text) {
+    final marker = text.indexOf('"action"');
+    if (marker < 0) return null;
+    final start = text.lastIndexOf('{', marker);
+    if (start < 0) return null;
+    var depth = 0;
+    var inString = false;
+    var escaped = false;
+    for (var i = start; i < text.length; i++) {
+      final ch = text[i];
+      if (inString) {
+        if (escaped) {
+          escaped = false;
+        } else if (ch == '\\') {
+          escaped = true;
+        } else if (ch == '"') {
+          inString = false;
+        }
+        continue;
+      }
+      if (ch == '"') {
+        inString = true;
+        continue;
+      }
+      if (ch == '{') depth++;
+      if (ch == '}') {
+        depth--;
+        if (depth == 0) {
+          final candidate = text.substring(start, i + 1);
+          try {
+            final decoded = jsonDecode(candidate);
+            if (decoded is Map &&
+                decoded['action'] is String &&
+                _agentActions.contains(decoded['action'])) {
+              return candidate;
+            }
+          } catch (_) {
+            return null;
+          }
+          return null;
+        }
+      }
+    }
+    return null;
   }
 
   /// Maps OpenAI/Anthropic-style tool calls onto Tamtoot's one-JSON-action protocol.
@@ -712,16 +813,26 @@ class ModelClient {
     required dynamic toolCalls,
     required String? model,
     required List<String> hints,
+    String? reasoning,
   }) {
     final lines = <String>[
       'No text answer returned.',
       if (finishReason != null) 'finish_reason: $finishReason',
       'content: ${_previewDiagnostic(content)}',
       if (toolCalls != null) 'tool_calls: ${_previewDiagnostic(toolCalls)}',
+      if (reasoning != null)
+        'reasoning_content: ${_previewDiagnostic(reasoning, max: 400)}',
       if (model != null && model.isNotEmpty) 'model: $model',
       if (hints.isNotEmpty) 'hints: ${hints.join('; ')}',
     ];
-    if (finishReason == 'length') {
+    if (reasoning != null && reasoning.trim().isNotEmpty) {
+      lines.add(
+        'The model spent its output budget on reasoning_content and returned '
+        'no JSON action in message.content. Reply with ONLY one short JSON '
+        'object (for example {"action":"replace_in_file",...}). '
+        'No chain-of-thought outside JSON.',
+      );
+    } else if (finishReason == 'length') {
       lines.add(
         'The model hit the output token limit and returned no usable text. '
         'Reply again with one short JSON action only '
