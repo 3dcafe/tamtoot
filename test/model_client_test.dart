@@ -213,7 +213,7 @@ void main() {
           expect(request.headers['x-api-key'], 'test-key');
           expect(request.headers['anthropic-version'], '2023-06-01');
           expect(request.headers.containsKey('authorization'), false);
-          expect(jsonDecode(request.body)['max_tokens'], 1200);
+          expect(jsonDecode(request.body)['max_tokens'], 2048);
           return http.Response(
             jsonEncode({
               'content': [
@@ -467,7 +467,32 @@ void main() {
             contains('tool_calls:'),
             contains('unknown_native_tool'),
             contains('model: glm-5.3-flash'),
-            contains('plain-text JSON'),
+            contains('not native tool calls'),
+          ),
+        ),
+      ),
+    );
+  });
+
+  test('parseReply explains empty length answers without blaming tools', () {
+    expect(
+      () => ModelClient.parseReply('chat-completions', {
+        'model': 'glm-5.3-flash',
+        'choices': [
+          {
+            'finish_reason': 'length',
+            'message': {'role': 'assistant', 'content': ''},
+          },
+        ],
+      }),
+      throwsA(
+        isA<ModelApiException>().having(
+          (e) => e.message,
+          'message',
+          allOf(
+            contains('finish_reason: length'),
+            contains('output token limit'),
+            isNot(contains('not native tool calls')),
           ),
         ),
       ),

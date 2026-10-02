@@ -9,6 +9,7 @@ import 'model_profile.dart';
 import 'hook_runner.dart';
 import 'command_runner.dart';
 import 'mcp_client.dart';
+import 'project_memory.dart';
 
 class AgentRunOptions {
   const AgentRunOptions({
@@ -124,6 +125,15 @@ Implementation rules:
 - If you have read both the caller and the failing implementation, your next action should normally be replace_in_file.
 - Additional searches after root cause identification are allowed only when required to make the edit safely.
 
+Memory rules:
+- Use retained project knowledge before searching.
+- Do not rediscover known file locations unless the information appears stale or insufficient.
+- Previous knowledge is a navigation hint, not authoritative source code.
+- Before editing a previously known file, verify the smallest relevant current excerpt.
+- Reuse known call chains, symbols, and implementation locations.
+- After solving a task, preserve only durable project knowledge: important files, symbols, relationships, root causes, edits, and unresolved issues.
+- Never preserve long reasoning or entire file contents.
+
 Actions:
 - say: {"action":"say","text":"..."}
 - list_files: {"action":"list_files","path":"relative/folder"}
@@ -138,8 +148,8 @@ Relative paths only. Never touch .git or .tamtoot.
 Reuse retained excerpts — do not re-read unchanged files.
 ''';
 
-  /// Agent replies are one JSON action; large completion budgets only waste latency.
-  static const int agentMaxTokens = 1200;
+  /// Agent replies are one JSON action; keep a small headroom for verbose models.
+  static const int agentMaxTokens = 2048;
 
   /// Default window when the model does not specify a range.
   static const int defaultReadLineCount = 70;
@@ -223,6 +233,38 @@ Reuse retained excerpts — do not re-read unchanged files.
       'Project index',
       await _projectIndex(),
     );
+    final memoryStore = ProjectMemoryStore(store);
+    var projectMemory = await memoryStore.load();
+    final memorySelection = projectMemory.selectRelevant(task);
+    final stalePaths = await _staleMemoryPaths(projectMemory, memorySelection);
+    final memoryPrompt = projectMemory.formatForPrompt(
+      memorySelection,
+      stalePaths: stalePaths,
+    );
+    if (memoryPrompt.isNotEmpty) {
+      _rememberObservation(
+        observations,
+        'Project memory',
+        memoryPrompt,
+      );
+      onEvent(
+        AgentEvent(
+          'memory',
+          'Loaded ${memorySelection.areaCount} relevant project '
+              '${memorySelection.areaCount == 1 ? 'memory' : 'memories'}',
+        ),
+      );
+      for (final path in {
+        ...memorySelection.areas.expand((area) => area.files),
+        ...memorySelection.recentEdits.map((edit) => edit.path),
+      }.take(3)) {
+        onEvent(AgentEvent('memory', 'Reused known location: $path'));
+      }
+    }
+    final runReadPaths = <String>{};
+    final runEditedPaths = <String>{};
+    final runFingerprints = <String, String>{};
+    final runLearned = <String>[];
     var mistakes = 0;
     var consecutiveSays = 0;
     var consecutiveSearches = 0;
@@ -250,9 +292,13 @@ Reuse retained excerpts — do not re-read unchanged files.
       final client =
           clientFactory?.call() ?? ModelClient(timeout: options.timeout);
       _active = client;
-      ModelReply reply;
+      late final ModelReply reply;
       try {
-        final userPrompt = _buildPrompt(transcript, activeFiles, observations);
+        final userPrompt = _buildPrompt(
+          transcript,
+          activeFiles,
+          observations,
+        );
         reply = await client.send(
           agentProfile,
           {
@@ -267,6 +313,21 @@ Reuse retained excerpts — do not re-read unchanged files.
           apiKey: apiKey,
           attachments: iteration == 1 ? attachments : const [],
         );
+      } on ModelApiException catch (e) {
+        mistakes++;
+        onEvent(AgentEvent('error', e.message));
+        _replaceNote(
+          transcript,
+          'Host note:',
+          'Host note: Model request failed: ${_bounded(e.message, 800)}\n'
+              'Emit exactly one short JSON action next. Do not explain.',
+        );
+        if (mistakes >= options.maxConsecutiveMistakes) {
+          throw ModelApiException(
+            'Agent stopped after $mistakes consecutive mistakes: ${e.message}',
+          );
+        }
+        continue;
       } finally {
         _active = null;
       }
@@ -318,7 +379,7 @@ Reuse retained excerpts — do not re-read unchanged files.
             transcript.add('Tool blocked by hook: $reason');
             continue;
           }
-            if (pre.context.isNotEmpty) {
+          if (pre.context.isNotEmpty) {
             transcript.add('Hook context:\n${pre.context}');
           }
         }
@@ -373,6 +434,26 @@ Reuse retained excerpts — do not re-read unchanged files.
               );
             }
             final path = _path(action['path'] ?? '', allowEmpty: true);
+            final knownFromMemory = projectMemory.knownPathsForQuery(query);
+            if (knownFromMemory.isNotEmpty &&
+                runReadPaths.isEmpty &&
+                !hasEdited) {
+              onEvent(
+                AgentEvent(
+                  'memory',
+                  'Skipped redundant search: $query',
+                ),
+              );
+              _softRejectSearch(
+                transcript,
+                'search_files',
+                'Search skipped: retained project knowledge already points to:\n'
+                    '${knownFromMemory.map((item) => '- $item').join('\n')}\n'
+                    'Read the smallest relevant current excerpt from those files '
+                    '(or one targeted search only if that knowledge is insufficient/stale).',
+              );
+              continue;
+            }
             final duplicate = _findDuplicateSearch(
               completedSearches,
               query,
@@ -423,6 +504,17 @@ Reuse retained excerpts — do not re-read unchanged files.
               focusLinesByPath
                   .putIfAbsent(hit.path, () => <int>[])
                   .add(hit.line!);
+            }
+            if (hits.isNotEmpty) {
+              final sample = hits
+                  .take(3)
+                  .map(
+                    (hit) => hit.line == null
+                        ? hit.path
+                        : '${hit.path}:${hit.line}',
+                  )
+                  .join(', ');
+              runLearned.add('$query → $sample');
             }
             onEvent(AgentEvent('tool', 'Searched project for “$query”'));
             _rememberObservation(
@@ -480,6 +572,8 @@ Reuse retained excerpts — do not re-read unchanged files.
               transcript,
             );
             onEvent(AgentEvent('tool', 'Read $path'));
+            runReadPaths.add(path);
+            runFingerprints[path] = ProjectMemory.fingerprintText(content);
             _replaceNote(
               transcript,
               'Tool read_file result:',
@@ -532,6 +626,8 @@ Reuse retained excerpts — do not re-read unchanged files.
                 transcript,
               );
               descriptions.add(excerpt.description);
+              runReadPaths.add(path);
+              runFingerprints[path] = ProjectMemory.fingerprintText(content);
             }
             onEvent(
               AgentEvent(
@@ -596,6 +692,8 @@ Reuse retained excerpts — do not re-read unchanged files.
               (key, _) => key == path || key.startsWith('$path ['),
             );
             onEvent(AgentEvent('tool', 'Edited $path'));
+            runEditedPaths.add(path);
+            runFingerprints[path] = ProjectMemory.fingerprintText(updated);
             transcript.add(
               'Tool replace_in_file result: edited $path successfully. Read the changed area before finishing.',
             );
@@ -624,6 +722,8 @@ Reuse retained excerpts — do not re-read unchanged files.
               (key, _) => key == path || key.startsWith('$path ['),
             );
             onEvent(AgentEvent('tool', 'Wrote $path'));
+            runEditedPaths.add(path);
+            runFingerprints[path] = ProjectMemory.fingerprintText(content);
             transcript.add(
               'Tool write_file result: wrote $path successfully. Inspect it before finishing.',
             );
@@ -666,6 +766,16 @@ Reuse retained excerpts — do not re-read unchanged files.
             );
           case 'finish':
             final summary = _string(action, 'summary');
+            await _persistProjectMemory(
+              memoryStore: memoryStore,
+              memory: projectMemory,
+              task: task,
+              summary: summary,
+              readPaths: runReadPaths,
+              editedPaths: runEditedPaths,
+              fingerprints: runFingerprints,
+              learned: runLearned,
+            );
             onEvent(AgentEvent('done', summary));
             return AgentRunResult(
               success: true,
@@ -951,6 +1061,99 @@ Reuse retained excerpts — do not re-read unchanged files.
       hits.add(_SearchHit(path, null));
     }
     return hits;
+  }
+
+  Future<Set<String>> _staleMemoryPaths(
+    ProjectMemory memory,
+    ProjectMemorySelection selection,
+  ) async {
+    final stale = <String>{};
+    final candidates = <String>{
+      ...selection.areas.expand((area) => area.files),
+      ...selection.recentEdits.map((edit) => edit.path),
+    };
+    for (final path in candidates) {
+      String? expected;
+      for (final area in memory.areas) {
+        expected ??= area.fileFingerprints[path];
+      }
+      for (final edit in memory.recentEdits) {
+        if (edit.path == path && edit.fingerprint.isNotEmpty) {
+          expected ??= edit.fingerprint;
+        }
+      }
+      if (expected == null || expected.isEmpty) continue;
+      try {
+        if (!await store.exists(path)) {
+          stale.add(path);
+          continue;
+        }
+        final current = ProjectMemory.fingerprintBytes(
+          await store.readBytes(path),
+        );
+        if (current != expected) stale.add(path);
+      } catch (_) {
+        stale.add(path);
+      }
+    }
+    return stale;
+  }
+
+  Future<void> _persistProjectMemory({
+    required ProjectMemoryStore memoryStore,
+    required ProjectMemory memory,
+    required String task,
+    required String summary,
+    required Set<String> readPaths,
+    required Set<String> editedPaths,
+    required Map<String, String> fingerprints,
+    required List<String> learned,
+  }) async {
+    if (readPaths.isEmpty &&
+        editedPaths.isEmpty &&
+        summary.trim().isEmpty) {
+      return;
+    }
+    try {
+      // Refresh fingerprints for edited/read files when missing.
+      for (final path in {...readPaths, ...editedPaths}) {
+        if (fingerprints.containsKey(path)) continue;
+        try {
+          if (await store.exists(path)) {
+            fingerprints[path] = ProjectMemory.fingerprintBytes(
+              await store.readBytes(path),
+            );
+          }
+        } catch (_) {}
+      }
+      final result = memory.mergeTask(
+        task: task,
+        summary: summary,
+        readPaths: readPaths,
+        editedPaths: editedPaths,
+        fileFingerprints: fingerprints,
+        learnedFacts: learned.take(6),
+      );
+      await memoryStore.save(memory);
+      onEvent(AgentEvent('memory', 'Updated area: ${result.areaTitle}'));
+      if (result.compacted) {
+        onEvent(
+          AgentEvent(
+            'memory',
+            'Compacted project memory: '
+                '${(result.charactersBefore / 4).round()} -> '
+                '${(result.charactersAfter / 4).round()} tokens',
+          ),
+        );
+      }
+    } catch (error) {
+      onEvent(
+        AgentEvent(
+          'memory',
+          'Skipped memory update: ${_bounded('$error', 200)}',
+        ),
+      );
+    }
   }
 
   void _softRejectSearch(

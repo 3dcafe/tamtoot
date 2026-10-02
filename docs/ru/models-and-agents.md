@@ -36,7 +36,7 @@ Model server: Custom compatible API
 Server URL: https://ai.qird.ru/v1/models
 API compatibility format: Chat Completions
 Model: /home/latin/models/bonsai/Ternary-Bonsai-2-27B-PQ2_0.gguf
-API parameters: {"temperature": 0.2, "max_tokens": 1200}
+API parameters: {"temperature": 0.2, "max_tokens": 2048}
 ```
 
 Нажмите **Check connection**, выберите найденную модель, задайте Display name и
@@ -100,6 +100,14 @@ API parameters: {"temperature": 0.2, "max_tokens": 1200}
 `replace_in_file`, `write_file` или одному точечному `read_file`. При исчерпании бюджета
 дальнейшие search/list/read_files мягко отклоняются; точечное чтение и правки по-прежнему
 разрешены.
+
+Постоянная память проекта хранится в `.tamtoot/agents/project_memory.json`.
+После успешного `finish` туда попадает компактное резюме: файлы, связи, правки,
+fingerprint. В следующую задачу подмешивается только релевантный срез как
+навигационная подсказка. Память может пропускать повторный поиск по уже
+известным местам, но перед правкой модель всё равно должна прочитать актуальный
+фрагмент. Секреты вычищаются, размер документа ограничен (~8k символов) с
+автоматическим compaction.
 
 ## Командная строка
 

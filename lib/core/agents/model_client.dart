@@ -199,7 +199,7 @@ class ModelClient {
         'stream': false,
       },
       'anthropic' => {
-        'max_tokens': 1200,
+        'max_tokens': 2048,
         ...p.parameters,
         'model': p.model,
         if (system.isNotEmpty) 'system': system,
@@ -426,7 +426,22 @@ class ModelClient {
         'API returned an error instead of a model answer.',
       );
     }
-    return parseReply(format, data);
+    try {
+      return parseReply(format, data);
+    } on ModelApiException catch (e) {
+      if (!e.message.startsWith('No text answer returned')) rethrow;
+      final choice = () {
+        final choices = data['choices'];
+        if (choices is List && choices.isNotEmpty) return choices.first;
+        if (format == 'anthropic') return data['content'];
+        if (format == 'responses') return data['output'];
+        if (format == 'ollama') return data['message'];
+        return data;
+      }();
+      throw ModelApiException(
+        '${e.message}\nraw: ${_previewDiagnostic(choice, max: 900)}',
+      );
+    }
   }
 
   Future<ModelReply> _ollamaStream(
@@ -705,9 +720,24 @@ class ModelClient {
       if (toolCalls != null) 'tool_calls: ${_previewDiagnostic(toolCalls)}',
       if (model != null && model.isNotEmpty) 'model: $model',
       if (hints.isNotEmpty) 'hints: ${hints.join('; ')}',
-      'Tamtoot needs a plain-text JSON action, not native tool calls. '
-          'Retry, or inspect the raw response in Agent logs.',
     ];
+    if (finishReason == 'length') {
+      lines.add(
+        'The model hit the output token limit and returned no usable text. '
+        'Reply again with one short JSON action only '
+        '(for example {"action":"read_file","path":"..."}).',
+      );
+    } else if (toolCalls != null) {
+      lines.add(
+        'Tamtoot needs a plain-text JSON action, not native tool calls. '
+        'Retry with a single JSON object in message content.',
+      );
+    } else {
+      lines.add(
+        'Empty model content. Retry with one short JSON action, '
+        'or inspect the raw response in Agent logs.',
+      );
+    }
     return lines.join('\n');
   }
 

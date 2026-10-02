@@ -82,7 +82,7 @@ Model server: Custom compatible API
 Server URL: https://ai.qird.ru/v1/models
 API format: Chat Completions
 Model: /home/latin/models/bonsai/Ternary-Bonsai-2-27B-PQ2_0.gguf
-API parameters: {"temperature": 0.2, "max_tokens": 1200}
+API parameters: {"temperature": 0.2, "max_tokens": 2048}
 ```
 
 The template variables are `{{task}}`, `{{file_path}}`, `{{file}}` and
@@ -180,6 +180,14 @@ searches and two reads without an edit, the host injects a progress note urging
 `replace_in_file`, `write_file`, or one final targeted `read_file`. When the
 budget is exhausted, further search, list, and batch read actions are
 soft-rejected; targeted reads and edits remain allowed.
+
+Persistent project memory lives in `.tamtoot/agents/project_memory.json`. After
+each successful `finish`, Tamtoot merges a compact area summary (files, learned
+relationships, edits, fingerprints). The next task receives only a relevance-
+selected slice as navigation hints. Memory may skip redundant searches when
+known locations already answer the query; the model must still verify a current
+excerpt before editing. Secrets are scrubbed, and the on-disk document is hard-
+capped (~8k characters) with automatic compaction.
 
 ## YOLO Mode
 

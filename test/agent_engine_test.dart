@@ -886,6 +886,67 @@ void main() {
     expect(events.where((e) => e.type == 'error'), isEmpty);
   });
 
+  test('agent recovers from empty model answers within mistake budget', () async {
+    final store = RepositoryMemory();
+    await store.writeText('lib/a.dart', 'const x = 1;');
+    final events = <AgentEvent>[];
+    final actions = <String?>[
+      null, // force empty answer once
+      '{"action":"finish","summary":"recovered"}',
+    ];
+    ModelClient client() => ModelClient(
+      client: MockClient((request) async {
+        final next = actions.removeAt(0);
+        if (next == null) {
+          return http.Response(
+            jsonEncode({
+              'model': 'glm-5.3-flash',
+              'choices': [
+                {
+                  'finish_reason': 'length',
+                  'message': {'role': 'assistant', 'content': ''},
+                },
+              ],
+            }),
+            200,
+          );
+        }
+        return http.Response(
+          jsonEncode({
+            'choices': [
+              {
+                'message': {'content': next},
+                'finish_reason': 'stop',
+              },
+            ],
+          }),
+          200,
+        );
+      }),
+    );
+    final engine = AgentTaskEngine(
+      profile: agentProfile(),
+      store: store,
+      git: AgentGit(),
+      root: root,
+      apiKey: '',
+      onEvent: events.add,
+      approve: (_, _) async => true,
+      clientFactory: client,
+      hooks: NoHooks(),
+      commands: FakeCommands(),
+    );
+    final result = await engine.run(
+      'Recover',
+      const AgentRunOptions(maxConsecutiveMistakes: 2),
+    );
+    expect(result.success, isTrue);
+    expect(
+      events.where((e) => e.type == 'error').map((e) => e.text),
+      anyElement(contains('finish_reason: length')),
+    );
+  });
+
   test('agent caps max_tokens for JSON actions', () async {
     final store = RepositoryMemory();
     await store.writeText('lib/a.dart', 'const x = 1;');

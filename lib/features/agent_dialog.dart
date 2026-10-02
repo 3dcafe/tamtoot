@@ -762,8 +762,22 @@ class _AgentPanelState extends State<AgentPanel> {
     final user = event.type == 'user';
     final errorEvent = event.type == 'error';
     final model = event.type == 'model';
+    final memory = event.type == 'memory';
     final hasJson =
         event.data.containsKey('request') || event.data.containsKey('response');
+    if (memory) {
+      return Padding(
+        padding: const EdgeInsets.only(bottom: 4),
+        child: Text(
+          event.text,
+          style: TextStyle(
+            fontSize: 11,
+            color: colors.onSurfaceVariant,
+            fontFamily: 'monospace',
+          ),
+        ),
+      );
+    }
     return Align(
       alignment: user ? Alignment.centerRight : Alignment.centerLeft,
       child: Container(
