@@ -92,6 +92,9 @@ class AgentTaskEngine {
   bool _stopped = false;
   ModelClient? _active;
 
+  /// Set while a run is in flight so aborted runs still keep what they learned.
+  Future<void> Function(Object error)? _flushMemoryOnFailure;
+
   void stop() {
     _stopped = true;
     _active?.cancel();
@@ -132,6 +135,8 @@ Implementation rules:
 - If a larger rewrite is needed, prefer several small replace_in_file steps, not one giant payload.
 
 Memory rules:
+- Retained project memory is pinned at the top of the context. Read it first.
+- When memory already names the relevant file, read that file instead of searching for it.
 - Use retained project knowledge before searching.
 - Do not rediscover known file locations unless the information appears stale or insufficient.
 - Previous knowledge is a navigation hint, not authoritative source code.
@@ -154,17 +159,14 @@ Relative paths only. Never touch .git or .tamtoot.
 Reuse retained excerpts — do not re-read unchanged files.
 ''';
 
-  /// Agent replies are one JSON action; keep a small headroom for verbose models.
-  static const int agentMaxTokens = 2048;
+  /// One navigation action is a few dozen tokens; this is pure headroom.
+  static const int agentActionTokens = 700;
 
-  /// Escalating budgets for providers that ignore thinking-disable flags.
-  static const List<int> reasoningRetryTokens = [8192, 16384];
+  /// Edits carry oldText/newText, so they get a slightly larger budget.
+  static const int agentEditTokens = 1600;
 
-  static int _reasoningRetryTokens(int failures) =>
-      reasoningRetryTokens[(failures - 1).clamp(
-        0,
-        reasoningRetryTokens.length - 1,
-      )];
+  /// Minimal recovery request after an empty reply: cheap in and out.
+  static const int agentRecoveryTokens = 800;
 
   /// Default window when the model does not specify a range.
   static const int defaultReadLineCount = 70;
@@ -179,10 +181,15 @@ Reuse retained excerpts — do not re-read unchanged files.
   /// Soft cap so replace_in_file JSON cannot burn the whole completion budget.
   static const int maxReplaceFragmentCharacters = 1200;
 
+  /// Shape of the single targeted read still allowed once the budget is spent.
+  static const int maxFinalReadFiles = 2;
+  static const int maxFinalReadLines = 60;
+
   static const investigationBudgetPrompt =
       'Investigation budget reached. You have enough context.\n'
-      'Your next action must be replace_in_file, write_file,\n'
-      'or one final targeted read required for the edit.';
+      'Next action must be replace_in_file, write_file, finish, or ONE final '
+      'targeted read (max $maxFinalReadFiles files, $maxFinalReadLines lines each).\n'
+      'search_files and list_files stay disabled until you edit.';
 
   Future<AgentRunResult> run(String task, AgentRunOptions options) async {
     if (task.trim().isEmpty) {
@@ -220,10 +227,17 @@ Reuse retained excerpts — do not re-read unchanged files.
           );
         },
       );
-    } catch (_) {
+    } catch (error) {
       if (_stopped) {
         try {
           await hooks.run('TaskCancel', {'task': task});
+        } catch (_) {}
+      }
+      final flush = _flushMemoryOnFailure;
+      _flushMemoryOnFailure = null;
+      if (flush != null) {
+        try {
+          await flush(error);
         } catch (_) {}
       }
       rethrow;
@@ -246,11 +260,7 @@ Reuse retained excerpts — do not re-read unchanged files.
     ];
     final activeFiles = <String, String>{};
     final observations = <String, String>{};
-    _rememberObservation(
-      observations,
-      'Project index',
-      await _projectIndex(),
-    );
+    _rememberObservation(observations, 'Project index', await _projectIndex());
     final memoryStore = ProjectMemoryStore(store);
     var projectMemory = await memoryStore.load();
     final memorySelection = projectMemory.selectRelevant(task);
@@ -259,12 +269,11 @@ Reuse retained excerpts — do not re-read unchanged files.
       memorySelection,
       stalePaths: stalePaths,
     );
+    final memoryFiles = <String>{
+      ...memorySelection.recentEdits.map((edit) => edit.path),
+      ...memorySelection.areas.expand((area) => area.files),
+    }.take(4).toList();
     if (memoryPrompt.isNotEmpty) {
-      _rememberObservation(
-        observations,
-        'Project memory',
-        memoryPrompt,
-      );
       onEvent(
         AgentEvent(
           'memory',
@@ -272,33 +281,60 @@ Reuse retained excerpts — do not re-read unchanged files.
               '${memorySelection.areaCount == 1 ? 'memory' : 'memories'}',
         ),
       );
-      for (final path in {
-        ...memorySelection.areas.expand((area) => area.files),
-        ...memorySelection.recentEdits.map((edit) => edit.path),
-      }.take(3)) {
+      for (final path in memoryFiles.take(3)) {
         onEvent(AgentEvent('memory', 'Reused known location: $path'));
+      }
+      if (memoryFiles.isNotEmpty) {
+        transcript.add(
+          'Memory note: Retained memory already points to '
+          '${memoryFiles.join(', ')}. Read the smallest relevant excerpt there '
+          'instead of searching for it again.',
+        );
       }
     }
     final runReadPaths = <String>{};
     final runEditedPaths = <String>{};
     final runFingerprints = <String, String>{};
     final runLearned = <String>[];
+    // Investigation that ends in a mistake limit or timeout is still worth
+    // keeping, otherwise the next run rediscovers the same call chain.
+    _flushMemoryOnFailure = (error) => _persistProjectMemory(
+      memoryStore: memoryStore,
+      memory: projectMemory,
+      task: task,
+      summary: '',
+      readPaths: runReadPaths,
+      editedPaths: runEditedPaths,
+      fingerprints: runFingerprints,
+      learned: runLearned,
+      unresolved: [
+        'Run stopped before finishing: ${_bounded(_firstLine('$error'), 120)}',
+      ],
+    );
     var mistakes = 0;
     var consecutiveSays = 0;
     var consecutiveSearches = 0;
     var requireReadAfterSearch = false;
-    var reasoningBudgetFailures = 0;
+    var jsonMode = true;
     final completedSearches = <_CompletedSearch>[];
     final focusLinesByPath = <String, List<int>>{};
     var searchesBeforeEdit = 0;
     var filesReadBeforeEdit = 0;
     var hasEdited = false;
-    final agentProfile = _withAgentTokenBudget(profile);
+    var finalReadUsed = false;
     for (var iteration = 1; iteration <= options.maxIterations; iteration++) {
       if (_stopped) {
         throw const ModelApiException('Agent stopped.');
       }
       onEvent(AgentEvent('iteration', 'Iteration $iteration'));
+      final budgetReached =
+          !hasEdited &&
+          _investigationExhausted(
+            searches: searchesBeforeEdit,
+            filesRead: filesReadBeforeEdit,
+            iteration: iteration,
+            options: options,
+          );
       if (!hasEdited) {
         _injectInvestigationBudget(
           transcript,
@@ -308,62 +344,56 @@ Reuse retained excerpts — do not re-read unchanged files.
           options: options,
         );
       }
-      final client =
-          clientFactory?.call() ?? ModelClient(timeout: options.timeout);
-      _active = client;
+      final implementationPhase =
+          hasEdited || budgetReached || activeFiles.isNotEmpty;
       late final ModelReply reply;
       try {
-        final userPrompt = _buildPrompt(
-          transcript,
-          activeFiles,
-          observations,
-        );
-        // Thinking models burn the budget on reasoning before writing content,
-        // so retries must widen the budget, not shrink it.
-        final requestProfile = reasoningBudgetFailures > 0
-            ? _withAgentTokenBudget(
-                profile,
-                maxTokensOverride: _reasoningRetryTokens(
-                  reasoningBudgetFailures,
-                ),
-              )
-            : agentProfile;
-        reply = await client.send(
-          requestProfile,
-          {
-            'systemPrompt': [
-              requestProfile.systemPrompt,
-              protocol,
-              if (reasoningBudgetFailures > 0)
-                'HOST OVERRIDE: Your previous reply filled reasoning_content '
-                    'and left message.content empty, so it was discarded. '
-                    'Think as little as possible. Write the JSON action into '
-                    'message.content immediately. First character must be {. '
-                    'Pick the simplest next action, even if imperfect.',
-              if (mcp != null && mcp!.tools.isNotEmpty)
-                'Available MCP tools:\n${mcp!.describe()}',
-            ].join('\n\n'),
-            'userPrompt': userPrompt,
-          },
-          apiKey: apiKey,
+        reply = await _requestAction(
+          options: options,
+          maxTokens: implementationPhase ? agentEditTokens : agentActionTokens,
+          jsonMode: jsonMode,
+          systemPrompt: [
+            profile.systemPrompt,
+            protocol,
+            if (mcp != null && mcp!.tools.isNotEmpty)
+              'Available MCP tools:\n${mcp!.describe()}',
+          ].join('\n\n'),
+          userPrompt: _buildPrompt(
+            transcript,
+            activeFiles,
+            observations,
+            memoryPrompt,
+          ),
           attachments: iteration == 1 ? attachments : const [],
+          // Empty content is answered by a tiny request instead of a full
+          // agent turn: no transcript, no file context, no reasoning echo.
+          onEmptyAnswer: (failure) => _recoveryRequest(
+            options: options,
+            failure: failure,
+            jsonMode: jsonMode,
+            implementationPhase: implementationPhase,
+            task: task,
+            knownFiles: _knownRelevantFiles(
+              activeFiles: activeFiles,
+              searches: completedSearches,
+              memoryFiles: memoryFiles,
+            ),
+          ),
         );
       } on ModelApiException catch (e) {
-        final reasoningOnly = e.message.contains('reasoning_content');
-        if (reasoningOnly) reasoningBudgetFailures++;
-        // Widening the budget is a host-side recovery, not a model mistake,
-        // so the first retries must not consume the mistake allowance.
-        if (!reasoningOnly ||
-            reasoningBudgetFailures > reasoningRetryTokens.length) {
-          mistakes++;
+        if (jsonMode && ModelClient.rejectedJsonObjectMode(e.message)) {
+          jsonMode = false;
+          onEvent(
+            AgentEvent('context', 'Provider rejected JSON mode; disabled it'),
+          );
+          continue;
         }
+        mistakes++;
         onEvent(AgentEvent('error', e.message));
         _replaceNote(
           transcript,
           'Host note:',
-          'Host note: Model request failed: ${_bounded(e.message, 800)}\n'
-              'Emit exactly one short JSON action next. First character must be {. '
-              'Do not write reasoning_content or analysis.',
+          'Host note: ${_requestFailureNote(e)}',
         );
         if (mistakes >= options.maxConsecutiveMistakes) {
           throw ModelApiException(
@@ -371,8 +401,6 @@ Reuse retained excerpts — do not re-read unchanged files.
           );
         }
         continue;
-      } finally {
-        _active = null;
       }
       onEvent(
         AgentEvent(
@@ -406,7 +434,32 @@ Reuse retained excerpts — do not re-read unchanged files.
         if (name == 'replace_in_file' || name == 'write_file') {
           _assertCompactEditPayload(name, action);
         }
-        if (!hasEdited &&
+        int? readLineBudget;
+        var readFileBudget = 4;
+        final isRead = name == 'read_file' || name == 'read_files';
+        if (budgetReached && isRead) {
+          if (finalReadUsed) {
+            _softRejectSearch(
+              transcript,
+              name,
+              'The final targeted read was already used.\n'
+              '$investigationBudgetPrompt',
+            );
+            continue;
+          }
+          // Normalize the read instead of denying it: denying would only cost
+          // another model round-trip to ask for the same thing, smaller.
+          finalReadUsed = true;
+          readLineBudget = maxFinalReadLines;
+          readFileBudget = maxFinalReadFiles;
+          onEvent(
+            AgentEvent(
+              'context',
+              'Final targeted read: max $maxFinalReadFiles files, '
+                  '$maxFinalReadLines lines each',
+            ),
+          );
+        } else if (!hasEdited &&
             _blocksPreEditInvestigation(
               name,
               searches: searchesBeforeEdit,
@@ -418,7 +471,7 @@ Reuse retained excerpts — do not re-read unchanged files.
             transcript,
             name,
             'Investigation budget reached ($name blocked).\n'
-                '$investigationBudgetPrompt',
+            '$investigationBudgetPrompt',
           );
           continue;
         }
@@ -494,12 +547,7 @@ Reuse retained excerpts — do not re-read unchanged files.
             if (knownFromMemory.isNotEmpty &&
                 runReadPaths.isEmpty &&
                 !hasEdited) {
-              onEvent(
-                AgentEvent(
-                  'memory',
-                  'Skipped redundant search: $query',
-                ),
-              );
+              onEvent(AgentEvent('memory', 'Skipped redundant search: $query'));
               _softRejectSearch(
                 transcript,
                 'search_files',
@@ -565,9 +613,8 @@ Reuse retained excerpts — do not re-read unchanged files.
               final sample = hits
                   .take(3)
                   .map(
-                    (hit) => hit.line == null
-                        ? hit.path
-                        : '${hit.path}:${hit.line}',
+                    (hit) =>
+                        hit.line == null ? hit.path : '${hit.path}:${hit.line}',
                   )
                   .join(', ');
               runLearned.add('$query → $sample');
@@ -620,6 +667,7 @@ Reuse retained excerpts — do not re-read unchanged files.
               content,
               action,
               focusLines: focusLinesByPath[path],
+              maxLines: readLineBudget,
             );
             _rememberFile(
               activeFiles,
@@ -654,13 +702,21 @@ Reuse retained excerpts — do not re-read unchanged files.
                 'read_files requires a non-empty paths array.',
               );
             }
-            if (rawPaths.length > 4) {
-              throw const ModelApiException(
-                'read_files accepts at most 4 paths per call.',
+            // Over-wide batches are trimmed, not rejected: the host already
+            // knows what the smaller request would look like.
+            final requestedPaths = rawPaths.length > readFileBudget
+                ? rawPaths.take(readFileBudget).toList()
+                : rawPaths;
+            if (requestedPaths.length < rawPaths.length) {
+              _replaceNote(
+                transcript,
+                'Normalized action:',
+                'Normalized action: read_files trimmed to the first '
+                    '${requestedPaths.length} of ${rawPaths.length} paths.',
               );
             }
             final descriptions = <String>[];
-            for (final raw in rawPaths) {
+            for (final raw in requestedPaths) {
               final path = _path(raw);
               final bytes = await store.readBytes(path);
               if (bytes.length > 1024 * 1024) {
@@ -674,6 +730,7 @@ Reuse retained excerpts — do not re-read unchanged files.
                 content,
                 action,
                 focusLines: focusLinesByPath[path],
+                maxLines: readLineBudget,
               );
               _rememberFile(
                 activeFiles,
@@ -688,7 +745,7 @@ Reuse retained excerpts — do not re-read unchanged files.
             onEvent(
               AgentEvent(
                 'tool',
-                'Read ${rawPaths.length} files: ${descriptions.join('; ')}',
+                'Read ${requestedPaths.length} files: ${descriptions.join('; ')}',
               ),
             );
             _replaceNote(
@@ -702,7 +759,7 @@ Reuse retained excerpts — do not re-read unchanged files.
               'Host note:',
               'Host note: Relevant excerpts are in context. Prefer replace_in_file or finish over another say.',
             );
-            filesReadBeforeEdit += rawPaths.length;
+            filesReadBeforeEdit += requestedPaths.length;
           case 'replace_in_file':
             consecutiveSays = 0;
             consecutiveSearches = 0;
@@ -822,6 +879,7 @@ Reuse retained excerpts — do not re-read unchanged files.
             );
           case 'finish':
             final summary = _string(action, 'summary');
+            _flushMemoryOnFailure = null;
             await _persistProjectMemory(
               memoryStore: memoryStore,
               memory: projectMemory,
@@ -881,6 +939,161 @@ Reuse retained excerpts — do not re-read unchanged files.
     );
   }
 
+  /// One model turn; empty content is repaired by [onEmptyAnswer] in place.
+  Future<ModelReply> _requestAction({
+    required AgentRunOptions options,
+    required int maxTokens,
+    required bool jsonMode,
+    required String systemPrompt,
+    required String userPrompt,
+    List<ModelAttachment> attachments = const [],
+    Future<ModelReply> Function(ModelEmptyAnswerException failure)?
+    onEmptyAnswer,
+  }) async {
+    try {
+      return await _send(
+        options: options,
+        maxTokens: maxTokens,
+        jsonMode: jsonMode,
+        systemPrompt: systemPrompt,
+        userPrompt: userPrompt,
+        attachments: attachments,
+      );
+    } on ModelEmptyAnswerException catch (e) {
+      if (onEmptyAnswer == null) rethrow;
+      onEvent(AgentEvent('error', e.message));
+      return await onEmptyAnswer(e);
+    }
+  }
+
+  Future<ModelReply> _send({
+    required AgentRunOptions options,
+    required int maxTokens,
+    required bool jsonMode,
+    required String systemPrompt,
+    required String userPrompt,
+    List<ModelAttachment> attachments = const [],
+  }) async {
+    final client =
+        clientFactory?.call() ?? ModelClient(timeout: options.timeout);
+    _active = client;
+    try {
+      return await client.send(
+        _agentRequestProfile(maxTokens: maxTokens, jsonMode: jsonMode),
+        {'systemPrompt': systemPrompt, 'userPrompt': userPrompt},
+        apiKey: apiKey,
+        attachments: attachments,
+      );
+    } finally {
+      _active = null;
+    }
+  }
+
+  /// Cheap second attempt: phase, allowed actions and known paths only.
+  ///
+  /// The failed reasoning is never echoed back — it is what exhausted the
+  /// budget in the first place.
+  Future<ModelReply> _recoveryRequest({
+    required AgentRunOptions options,
+    required ModelEmptyAnswerException failure,
+    required bool jsonMode,
+    required bool implementationPhase,
+    required String task,
+    required List<String> knownFiles,
+  }) {
+    onEvent(
+      AgentEvent(
+        'context',
+        'Recovery request after '
+            '${failure.reasoningOnly ? 'a reasoning-only reply' : 'empty content'} '
+            '(minimal prompt, $agentRecoveryTokens tokens)',
+      ),
+    );
+    const system =
+        'Return exactly one JSON action in message.content.\n'
+        'Do not explain. Do not use reasoning_content.\n'
+        'Shapes:\n'
+        '{"action":"read_file","path":"relative/file","startLine":1,"lineCount":60}\n'
+        '{"action":"replace_in_file","path":"relative/file","oldText":"...","newText":"..."}\n'
+        '{"action":"write_file","path":"relative/file","content":"..."}\n'
+        '{"action":"search_files","query":"literal text"}\n'
+        '{"action":"finish","summary":"..."}';
+    final allowed = implementationPhase
+        ? const ['read_file', 'replace_in_file', 'write_file', 'finish']
+        : const ['search_files', 'read_file', 'finish'];
+    final user = StringBuffer()
+      ..writeln('Previous response failed because content was empty.')
+      ..writeln()
+      ..writeln('Task: ${_bounded(task.trim(), 200)}')
+      ..writeln(
+        'Current required phase: '
+        '${implementationPhase ? 'implementation' : 'investigation'}.',
+      )
+      ..writeln('Allowed next actions:');
+    for (final action in allowed) {
+      user.writeln('- $action');
+    }
+    if (knownFiles.isNotEmpty) {
+      user
+        ..writeln()
+        ..writeln('Known relevant files:');
+      for (final path in knownFiles) {
+        user.writeln('- $path');
+      }
+    }
+    user
+      ..writeln()
+      ..write('Return the next action only.');
+    return _send(
+      options: options,
+      maxTokens: agentRecoveryTokens,
+      jsonMode: jsonMode,
+      systemPrompt: system,
+      userPrompt: user.toString(),
+    );
+  }
+
+  List<String> _knownRelevantFiles({
+    required Map<String, String> activeFiles,
+    required List<_CompletedSearch> searches,
+    required List<String> memoryFiles,
+  }) {
+    final paths = <String>{};
+    for (final key in activeFiles.keys) {
+      paths.add(key.split(' ').first);
+    }
+    if (searches.isNotEmpty) {
+      for (final hit in searches.last.hits) {
+        if (_looksLikeImplementationPath(hit.path)) paths.add(hit.path);
+      }
+    }
+    paths.addAll(memoryFiles);
+    return paths.take(4).toList();
+  }
+
+  /// Short, reasoning-free note for the transcript after a failed request.
+  String _requestFailureNote(ModelApiException e) {
+    if (e is ModelEmptyAnswerException) {
+      final details = [
+        if (e.finishReason.isNotEmpty) 'finish_reason: ${e.finishReason}',
+        if (e.reasoningOnly)
+          'reasoning_content: ${e.reasoningCharacters} chars',
+        if (e.hadToolCalls) 'native tool_calls',
+      ].join(', ');
+      return 'Previous reply left message.content empty'
+          '${details.isEmpty ? '' : ' ($details)'}. '
+          'Write one short JSON action into message.content. '
+          'First character must be {. No analysis, no reasoning_content.';
+    }
+    return 'Model request failed: ${_bounded(_firstLine(e.message), 200)}. '
+        'Emit exactly one short JSON action next. First character must be {.';
+  }
+
+  static String _firstLine(String value) {
+    final index = value.indexOf('\n');
+    return index < 0 ? value : value.substring(0, index);
+  }
+
   Future<HookResult> _hook(String type, Map<String, dynamic> input) async {
     final result = await hooks.run(type, input);
     onEvent(AgentEvent('hook', '$type: ${result.cancel ? 'blocked' : 'ok'}'));
@@ -913,7 +1126,8 @@ Reuse retained excerpts — do not re-read unchanged files.
     }
     if (name == 'write_file') {
       final content = action['content'];
-      if (content is String && content.length > maxReplaceFragmentCharacters * 4) {
+      if (content is String &&
+          content.length > maxReplaceFragmentCharacters * 4) {
         throw ModelApiException(
           'write_file.content is too large for one agent step '
           '(${content.length} chars). Prefer replace_in_file for small unique fragments.',
@@ -1049,8 +1263,14 @@ Reuse retained excerpts — do not re-read unchanged files.
     List<String> transcript,
     Map<String, String> activeFiles,
     Map<String, String> observations,
+    String memoryPrompt,
   ) {
     final out = StringBuffer(transcript.join('\n\n'));
+    // Pinned: persistent memory must never be evicted by fresh observations.
+    if (memoryPrompt.isNotEmpty) {
+      out.write('\n\n--- Retained project memory (persistent) ---\n');
+      out.write(memoryPrompt);
+    }
     if (observations.isNotEmpty) {
       out.write('\n\nRetained investigation context:');
       for (final entry in observations.entries) {
@@ -1104,43 +1324,37 @@ Reuse retained excerpts — do not re-read unchanged files.
         'Prefer literal search_files or list_files; do not re-list the tree.';
   }
 
-  ModelProfile _withAgentTokenBudget(
-    ModelProfile source, {
-    int? maxTokensOverride,
-    bool disableThinking = true,
+  /// Profile for one agent request: tight budget, no thinking, JSON mode.
+  ModelProfile _agentRequestProfile({
+    required int maxTokens,
+    required bool jsonMode,
   }) {
-    final params = Map<String, dynamic>.from(source.parameters);
-    final existing = params['max_tokens'];
-    final capped = maxTokensOverride ??
-        (existing is num
-            ? existing.clamp(1, agentMaxTokens).toInt()
-            : agentMaxTokens);
-    params['max_tokens'] = capped;
-    // GLM / AI STAR thinking builds otherwise fill reasoning_content and leave
-    // message.content empty until max_tokens, which breaks the JSON protocol.
-    if (disableThinking) {
-      params['enable_thinking'] = false;
-      params['thinking'] = const {'type': 'disabled'};
-      final template = params['chat_template_kwargs'];
-      if (template is Map) {
-        params['chat_template_kwargs'] = {
-          ...Map<String, dynamic>.from(template),
-          'enable_thinking': false,
-        };
-      } else {
-        params['chat_template_kwargs'] = const {'enable_thinking': false};
-      }
+    final format = profile.apiFormat;
+    final params = Map<String, dynamic>.from(profile.parameters);
+    // Each API format names the completion budget differently.
+    params.removeWhere((key, _) => ModelClient.tokenBudgetKeys.contains(key));
+    params[ModelClient.tokenBudgetKey(format)] = maxTokens;
+    for (final entry in ModelClient.disableThinkingParameters(format).entries) {
+      final existing = params[entry.key];
+      final value = entry.value;
+      params[entry.key] = existing is Map && value is Map
+          ? {...Map<String, dynamic>.from(existing), ...value}
+          : value;
+    }
+    if (jsonMode && ModelClient.supportsJsonObjectMode(format)) {
+      // The protocol is a single JSON object, so ask the API to enforce it.
+      params['response_format'] = const {'type': 'json_object'};
     }
     return ModelProfile(
-      id: source.id,
-      name: source.name,
-      provider: source.provider,
-      model: source.model,
-      systemPrompt: source.systemPrompt,
-      userTemplate: source.userTemplate,
+      id: profile.id,
+      name: profile.name,
+      provider: profile.provider,
+      model: profile.model,
+      systemPrompt: profile.systemPrompt,
+      userTemplate: profile.userTemplate,
       parameters: params,
-      apiFormat: source.apiFormat,
-      endpoint: source.endpoint,
+      apiFormat: format,
+      endpoint: profile.endpoint,
     );
   }
 
@@ -1202,9 +1416,7 @@ Reuse retained excerpts — do not re-read unchanged files.
       caseSensitive: false,
     );
     for (final match in withLine.allMatches(result)) {
-      hits.add(
-        _SearchHit(match.group(1)!, int.parse(match.group(2)!)),
-      );
+      hits.add(_SearchHit(match.group(1)!, int.parse(match.group(2)!)));
     }
     for (final match in pathOnly.allMatches(result)) {
       final path = match.group(1)!;
@@ -1259,10 +1471,9 @@ Reuse retained excerpts — do not re-read unchanged files.
     required Set<String> editedPaths,
     required Map<String, String> fingerprints,
     required List<String> learned,
+    List<String> unresolved = const [],
   }) async {
-    if (readPaths.isEmpty &&
-        editedPaths.isEmpty &&
-        summary.trim().isEmpty) {
+    if (readPaths.isEmpty && editedPaths.isEmpty && summary.trim().isEmpty) {
       return;
     }
     try {
@@ -1284,6 +1495,7 @@ Reuse retained excerpts — do not re-read unchanged files.
         editedPaths: editedPaths,
         fileFingerprints: fingerprints,
         learnedFacts: learned.take(6),
+        unresolved: unresolved,
       );
       await memoryStore.save(memory);
       onEvent(AgentEvent('memory', 'Updated area: ${result.areaTitle}'));
@@ -1307,11 +1519,7 @@ Reuse retained excerpts — do not re-read unchanged files.
     }
   }
 
-  void _softRejectSearch(
-    List<String> transcript,
-    String tool,
-    String message,
-  ) {
+  void _softRejectSearch(List<String> transcript, String tool, String message) {
     onEvent(AgentEvent('denied', '$tool blocked'));
     _replaceNote(transcript, 'Host note:', 'Host note: $message');
   }
@@ -1373,7 +1581,9 @@ Reuse retained excerpts — do not re-read unchanged files.
     required int iteration,
     required AgentRunOptions options,
   }) {
+    // Reads are never denied here: the caller narrows them instead.
     if (action == 'read_file' ||
+        action == 'read_files' ||
         action == 'replace_in_file' ||
         action == 'write_file' ||
         action == 'finish' ||
@@ -1382,9 +1592,6 @@ Reuse retained excerpts — do not re-read unchanged files.
     }
     if (action == 'search_files' &&
         searches >= options.maxSearchesBeforeFirstEdit) {
-      return true;
-    }
-    if (action == 'read_files' && filesRead >= options.maxReadsBeforeFirstEdit) {
       return true;
     }
     if (!_investigationExhausted(
@@ -1397,7 +1604,6 @@ Reuse retained excerpts — do not re-read unchanged files.
     }
     return action == 'search_files' ||
         action == 'list_files' ||
-        action == 'read_files' ||
         action == 'say';
   }
 
@@ -1509,6 +1715,7 @@ Reuse retained excerpts — do not re-read unchanged files.
     String content,
     Map<String, dynamic> action, {
     List<int>? focusLines,
+    int? maxLines,
   }) {
     int? integer(String key) {
       final value = action[key];
@@ -1520,52 +1727,51 @@ Reuse retained excerpts — do not re-read unchanged files.
     }
 
     final lines = content.split('\n');
-    final requestedStart = integer('startLine');
-    final requestedCount = integer('lineCount');
-    if (requestedStart != null && requestedStart < 1) {
-      throw const ModelApiException('startLine must be positive.');
-    }
-    if (requestedCount != null &&
-        (requestedCount < 1 || requestedCount > 500)) {
-      throw const ModelApiException('lineCount must be between 1 and 500.');
-    }
+    // Out-of-range windows are clamped rather than rejected, so a slightly
+    // wrong range never costs an extra model round-trip.
+    final requestedStart = integer('startLine')?.clamp(1, lines.length);
+    final requestedCount = integer('lineCount')?.clamp(1, maxLines ?? 500);
+    final budget = maxLines ?? defaultReadLineCount;
 
     if (requestedStart != null || requestedCount != null) {
       final start = (requestedStart ?? 1) - 1;
-      if (start >= lines.length) {
-        throw ModelApiException(
-          'startLine exceeds the ${lines.length}-line file.',
-        );
-      }
-      final count = requestedCount ?? defaultReadLineCount;
+      final count = requestedCount ?? budget;
       return _sliceExcerpt(path, lines, start, start + count);
     }
 
     final uniqueFocus = {
       for (final line in focusLines ?? const <int>[])
         if (line >= 1 && line <= lines.length) line,
-    }.toList()
-      ..sort();
+    }.toList()..sort();
     if (uniqueFocus.isNotEmpty) {
-      return _excerptAroundMatches(path, lines, uniqueFocus);
+      return _excerptAroundMatches(
+        path,
+        lines,
+        uniqueFocus,
+        maxLines: maxLines,
+      );
     }
 
-    if (lines.length <= defaultReadLineCount &&
-        content.length <= maxExcerptCharacters) {
+    if (lines.length <= budget && content.length <= maxExcerptCharacters) {
       return _AgentFileExcerpt(path, content, '$path (${lines.length} lines)');
     }
-    return _sliceExcerpt(path, lines, 0, defaultReadLineCount);
+    return _sliceExcerpt(path, lines, 0, budget);
   }
 
   _AgentFileExcerpt _excerptAroundMatches(
     String path,
     List<String> lines,
-    List<int> matchLines,
-  ) {
+    List<int> matchLines, {
+    int? maxLines,
+  }) {
+    // Share the line budget between match windows when one is set.
+    final radius = maxLines == null
+        ? matchContextRadius
+        : (maxLines ~/ (2 * matchLines.length)).clamp(6, matchContextRadius);
     final windows = <List<int>>[];
     for (final line in matchLines) {
-      final start = (line - 1 - matchContextRadius).clamp(0, lines.length);
-      final end = (line + matchContextRadius).clamp(0, lines.length);
+      final start = (line - 1 - radius).clamp(0, lines.length);
+      final end = (line + radius).clamp(0, lines.length);
       if (windows.isNotEmpty && start <= windows.last[1]) {
         windows.last[1] = end > windows.last[1] ? end : windows.last[1];
       } else {
@@ -1582,8 +1788,7 @@ Reuse retained excerpts — do not re-read unchanged files.
       if (total + chunk.length > maxExcerptCharacters) {
         final remaining = maxExcerptCharacters - total;
         if (remaining <= 0) break;
-        chunk =
-            '${chunk.substring(0, remaining)}\n… excerpt character limit';
+        chunk = '${chunk.substring(0, remaining)}\n… excerpt character limit';
         parts.add('… lines $from-$to …\n$chunk');
         labels.add('$from-$to');
         break;
@@ -1688,6 +1893,7 @@ Reuse retained excerpts — do not re-read unchanged files.
             !item.startsWith('Task:') &&
             !item.startsWith('Phase:') &&
             !item.startsWith('Assistant analysis:') &&
+            !item.startsWith('Memory note:') &&
             !item.startsWith('Host note:'),
       );
       if (removable < 0) break;

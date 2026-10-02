@@ -177,15 +177,35 @@ attachments and every file inspected earlier.
 Before the first edit, a small-task investigation budget applies by default: at
 most three `search_files`, three file reads, and six model iterations. After two
 searches and two reads without an edit, the host injects a progress note urging
-`replace_in_file`, `write_file`, or one final targeted `read_file`. When the
-budget is exhausted, further search, list, and batch read actions are
-soft-rejected; targeted reads and edits remain allowed.
+`replace_in_file`, `write_file`, or one final targeted read. When the budget is
+exhausted, `search_files`, `list_files` and `say` are soft-rejected, while reads
+and edits stay available: the host narrows one final read to two files and sixty
+lines each instead of denying it. Over-wide or out-of-range read requests are
+normalized the same way — trimmed paths and clamped line ranges — because
+denying them would only cost another model round-trip for a smaller version of
+the same request.
 
-Persistent project memory lives in `.tamtoot/agents/project_memory.json`. After
-each successful `finish`, Tamtoot merges a compact area summary (files, learned
-relationships, edits, fingerprints). The next task receives only a relevance-
-selected slice as navigation hints. Memory may skip redundant searches when
-known locations already answer the query; the model must still verify a current
+Completion budgets are small by design: one navigation action gets 700 tokens
+and an edit 1600, which is ample for a single JSON object. The budget is sent
+under the key the selected API format expects (`max_tokens`,
+`max_output_tokens` or Ollama's `num_predict`), together with the
+thinking-disable switches that format documents, and Chat Completions requests
+additionally ask for JSON mode. If a reply still arrives with empty
+`message.content` — typical for thinking builds that fill `reasoning_content`
+until the limit — Tamtoot retries once with a minimal recovery request stating
+only the task line, the required phase, the allowed actions and the known
+relevant files. The failed reasoning is never sent back, and the retry does not
+count as a mistake unless it also fails.
+
+Persistent project memory lives in `.tamtoot/agents/project_memory.json`. It is
+merged after a successful `finish` and also when a run is cut short by the
+mistake limit, the iteration limit, a timeout or Stop, so an aborted
+investigation is not repeated from scratch. Each entry is a compact area summary
+(files, learned relationships, edits, fingerprints). The next task receives only
+a relevance-selected slice, pinned at the top of the prompt where fresh
+observations cannot evict it, plus an up-front note naming the known files to
+read instead of searching. Memory may skip redundant searches when known
+locations already answer the query; the model must still verify a current
 excerpt before editing. Secrets are scrubbed, and the on-disk document is hard-
 capped (~8k characters) with automatic compaction.
 

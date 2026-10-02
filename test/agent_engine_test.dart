@@ -8,6 +8,7 @@ import 'package:tamtoot/core/agents/agent_engine.dart';
 import 'package:tamtoot/core/agents/model_client.dart';
 import 'package:tamtoot/core/agents/model_attachment.dart';
 import 'package:tamtoot/core/agents/model_profile.dart';
+import 'package:tamtoot/core/agents/project_memory.dart';
 import 'package:tamtoot/core/agents/hook_runner.dart';
 import 'package:tamtoot/core/agents/command_runner.dart';
 import 'package:tamtoot/core/git/git_service.dart';
@@ -72,7 +73,9 @@ ModelClient queueClient(List<String> actions) => ModelClient(
 
 void main() {
   final root = Uri.parse('memory:///project/');
-  test('agent sends attachments once and retains investigation context', () async {
+  test(
+    'agent sends attachments once and retains investigation context',
+    () async {
       final store = RepositoryMemory();
       await store.writeText(
         'lib/target.dart',
@@ -189,62 +192,65 @@ void main() {
     },
   );
 
-  test('agent batches several files with read_files in one iteration', () async {
-    final store = RepositoryMemory();
-    await store.writeText('lib/a.dart', 'const alpha = "A";');
-    await store.writeText('lib/b.dart', 'const beta = "B";');
-    final bodies = <String>[];
-    final events = <AgentEvent>[];
-    final actions = [
-      '{"action":"read_files","paths":["lib/a.dart","lib/b.dart"]}',
-      '{"action":"finish","summary":"Loaded both files."}',
-    ];
-    ModelClient client() => ModelClient(
-      client: MockClient((request) async {
-        bodies.add(request.body);
-        return http.Response(
-          jsonEncode({
-            'choices': [
-              {
-                'message': {'content': actions.removeAt(0)},
-                'finish_reason': 'stop',
-              },
-            ],
-          }),
-          200,
-        );
-      }),
-    );
-    final engine = AgentTaskEngine(
-      profile: agentProfile(),
-      store: store,
-      git: AgentGit(),
-      root: root,
-      apiKey: '',
-      onEvent: events.add,
-      approve: (_, _) async => true,
-      clientFactory: client,
-      hooks: NoHooks(),
-      commands: FakeCommands(),
-    );
+  test(
+    'agent batches several files with read_files in one iteration',
+    () async {
+      final store = RepositoryMemory();
+      await store.writeText('lib/a.dart', 'const alpha = "A";');
+      await store.writeText('lib/b.dart', 'const beta = "B";');
+      final bodies = <String>[];
+      final events = <AgentEvent>[];
+      final actions = [
+        '{"action":"read_files","paths":["lib/a.dart","lib/b.dart"]}',
+        '{"action":"finish","summary":"Loaded both files."}',
+      ];
+      ModelClient client() => ModelClient(
+        client: MockClient((request) async {
+          bodies.add(request.body);
+          return http.Response(
+            jsonEncode({
+              'choices': [
+                {
+                  'message': {'content': actions.removeAt(0)},
+                  'finish_reason': 'stop',
+                },
+              ],
+            }),
+            200,
+          );
+        }),
+      );
+      final engine = AgentTaskEngine(
+        profile: agentProfile(),
+        store: store,
+        git: AgentGit(),
+        root: root,
+        apiKey: '',
+        onEvent: events.add,
+        approve: (_, _) async => true,
+        clientFactory: client,
+        hooks: NoHooks(),
+        commands: FakeCommands(),
+      );
 
-    final result = await engine.run(
-      'Read both helpers',
-      const AgentRunOptions(),
-    );
+      final result = await engine.run(
+        'Read both helpers',
+        const AgentRunOptions(),
+      );
 
-    expect(result.success, isTrue);
-    expect(
-      events.map((event) => event.text),
-      contains(contains('Read 2 files')),
-    );
-    expect(bodies, hasLength(2));
-    expect(bodies[1], contains('lib/a.dart'));
-    expect(bodies[1], contains('const alpha'));
-    expect(bodies[1], contains('lib/b.dart'));
-    expect(bodies[1], contains('const beta'));
-    expect(bodies[1], contains('Active file context'));
-  });
+      expect(result.success, isTrue);
+      expect(
+        events.map((event) => event.text),
+        contains(contains('Read 2 files')),
+      );
+      expect(bodies, hasLength(2));
+      expect(bodies[1], contains('lib/a.dart'));
+      expect(bodies[1], contains('const alpha'));
+      expect(bodies[1], contains('lib/b.dart'));
+      expect(bodies[1], contains('const beta'));
+      expect(bodies[1], contains('Active file context'));
+    },
+  );
 
   test(
     'agent accepts the first JSON object when the model emits NDJSON',
@@ -587,8 +593,8 @@ void main() {
     await store.writeText(
       'lib/session_commands.dart',
       '${List.generate(80, (i) => 'line${i + 1};').join('\n')}\n'
-      'documents.open();\n'
-      'documents.open();\n',
+          'documents.open();\n'
+          'documents.open();\n',
     );
     final events = <AgentEvent>[];
     final bodies = <String>[];
@@ -782,54 +788,54 @@ void main() {
     expect(events.where((e) => e.type == 'error'), isEmpty);
   });
 
-  test('agent injects investigation budget after two searches and reads', () async {
-    final store = RepositoryMemory();
-    await store.writeText('lib/a.dart', 'const alpha = 1;');
-    await store.writeText('lib/b.dart', 'const beta = 2;');
-    final bodies = <String>[];
-    final actions = [
-      '{"action":"search_files","query":"alpha","path":"lib"}',
-      '{"action":"read_file","path":"lib/a.dart"}',
-      '{"action":"search_files","query":"beta","path":"lib"}',
-      '{"action":"read_file","path":"lib/b.dart"}',
-      '{"action":"replace_in_file","path":"lib/a.dart","oldText":"const alpha = 1;","newText":"const alpha = 2;"}',
-      '{"action":"finish","summary":"done"}',
-    ];
-    ModelClient client() => ModelClient(
-      client: MockClient((request) async {
-        bodies.add(request.body);
-        return http.Response(
-          jsonEncode({
-            'choices': [
-              {
-                'message': {'content': actions.removeAt(0)},
-                'finish_reason': 'stop',
-              },
-            ],
-          }),
-          200,
-        );
-      }),
-    );
-    final engine = AgentTaskEngine(
-      profile: agentProfile(),
-      store: store,
-      git: AgentGit(),
-      root: root,
-      apiKey: '',
-      onEvent: (_) {},
-      approve: (_, _) async => true,
-      clientFactory: client,
-      hooks: NoHooks(),
-      commands: FakeCommands(),
-    );
-    await engine.run(
-      'Fix alpha',
-      const AgentRunOptions(yolo: false),
-    );
-    expect(bodies[4], contains('Investigation budget reached'));
-    expect(bodies[4], contains('replace_in_file'));
-  });
+  test(
+    'agent injects investigation budget after two searches and reads',
+    () async {
+      final store = RepositoryMemory();
+      await store.writeText('lib/a.dart', 'const alpha = 1;');
+      await store.writeText('lib/b.dart', 'const beta = 2;');
+      final bodies = <String>[];
+      final actions = [
+        '{"action":"search_files","query":"alpha","path":"lib"}',
+        '{"action":"read_file","path":"lib/a.dart"}',
+        '{"action":"search_files","query":"beta","path":"lib"}',
+        '{"action":"read_file","path":"lib/b.dart"}',
+        '{"action":"replace_in_file","path":"lib/a.dart","oldText":"const alpha = 1;","newText":"const alpha = 2;"}',
+        '{"action":"finish","summary":"done"}',
+      ];
+      ModelClient client() => ModelClient(
+        client: MockClient((request) async {
+          bodies.add(request.body);
+          return http.Response(
+            jsonEncode({
+              'choices': [
+                {
+                  'message': {'content': actions.removeAt(0)},
+                  'finish_reason': 'stop',
+                },
+              ],
+            }),
+            200,
+          );
+        }),
+      );
+      final engine = AgentTaskEngine(
+        profile: agentProfile(),
+        store: store,
+        git: AgentGit(),
+        root: root,
+        apiKey: '',
+        onEvent: (_) {},
+        approve: (_, _) async => true,
+        clientFactory: client,
+        hooks: NoHooks(),
+        commands: FakeCommands(),
+      );
+      await engine.run('Fix alpha', const AgentRunOptions(yolo: false));
+      expect(bodies[4], contains('Investigation budget reached'));
+      expect(bodies[4], contains('replace_in_file'));
+    },
+  );
 
   test('agent blocks fourth search before first edit', () async {
     final store = RepositoryMemory();
@@ -886,73 +892,73 @@ void main() {
     expect(events.where((e) => e.type == 'error'), isEmpty);
   });
 
-  test('agent recovers from empty model answers within mistake budget', () async {
-    final store = RepositoryMemory();
-    await store.writeText('lib/a.dart', 'const x = 1;');
-    final events = <AgentEvent>[];
-    final actions = <String?>[
-      null, // force empty answer once
-      '{"action":"finish","summary":"recovered"}',
-    ];
-    ModelClient client() => ModelClient(
-      client: MockClient((request) async {
-        final next = actions.removeAt(0);
-        if (next == null) {
+  test(
+    'agent recovers from empty model answers within mistake budget',
+    () async {
+      final store = RepositoryMemory();
+      await store.writeText('lib/a.dart', 'const x = 1;');
+      final events = <AgentEvent>[];
+      final actions = <String?>[
+        null, // force empty answer once
+        '{"action":"finish","summary":"recovered"}',
+      ];
+      ModelClient client() => ModelClient(
+        client: MockClient((request) async {
+          final next = actions.removeAt(0);
+          if (next == null) {
+            return http.Response(
+              jsonEncode({
+                'model': 'glm-5.3-flash',
+                'choices': [
+                  {
+                    'finish_reason': 'length',
+                    'message': {'role': 'assistant', 'content': ''},
+                  },
+                ],
+              }),
+              200,
+            );
+          }
           return http.Response(
             jsonEncode({
-              'model': 'glm-5.3-flash',
               'choices': [
                 {
-                  'finish_reason': 'length',
-                  'message': {'role': 'assistant', 'content': ''},
+                  'message': {'content': next},
+                  'finish_reason': 'stop',
                 },
               ],
             }),
             200,
           );
-        }
-        return http.Response(
-          jsonEncode({
-            'choices': [
-              {
-                'message': {'content': next},
-                'finish_reason': 'stop',
-              },
-            ],
-          }),
-          200,
-        );
-      }),
-    );
-    final engine = AgentTaskEngine(
-      profile: agentProfile(),
-      store: store,
-      git: AgentGit(),
-      root: root,
-      apiKey: '',
-      onEvent: events.add,
-      approve: (_, _) async => true,
-      clientFactory: client,
-      hooks: NoHooks(),
-      commands: FakeCommands(),
-    );
-    final result = await engine.run(
-      'Recover',
-      const AgentRunOptions(maxConsecutiveMistakes: 2),
-    );
-    expect(result.success, isTrue);
-    expect(
-      events.where((e) => e.type == 'error').map((e) => e.text),
-      anyElement(contains('finish_reason: length')),
-    );
-  });
+        }),
+      );
+      final engine = AgentTaskEngine(
+        profile: agentProfile(),
+        store: store,
+        git: AgentGit(),
+        root: root,
+        apiKey: '',
+        onEvent: events.add,
+        approve: (_, _) async => true,
+        clientFactory: client,
+        hooks: NoHooks(),
+        commands: FakeCommands(),
+      );
+      final result = await engine.run(
+        'Recover',
+        const AgentRunOptions(maxConsecutiveMistakes: 2),
+      );
+      expect(result.success, isTrue);
+      expect(
+        events.where((e) => e.type == 'error').map((e) => e.text),
+        anyElement(contains('finish_reason: length')),
+      );
+    },
+  );
 
   test('agent recovers from truncated replace_in_file JSON', () async {
     final store = RepositoryMemory();
-    await store.writeText(
-      'lib/a.dart',
-      'class A {\n  final value = 1;\n}\n',
-    );
+    await store.writeText('lib/a.dart', 'class A {\n  final value = 1;\n}\n');
     final events = <AgentEvent>[];
     final actions = [
       // Truncated mid-string like a max_tokens cut.
@@ -1021,9 +1027,7 @@ void main() {
     final store = RepositoryMemory();
     await store.writeText('lib/a.dart', 'const x = 1;');
     final bodies = <Map<String, dynamic>>[];
-    final actions = [
-      '{"action":"finish","summary":"done"}',
-    ];
+    final actions = ['{"action":"finish","summary":"done"}'];
     ModelClient client() => ModelClient(
       client: MockClient((request) async {
         bodies.add(
@@ -1064,12 +1068,13 @@ void main() {
       commands: FakeCommands(),
     );
     await engine.run('Done', const AgentRunOptions());
-    expect(bodies.single['max_tokens'], AgentTaskEngine.agentMaxTokens);
+    expect(bodies.single['max_tokens'], AgentTaskEngine.agentActionTokens);
     expect(bodies.single['enable_thinking'], isFalse);
     expect(bodies.single['thinking'], {'type': 'disabled'});
+    expect(bodies.single['response_format'], {'type': 'json_object'});
   });
 
-  test('agent widens tokens after reasoning_content budget failure', () async {
+  test('empty content triggers a cheap recovery request', () async {
     final store = RepositoryMemory();
     await store.writeText('lib/a.dart', 'const x = 1;');
     final bodies = <Map<String, dynamic>>[];
@@ -1095,7 +1100,8 @@ void main() {
                   'message': {
                     'role': 'assistant',
                     'content': '',
-                    'reasoning_content': 'Long analysis without a JSON action.',
+                    'reasoning_content':
+                        'Long analysis mentioning unrepeatable-reasoning-marker.',
                   },
                 },
               ],
@@ -1136,50 +1142,135 @@ void main() {
     );
     final result = await engine.run(
       'Recover',
-      const AgentRunOptions(maxConsecutiveMistakes: 2),
+      const AgentRunOptions(maxConsecutiveMistakes: 1),
     );
     expect(result.success, isTrue);
     expect(bodies, hasLength(2));
-    expect(bodies[1]['max_tokens'], AgentTaskEngine.reasoningRetryTokens.first);
-    expect(jsonEncode(bodies[1]), contains('HOST OVERRIDE'));
+    // Recovery stays cheap in both directions and never echoes the reasoning.
+    expect(bodies[1]['max_tokens'], AgentTaskEngine.agentRecoveryTokens);
+    expect(
+      jsonEncode(bodies[1]),
+      isNot(contains('unrepeatable-reasoning-marker')),
+    );
+    expect(jsonEncode(bodies[1]), isNot(contains('Project file index')));
+    expect(jsonEncode(bodies[1]), contains('Return the next action only'));
+    expect(
+      jsonEncode(bodies[1]).length,
+      lessThan(jsonEncode(bodies[0]).length),
+    );
   });
 
-  test('reasoning-only replies escalate budget without burning mistakes', () async {
+  test('investigation budget narrows read_files instead of denying it', () async {
     final store = RepositoryMemory();
-    await store.writeText('lib/a.dart', 'const x = 1;');
-    final bodies = <Map<String, dynamic>>[];
-    var reasoningReplies = 0;
+    for (final name in ['a', 'b', 'c']) {
+      await store.writeText(
+        'lib/$name.dart',
+        List.generate(200, (i) => 'const ${name}_$i = $i;').join('\n'),
+      );
+    }
+    final events = <AgentEvent>[];
+    final actions = [
+      '{"action":"search_files","query":"a_0","path":"lib"}',
+      '{"action":"read_file","path":"lib/a.dart","startLine":1,"lineCount":200}',
+      '{"action":"search_files","query":"b_0","path":"lib"}',
+      '{"action":"read_file","path":"lib/b.dart","startLine":1,"lineCount":200}',
+      '{"action":"read_file","path":"lib/c.dart","startLine":1,"lineCount":200}',
+      '{"action":"read_files","paths":["lib/a.dart","lib/b.dart","lib/c.dart"],'
+          '"startLine":1,"lineCount":200}',
+      '{"action":"replace_in_file","path":"lib/c.dart",'
+          '"oldText":"const c_0 = 0;","newText":"const c_0 = 1;"}',
+      '{"action":"finish","summary":"done"}',
+    ];
+    final engine = AgentTaskEngine(
+      profile: agentProfile(),
+      store: store,
+      git: AgentGit(),
+      root: root,
+      apiKey: '',
+      onEvent: events.add,
+      approve: (_, _) async => true,
+      clientFactory: () => queueClient(actions),
+      hooks: NoHooks(),
+      commands: FakeCommands(),
+    );
+    final result = await engine.run(
+      'Fix c',
+      const AgentRunOptions(yolo: false, maxConsecutiveMistakes: 1),
+    );
+    expect(result.success, isTrue);
+    expect(actions, isEmpty, reason: 'no action may be denied and repeated');
+    expect(
+      events.where((e) => e.type == 'denied'),
+      isEmpty,
+      reason: 'reads are narrowed, not blocked',
+    );
+    expect(
+      events.map((e) => e.text),
+      contains(contains('Final targeted read: max 2 files')),
+    );
+    expect(events.map((e) => e.text), contains(contains('Read 2 files')));
+  });
+
+  test('aborted runs still persist what they learned', () async {
+    final store = RepositoryMemory();
+    await store.writeText('lib/platform_services.dart', 'String readLocal();');
+    final actions = [
+      '{"action":"read_file","path":"lib/platform_services.dart"}',
+      '{"action":"read_file","path":"lib/does_not_exist.dart"}',
+    ];
+    final engine = AgentTaskEngine(
+      profile: agentProfile(),
+      store: store,
+      git: AgentGit(),
+      root: root,
+      apiKey: '',
+      onEvent: (_) {},
+      approve: (_, _) async => true,
+      clientFactory: () => queueClient(actions),
+      hooks: NoHooks(),
+      commands: FakeCommands(),
+    );
+    await expectLater(
+      engine.run(
+        'Investigate readLocal',
+        const AgentRunOptions(maxConsecutiveMistakes: 1),
+      ),
+      throwsA(isA<ModelApiException>()),
+    );
+    final memory = await ProjectMemoryStore(store).load();
+    expect(
+      memory.areas.expand((area) => area.files),
+      contains('lib/platform_services.dart'),
+    );
+    expect(memory.areas.last.status, 'unresolved');
+  });
+
+  test('memory stays pinned in the prompt and is offered up front', () async {
+    final store = RepositoryMemory();
+    await store.writeText('lib/platform_services.dart', 'String readLocal();');
+    final memory = ProjectMemory();
+    memory.mergeTask(
+      task: 'Opening a PNG fails with a UTF-8 decode error',
+      summary: 'readLocal decodes bytes as UTF-8 text',
+      readPaths: const ['lib/platform_services.dart'],
+      editedPaths: const [],
+      fileFingerprints: const {},
+      learnedFacts: const ['readAsString → lib/platform_services.dart:12'],
+    );
+    await ProjectMemoryStore(store).save(memory);
+    final bodies = <String>[];
+    final actions = [
+      '{"action":"read_file","path":"lib/platform_services.dart"}',
+      '{"action":"finish","summary":"done"}',
+    ];
     ModelClient client() => ModelClient(
       client: MockClient((request) async {
-        bodies.add(
-          Map<String, dynamic>.from(
-            jsonDecode(request.body) as Map<String, dynamic>,
-          ),
-        );
-        if (reasoningReplies < 2) {
-          reasoningReplies++;
-          return http.Response(
-            jsonEncode({
-              'model': 'glm-5.3-flash',
-              'choices': [
-                {
-                  'finish_reason': 'length',
-                  'message': {
-                    'role': 'assistant',
-                    'content': '',
-                    'reasoning_content': 'Analysis without any JSON action.',
-                  },
-                },
-              ],
-            }),
-            200,
-          );
-        }
+        bodies.add(request.body);
         return http.Response(
           jsonEncode({
             'choices': [
               {
-                'message': {'content': '{"action":"finish","summary":"ok"}'},
+                'message': {'content': actions.removeAt(0)},
                 'finish_reason': 'stop',
               },
             ],
@@ -1188,31 +1279,31 @@ void main() {
         );
       }),
     );
+    final events = <AgentEvent>[];
     final engine = AgentTaskEngine(
-      profile: ModelProfile(
-        id: 'agent',
-        name: 'Agent',
-        provider: 'ai-star',
-        model: 'glm-5.3-flash',
-        endpoint: 'https://example.test/v1/chat/completions',
-      ),
+      profile: agentProfile(),
       store: store,
       git: AgentGit(),
       root: root,
       apiKey: '',
-      onEvent: (_) {},
+      onEvent: events.add,
       approve: (_, _) async => true,
       clientFactory: client,
       hooks: NoHooks(),
       commands: FakeCommands(),
     );
-    final result = await engine.run(
-      'Recover twice',
-      const AgentRunOptions(maxConsecutiveMistakes: 1),
+    await engine.run(
+      'Opening a JPG fails with a UTF-8 decode error',
+      const AgentRunOptions(),
     );
-    expect(result.success, isTrue);
-    expect(bodies, hasLength(3));
-    expect(bodies[1]['max_tokens'], AgentTaskEngine.reasoningRetryTokens[0]);
-    expect(bodies[2]['max_tokens'], AgentTaskEngine.reasoningRetryTokens[1]);
+    for (final body in bodies) {
+      expect(body, contains('Retained project memory (persistent)'));
+      expect(body, contains('lib/platform_services.dart'));
+    }
+    expect(bodies.first, contains('Retained memory already points to'));
+    expect(
+      events.where((e) => e.type == 'memory').map((e) => e.text),
+      anyElement(contains('Reused known location')),
+    );
   });
 }

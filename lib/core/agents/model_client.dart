@@ -11,6 +11,34 @@ class ModelApiException implements Exception {
   String toString() => message;
 }
 
+/// The API answered, but `message.content` carried no usable text.
+///
+/// Thinking builds (GLM, Qwen, DeepSeek R1 …) hit this constantly: they fill
+/// `reasoning_content` until `max_tokens` and leave content empty. Callers need
+/// the metadata without the reasoning text so they can retry cheaply.
+class ModelEmptyAnswerException extends ModelApiException {
+  const ModelEmptyAnswerException(
+    super.message, {
+    this.finishReason = '',
+    this.reasoningCharacters = 0,
+    this.hadToolCalls = false,
+  });
+
+  final String finishReason;
+  final int reasoningCharacters;
+  final bool hadToolCalls;
+
+  bool get reasoningOnly => reasoningCharacters > 0;
+
+  ModelEmptyAnswerException withMessage(String message) =>
+      ModelEmptyAnswerException(
+        message,
+        finishReason: finishReason,
+        reasoningCharacters: reasoningCharacters,
+        hadToolCalls: hadToolCalls,
+      );
+}
+
 class ModelReply {
   const ModelReply(
     this.text, {
@@ -128,9 +156,11 @@ class ModelClient {
           safe = lines.join('\n');
         }
       }
-      throw ModelApiException(
-        safe.length > 2000 ? '${safe.substring(0, 2000)}…' : safe,
-      );
+      final bounded = safe.length > 2000 ? '${safe.substring(0, 2000)}…' : safe;
+      // Keep the empty-answer type so callers can run a cheap recovery request.
+      throw e is ModelEmptyAnswerException
+          ? e.withMessage(bounded)
+          : ModelApiException(bounded);
     } on FormatException {
       throw const ModelApiException(
         'Invalid endpoint, parameters or API response. Check the selected API format.',
@@ -146,6 +176,48 @@ class ModelClient {
       _client.close();
     }
   }
+
+  /// Key that carries the completion budget in one API format.
+  static String tokenBudgetKey(String apiFormat) => switch (apiFormat) {
+    'responses' => 'max_output_tokens',
+    'ollama' => 'num_predict',
+    _ => 'max_tokens',
+  };
+
+  static const tokenBudgetKeys = {
+    'max_tokens',
+    'max_output_tokens',
+    'num_predict',
+  };
+
+  /// Provider switches that stop thinking builds from filling
+  /// `reasoning_content` while `message.content` stays empty.
+  ///
+  /// Only fields the matching API actually documents are sent: unknown
+  /// parameters make strict gateways answer HTTP 400 instead of text.
+  static Map<String, dynamic> disableThinkingParameters(String apiFormat) =>
+      switch (apiFormat) {
+        'anthropic' => const {
+          'thinking': {'type': 'disabled'},
+        },
+        'responses' => const {
+          'reasoning': {'effort': 'minimal'},
+        },
+        'ollama' => const {'think': false},
+        _ => const {
+          'enable_thinking': false,
+          'thinking': {'type': 'disabled'},
+          'chat_template_kwargs': {'enable_thinking': false},
+        },
+      };
+
+  /// Chat Completions gateways accept OpenAI JSON mode; the others do not.
+  static bool supportsJsonObjectMode(String apiFormat) =>
+      apiFormat == 'chat-completions';
+
+  /// True when an HTTP error says the gateway rejected JSON mode itself.
+  static bool rejectedJsonObjectMode(String message) =>
+      message.startsWith('HTTP 4') && message.contains('response_format');
 
   static Map<String, dynamic> requestBody(
     ModelProfile p,
@@ -163,9 +235,13 @@ class ModelClient {
     final userText = user.trim().isEmpty && attachments.isNotEmpty
         ? 'Please inspect the attached files.'
         : user;
+    // Ollama carries sampling knobs in `options`, but `think` is top-level.
+    final ollamaOptions = Map<String, dynamic>.from(p.parameters);
+    final ollamaThink = ollamaOptions.remove('think');
     return switch (p.apiFormat) {
       'ollama' => {
         'model': p.model,
+        if (ollamaThink != null) 'think': ollamaThink!,
         'messages': [
           if (system.isNotEmpty) {'role': 'system', 'content': system},
           {
@@ -178,7 +254,7 @@ class ModelClient {
               ],
           },
         ],
-        'options': p.parameters,
+        'options': ollamaOptions,
         'stream': stream,
       },
       'responses' => {
@@ -428,8 +504,7 @@ class ModelClient {
     }
     try {
       return parseReply(format, data);
-    } on ModelApiException catch (e) {
-      if (!e.message.startsWith('No text answer returned')) rethrow;
+    } on ModelEmptyAnswerException catch (e) {
       final choice = () {
         final choices = data['choices'];
         if (choices is List && choices.isNotEmpty) return choices.first;
@@ -438,7 +513,7 @@ class ModelClient {
         if (format == 'ollama') return data['message'];
         return data;
       }();
-      throw ModelApiException(
+      throw e.withMessage(
         '${e.message}\nraw: ${_previewDiagnostic(choice, max: 900)}',
       );
     }
@@ -616,7 +691,8 @@ class ModelClient {
               (message['refusal'] as String).trim().isNotEmpty) {
             parts.add(message['refusal'] as String);
           }
-          final reasoning = message['reasoning_content'] ?? message['reasoning'];
+          final reasoning =
+              message['reasoning_content'] ?? message['reasoning'];
           if (reasoning is String && reasoning.trim().isNotEmpty) {
             reasoningText = reasoning;
             hints.add('reasoning_content: ${reasoning.length} chars');
@@ -626,9 +702,11 @@ class ModelClient {
           if (blocks is List) {
             for (final block in blocks) {
               if (block is! Map) continue;
-              if ({'reasoning', 'thinking', 'reasoning_text'}.contains(
-                    block['type'],
-                  ) &&
+              if ({
+                    'reasoning',
+                    'thinking',
+                    'reasoning_text',
+                  }.contains(block['type']) &&
                   block['text'] is String &&
                   (block['text'] as String).trim().isNotEmpty) {
                 reasoningText ??= block['text'] as String;
@@ -672,7 +750,7 @@ class ModelClient {
     }
 
     if (parts.join().trim().isEmpty) {
-      throw ModelApiException(
+      throw ModelEmptyAnswerException(
         _emptyAnswerMessage(
           finishReason: finishReason,
           content: rawContent,
@@ -681,13 +759,17 @@ class ModelClient {
           hints: hints,
           reasoning: reasoningText,
         ),
+        finishReason: finishReason ?? '',
+        reasoningCharacters: reasoningText?.length ?? 0,
+        hadToolCalls: rawToolCalls != null,
       );
     }
     // If content is prose/reasoning but embeds a JSON action, prefer the action.
     if (!_looksLikeJsonAction(parts.join('\n'))) {
       final fromParts = _embeddedJsonAction(parts.join('\n'));
-      final fromReasoning =
-          reasoningText == null ? null : _embeddedJsonAction(reasoningText);
+      final fromReasoning = reasoningText == null
+          ? null
+          : _embeddedJsonAction(reasoningText);
       final embedded = fromParts ?? fromReasoning;
       if (embedded != null) {
         return ModelReply(

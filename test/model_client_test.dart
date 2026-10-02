@@ -433,6 +433,68 @@ void main() {
     expect(anthropic['tool_choice'], {'type': 'none'});
   });
 
+  test('each API format names its own budget and thinking switches', () {
+    expect(ModelClient.tokenBudgetKey('chat-completions'), 'max_tokens');
+    expect(ModelClient.tokenBudgetKey('responses'), 'max_output_tokens');
+    expect(ModelClient.tokenBudgetKey('ollama'), 'num_predict');
+    expect(ModelClient.tokenBudgetKey('anthropic'), 'max_tokens');
+
+    final chat = ModelClient.disableThinkingParameters('chat-completions');
+    expect(chat['enable_thinking'], isFalse);
+    expect(chat['thinking'], {'type': 'disabled'});
+    expect(chat['chat_template_kwargs'], {'enable_thinking': false});
+    // Strict gateways answer 400 for parameters they do not know.
+    expect(ModelClient.disableThinkingParameters('anthropic').keys, [
+      'thinking',
+    ]);
+    expect(ModelClient.disableThinkingParameters('responses')['reasoning'], {
+      'effort': 'minimal',
+    });
+    expect(ModelClient.supportsJsonObjectMode('chat-completions'), isTrue);
+    expect(ModelClient.supportsJsonObjectMode('anthropic'), isFalse);
+  });
+
+  test('Ollama keeps think outside the sampling options', () {
+    final body = ModelClient.requestBody(
+      ModelProfile(
+        id: 'o',
+        name: 'Ollama',
+        provider: 'ollama',
+        model: 'qwen3',
+        apiFormat: 'ollama',
+        endpoint: 'http://localhost:11434/api/chat',
+        parameters: const {'think': false, 'num_predict': 700},
+      ),
+      prompt,
+    );
+    expect(body['think'], isFalse);
+    expect(body['options'], {'num_predict': 700});
+  });
+
+  test('empty content raises a typed failure with reasoning metadata', () {
+    expect(
+      () => ModelClient.parseReply('chat-completions', {
+        'model': 'glm-5.3-flash',
+        'choices': [
+          {
+            'finish_reason': 'length',
+            'message': {
+              'role': 'assistant',
+              'content': '',
+              'reasoning_content': 'Analysis without a JSON action.',
+            },
+          },
+        ],
+      }),
+      throwsA(
+        isA<ModelEmptyAnswerException>()
+            .having((e) => e.finishReason, 'finishReason', 'length')
+            .having((e) => e.reasoningOnly, 'reasoningOnly', isTrue)
+            .having((e) => e.reasoningCharacters, 'reasoningCharacters', 31),
+      ),
+    );
+  });
+
   test('parseReply explains empty tool_calls answers', () {
     expect(
       () => ModelClient.parseReply('chat-completions', {
