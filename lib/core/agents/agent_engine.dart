@@ -157,6 +157,15 @@ Reuse retained excerpts — do not re-read unchanged files.
   /// Agent replies are one JSON action; keep a small headroom for verbose models.
   static const int agentMaxTokens = 2048;
 
+  /// Escalating budgets for providers that ignore thinking-disable flags.
+  static const List<int> reasoningRetryTokens = [8192, 16384];
+
+  static int _reasoningRetryTokens(int failures) =>
+      reasoningRetryTokens[(failures - 1).clamp(
+        0,
+        reasoningRetryTokens.length - 1,
+      )];
+
   /// Default window when the model does not specify a range.
   static const int defaultReadLineCount = 70;
 
@@ -309,11 +318,14 @@ Reuse retained excerpts — do not re-read unchanged files.
           activeFiles,
           observations,
         );
+        // Thinking models burn the budget on reasoning before writing content,
+        // so retries must widen the budget, not shrink it.
         final requestProfile = reasoningBudgetFailures > 0
             ? _withAgentTokenBudget(
                 profile,
-                maxTokensOverride: 600,
-                disableThinking: true,
+                maxTokensOverride: _reasoningRetryTokens(
+                  reasoningBudgetFailures,
+                ),
               )
             : agentProfile;
         reply = await client.send(
@@ -323,9 +335,11 @@ Reuse retained excerpts — do not re-read unchanged files.
               requestProfile.systemPrompt,
               protocol,
               if (reasoningBudgetFailures > 0)
-                'HOST OVERRIDE: Previous reply used reasoning_content and left '
-                    'content empty. Answer with ONLY one JSON action object. '
-                    'First character must be {. No analysis text.',
+                'HOST OVERRIDE: Your previous reply filled reasoning_content '
+                    'and left message.content empty, so it was discarded. '
+                    'Think as little as possible. Write the JSON action into '
+                    'message.content immediately. First character must be {. '
+                    'Pick the simplest next action, even if imperfect.',
               if (mcp != null && mcp!.tools.isNotEmpty)
                 'Available MCP tools:\n${mcp!.describe()}',
             ].join('\n\n'),
@@ -335,9 +349,13 @@ Reuse retained excerpts — do not re-read unchanged files.
           attachments: iteration == 1 ? attachments : const [],
         );
       } on ModelApiException catch (e) {
-        mistakes++;
-        if (e.message.contains('reasoning_content')) {
-          reasoningBudgetFailures++;
+        final reasoningOnly = e.message.contains('reasoning_content');
+        if (reasoningOnly) reasoningBudgetFailures++;
+        // Widening the budget is a host-side recovery, not a model mistake,
+        // so the first retries must not consume the mistake allowance.
+        if (!reasoningOnly ||
+            reasoningBudgetFailures > reasoningRetryTokens.length) {
+          mistakes++;
         }
         onEvent(AgentEvent('error', e.message));
         _replaceNote(

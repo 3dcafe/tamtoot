@@ -1069,7 +1069,7 @@ void main() {
     expect(bodies.single['thinking'], {'type': 'disabled'});
   });
 
-  test('agent tightens tokens after reasoning_content budget failure', () async {
+  test('agent widens tokens after reasoning_content budget failure', () async {
     final store = RepositoryMemory();
     await store.writeText('lib/a.dart', 'const x = 1;');
     final bodies = <Map<String, dynamic>>[];
@@ -1140,7 +1140,79 @@ void main() {
     );
     expect(result.success, isTrue);
     expect(bodies, hasLength(2));
-    expect(bodies[1]['max_tokens'], 600);
+    expect(bodies[1]['max_tokens'], AgentTaskEngine.reasoningRetryTokens.first);
     expect(jsonEncode(bodies[1]), contains('HOST OVERRIDE'));
+  });
+
+  test('reasoning-only replies escalate budget without burning mistakes', () async {
+    final store = RepositoryMemory();
+    await store.writeText('lib/a.dart', 'const x = 1;');
+    final bodies = <Map<String, dynamic>>[];
+    var reasoningReplies = 0;
+    ModelClient client() => ModelClient(
+      client: MockClient((request) async {
+        bodies.add(
+          Map<String, dynamic>.from(
+            jsonDecode(request.body) as Map<String, dynamic>,
+          ),
+        );
+        if (reasoningReplies < 2) {
+          reasoningReplies++;
+          return http.Response(
+            jsonEncode({
+              'model': 'glm-5.3-flash',
+              'choices': [
+                {
+                  'finish_reason': 'length',
+                  'message': {
+                    'role': 'assistant',
+                    'content': '',
+                    'reasoning_content': 'Analysis without any JSON action.',
+                  },
+                },
+              ],
+            }),
+            200,
+          );
+        }
+        return http.Response(
+          jsonEncode({
+            'choices': [
+              {
+                'message': {'content': '{"action":"finish","summary":"ok"}'},
+                'finish_reason': 'stop',
+              },
+            ],
+          }),
+          200,
+        );
+      }),
+    );
+    final engine = AgentTaskEngine(
+      profile: ModelProfile(
+        id: 'agent',
+        name: 'Agent',
+        provider: 'ai-star',
+        model: 'glm-5.3-flash',
+        endpoint: 'https://example.test/v1/chat/completions',
+      ),
+      store: store,
+      git: AgentGit(),
+      root: root,
+      apiKey: '',
+      onEvent: (_) {},
+      approve: (_, _) async => true,
+      clientFactory: client,
+      hooks: NoHooks(),
+      commands: FakeCommands(),
+    );
+    final result = await engine.run(
+      'Recover twice',
+      const AgentRunOptions(maxConsecutiveMistakes: 1),
+    );
+    expect(result.success, isTrue);
+    expect(bodies, hasLength(3));
+    expect(bodies[1]['max_tokens'], AgentTaskEngine.reasoningRetryTokens[0]);
+    expect(bodies[2]['max_tokens'], AgentTaskEngine.reasoningRetryTokens[1]);
   });
 }

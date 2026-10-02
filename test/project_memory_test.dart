@@ -6,8 +6,6 @@ import 'dart:convert';
 import 'package:tamtoot/core/agents/agent_engine.dart';
 import 'package:tamtoot/core/agents/project_memory.dart';
 import 'package:tamtoot/core/agents/model_client.dart';
-import 'package:tamtoot/core/agents/hook_runner.dart';
-import 'package:tamtoot/core/agents/command_runner.dart';
 
 import 'agent_engine_test.dart' show AgentGit, NoHooks, FakeCommands, agentProfile;
 import 'explorer_test.dart' show RepositoryMemory;
