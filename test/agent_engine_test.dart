@@ -388,4 +388,88 @@ void main() {
       ),
     );
   });
+
+  test('agent rejects repeated say without tools', () async {
+    final store = RepositoryMemory();
+    await store.writeText('lib/a.dart', 'const x = 1;');
+    final events = <AgentEvent>[];
+    final actions = [
+      '{"action":"say","text":"Plan: edit a.dart"}',
+      '{"action":"say","text":"Still planning"}',
+      '{"action":"say","text":"Planning again"}',
+      '{"action":"say","text":"And again"}',
+    ];
+    final engine = AgentTaskEngine(
+      profile: agentProfile(),
+      store: store,
+      git: AgentGit(),
+      root: root,
+      apiKey: '',
+      onEvent: events.add,
+      approve: (_, _) async => true,
+      clientFactory: () => queueClient(actions),
+      hooks: NoHooks(),
+      commands: FakeCommands(),
+    );
+    await expectLater(
+      engine.run(
+        'Edit a',
+        const AgentRunOptions(maxConsecutiveMistakes: 2, maxIterations: 8),
+      ),
+      throwsA(
+        isA<ModelApiException>().having(
+          (e) => e.message,
+          'message',
+          contains('consecutive mistakes'),
+        ),
+      ),
+    );
+    expect(
+      events.where((event) => event.type == 'error').map((e) => e.text),
+      anyElement(contains('Repeated say')),
+    );
+  });
+
+  test('agent compacts project index after the first tool', () async {
+    final store = RepositoryMemory();
+    await store.writeText('lib/a.dart', 'const needle = 1;');
+    final bodies = <String>[];
+    final actions = [
+      '{"action":"say","text":"Find needle"}',
+      '{"action":"search_files","query":"needle","path":"lib"}',
+      '{"action":"finish","summary":"done"}',
+    ];
+    ModelClient client() => ModelClient(
+      client: MockClient((request) async {
+        bodies.add(request.body);
+        return http.Response(
+          jsonEncode({
+            'choices': [
+              {
+                'message': {'content': actions.removeAt(0)},
+                'finish_reason': 'stop',
+              },
+            ],
+          }),
+          200,
+        );
+      }),
+    );
+    final engine = AgentTaskEngine(
+      profile: agentProfile(),
+      store: store,
+      git: AgentGit(),
+      root: root,
+      apiKey: '',
+      onEvent: (_) {},
+      approve: (_, _) async => true,
+      clientFactory: client,
+      hooks: NoHooks(),
+      commands: FakeCommands(),
+    );
+    await engine.run('Find', const AgentRunOptions());
+    expect(bodies[1], contains('Project file index'));
+    expect(bodies[1], isNot(contains('already provided once')));
+    expect(bodies[2], contains('already provided once'));
+  });
 }

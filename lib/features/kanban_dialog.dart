@@ -70,6 +70,7 @@ class _KanbanDialogState extends State<KanbanDialog> {
   }
 
   Future<void> _create() async {
+    if (busy) return;
     final name = title.text.trim();
     if (name.isEmpty) return;
     var id = name
@@ -276,6 +277,8 @@ class _KanbanDialogState extends State<KanbanDialog> {
                     child: TextField(
                       controller: title,
                       enabled: !busy,
+                      textInputAction: TextInputAction.done,
+                      onSubmitted: (_) => _create(),
                       decoration: const InputDecoration(labelText: 'New task'),
                     ),
                   ),
@@ -284,6 +287,8 @@ class _KanbanDialogState extends State<KanbanDialog> {
                     child: TextField(
                       controller: description,
                       enabled: !busy,
+                      textInputAction: TextInputAction.done,
+                      onSubmitted: (_) => _create(),
                       decoration:
                           const InputDecoration(labelText: 'Description'),
                     ),

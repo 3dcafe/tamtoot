@@ -94,33 +94,26 @@ class AgentTaskEngine {
   }
 
   static const protocol = '''
-You are an autonomous coding agent.
-RUNTIME LIMIT: Tamtoot is a mobile IDE. It has no terminal, interpreter, compiler, debugger, build runner, or test runner.
-NEVER try to run tests, analysis, builds, applications, debuggers, shell commands, or executables.
-Do not ask the user to run them during the agent loop. Do not spend iterations looking for a way to execute them.
-Verify edits by reading the changed files. State in the final summary that runtime checks were not executed in the mobile IDE.
-FIRST RESPONSE RULE: your first response for every new task must only analyze the request.
-For that first response, emit one say action with a concise plan: restate the goal, identify what you need to inspect, name likely files or areas, and mention important risks or ambiguities.
-Attachments are sent only with this first request. Extract and retain the task-relevant facts from them in your analysis instead of asking for them again.
-Do not list files, read files, write files, call MCP tools, or finish in the first response.
-Begin project inspection and implementation only after the host returns your analysis to you for the next iteration.
-Reply with exactly ONE JSON object for the next step. Never return two actions.
-Do not wrap the object in markdown. Do not add commentary before or after it.
-Allowed actions (examples only — emit one of these shapes):
+You are an autonomous coding agent in Tamtoot (mobile IDE: no terminal, builds, tests, or shell).
+Never run or ask for runtime checks; verify by reading files and say so in the finish summary.
+FIRST RESPONSE: one say with a short plan only (goal, files to inspect, risks). No tools yet.
+After that, use tools. Do not emit another say until after a tool result, and only for a short status.
+Repeating say without a tool wastes tokens and is a mistake — prefer read_file / search_files / replace_in_file / finish.
+Reply with exactly ONE JSON object. No markdown fences, no commentary outside JSON.
+Actions:
 - say: {"action":"say","text":"..."}
 - list_files: {"action":"list_files","path":"relative/folder"}
 - search_files: {"action":"search_files","query":"symbol or text","path":"optional/relative/folder"}
-- read_file: {"action":"read_file","path":"relative/file","startLine":1,"lineCount":240}
+- read_file: {"action":"read_file","path":"relative/file","startLine":1,"lineCount":160}
 - replace_in_file: {"action":"replace_in_file","path":"relative/file","oldText":"exact existing text","newText":"replacement text"}
 - write_file: {"action":"write_file","path":"relative/file","content":"..."}
 - mcp_call: {"action":"mcp_call","server":"name","tool":"tool_name","arguments":{}}
 - finish: {"action":"finish","summary":"..."}
-Use relative paths only. Never access .git or .tamtoot. Read relevant files before writing.
-Keep the working set small. Use the one-time project index and search_files to locate candidates, then read only the files and line ranges needed for the task.
-The host preserves a bounded investigation history and several recent file excerpts between requests. Use that retained evidence instead of repeating searches and reads.
-Prefer replace_in_file for a small, exact edit. Use write_file when creating a file or when the complete replacement is intentional.
-Do not repeat an identical list, search, or read unless an edit changed the relevant file. Once you have enough evidence, make the edit instead of continuing to inspect unrelated files.
-After editing, read the changed area to inspect it, then finish without running commands.
+Relative paths only. Never touch .git or .tamtoot.
+Use the one-time project index + search_files; read only needed line ranges.
+Reuse retained excerpts — do not re-read unchanged files.
+When Active file context already has the edit site, call replace_in_file immediately.
+After a small edit, re-read the changed area, then finish.
 ''';
 
   Future<AgentRunResult> run(String task, AgentRunOptions options) async {
@@ -186,6 +179,7 @@ After editing, read the changed area to inspect it, then finish without running 
     final activeFiles = LinkedHashMap<String, String>();
     final observations = LinkedHashMap<String, String>();
     var mistakes = 0;
+    var consecutiveSays = 0;
     for (var iteration = 1; iteration <= options.maxIterations; iteration++) {
       if (_stopped) {
         throw const ModelApiException('Agent stopped.');
@@ -246,22 +240,32 @@ After editing, read the changed area to inspect it, then finish without running 
             transcript.add('Tool blocked by hook: $reason');
             continue;
           }
-          if (pre.context.isNotEmpty) {
+            if (pre.context.isNotEmpty) {
             transcript.add('Hook context:\n${pre.context}');
           }
         }
         switch (name) {
           case 'say':
             final text = _string(action, 'text');
+            if (iteration > 1) {
+              consecutiveSays++;
+              if (consecutiveSays >= 2) {
+                throw const ModelApiException(
+                  'Repeated say without tools wastes tokens. '
+                  'Emit read_file, search_files, replace_in_file, write_file, or finish now.',
+                );
+              }
+            }
             onEvent(AgentEvent('say', text));
             if (iteration == 1) {
               _replaceNote(
                 transcript,
                 'Assistant analysis:',
-                'Assistant analysis: $text',
+                'Assistant analysis: ${_bounded(text, 1200)}',
               );
               transcript[1] =
-                  'Phase: implementation. Select only relevant files; inspect before editing.';
+                  'Phase: implementation. Prefer tools over say. '
+                  'Select only relevant files; inspect before editing.';
               _rememberObservation(
                 observations,
                 'Project index',
@@ -271,20 +275,28 @@ After editing, read the changed area to inspect it, then finish without running 
               _replaceNote(
                 transcript,
                 'Assistant update:',
-                'Assistant update: ${_bounded(text, 4000)}',
+                'Assistant update: ${_bounded(text, 600)}',
+              );
+              _replaceNote(
+                transcript,
+                'Host note:',
+                'Host note: Next step must be a tool or finish — not another say.',
               );
             }
           case 'list_files':
+            consecutiveSays = 0;
             final path = _path(action['path'] ?? '', allowEmpty: true);
             final files = await store.listFiles(path);
-            final visible = files.where(_useful).take(300).join('\n');
+            final visible = files.where(_useful).take(120).join('\n');
             onEvent(AgentEvent('tool', 'Listed ${path.isEmpty ? '.' : path}'));
             _rememberObservation(
               observations,
               'List ${path.isEmpty ? '.' : path}',
               'Tool list_files result for ${path.isEmpty ? '.' : path}:\n$visible',
             );
+            _compactProjectIndex(observations);
           case 'search_files':
+            consecutiveSays = 0;
             final query = _string(action, 'query').trim();
             if (query.length < 2) {
               throw const ModelApiException(
@@ -299,7 +311,9 @@ After editing, read the changed area to inspect it, then finish without running 
               'Search $path::$query',
               'Tool search_files result for "$query":\n$result',
             );
+            _compactProjectIndex(observations);
           case 'read_file':
+            consecutiveSays = 0;
             final path = _path(action['path']);
             final bytes = await store.readBytes(path);
             if (bytes.length > 1024 * 1024) {
@@ -321,7 +335,16 @@ After editing, read the changed area to inspect it, then finish without running 
               'Tool read_file result:',
               'Tool read_file result: ${excerpt.description}. The content is in Active file context.',
             );
+            _compactProjectIndex(observations);
+            if (activeFiles.isNotEmpty) {
+              _replaceNote(
+                transcript,
+                'Host note:',
+                'Host note: File context is available. Prefer replace_in_file or finish over another say.',
+              );
+            }
           case 'replace_in_file':
+            consecutiveSays = 0;
             final path = _path(action['path']);
             final oldText = _string(action, 'oldText');
             final newText = action['newText'];
@@ -368,6 +391,7 @@ After editing, read the changed area to inspect it, then finish without running 
               'Tool replace_in_file result: edited $path successfully. Read the changed area before finishing.',
             );
           case 'write_file':
+            consecutiveSays = 0;
             final path = _path(action['path']);
             final content = _string(action, 'content');
             if (utf8.encode(content).length > 1024 * 1024) {
@@ -403,6 +427,7 @@ After editing, read the changed area to inspect it, then finish without running 
               ),
             );
           case 'mcp_call':
+            consecutiveSays = 0;
             final registry = mcp;
             if (registry == null) {
               throw const ModelApiException('No MCP servers are connected.');
@@ -593,10 +618,10 @@ After editing, read the changed area to inspect it, then finish without running 
 
   Future<String> _projectIndex() async {
     final paths = (await store.listFiles('')).where(_useful).toList()..sort();
-    const maxPaths = 300;
-    const maxCharacters = 8000;
+    const maxPaths = 120;
+    const maxCharacters = 3500;
     final out = StringBuffer(
-      'Project file index. Use search_files or list_files if you need another view:\n',
+      'Project file index (one-time). Prefer search_files afterward:\n',
     );
     var included = 0;
     for (final path in paths.take(maxPaths)) {
@@ -609,6 +634,20 @@ After editing, read the changed area to inspect it, then finish without running 
     }
     onEvent(AgentEvent('context', 'Indexed $included project files once'));
     return out.toString();
+  }
+
+  void _compactProjectIndex(LinkedHashMap<String, String> observations) {
+    final current = observations['Project index'];
+    if (current == null || current.startsWith('Project file index already')) {
+      return;
+    }
+    final lines = current
+        .split('\n')
+        .where((line) => line.trim().isNotEmpty && !line.startsWith('…'))
+        .length;
+    observations['Project index'] =
+        'Project file index already provided once (~$lines paths). '
+        'Prefer search_files or list_files; do not re-list the tree.';
   }
 
   Future<String> _searchFiles(String query, String directory) async {
@@ -721,7 +760,7 @@ After editing, read the changed area to inspect it, then finish without running 
     final needsExcerpt =
         requestedStart != null ||
         requestedCount != null ||
-        content.length > 14000;
+        content.length > 8000;
     if (!needsExcerpt) {
       return _AgentFileExcerpt(path, content, '$path (${lines.length} lines)');
     }
@@ -731,11 +770,11 @@ After editing, read the changed area to inspect it, then finish without running 
         'startLine exceeds the ${lines.length}-line file.',
       );
     }
-    final count = requestedCount ?? 240;
+    final count = requestedCount ?? 160;
     final end = (start + count).clamp(0, lines.length).toInt();
     var excerpt = lines.sublist(start, end).join('\n');
-    if (excerpt.length > 14000) {
-      excerpt = '${excerpt.substring(0, 14000)}\n… excerpt character limit';
+    if (excerpt.length > 8000) {
+      excerpt = '${excerpt.substring(0, 8000)}\n… excerpt character limit';
     }
     final from = start + 1;
     final to = end;
@@ -757,7 +796,7 @@ After editing, read the changed area to inspect it, then finish without running 
     final evicted = <String>[];
     int characters() =>
         activeFiles.values.fold(0, (total, value) => total + value.length);
-    while (activeFiles.length > 8 || characters() > 72000) {
+    while (activeFiles.length > 4 || characters() > 28000) {
       final oldest = activeFiles.keys.first;
       activeFiles.remove(oldest);
       evicted.add(oldest);
@@ -777,10 +816,10 @@ After editing, read the changed area to inspect it, then finish without running 
     String value,
   ) {
     observations.remove(key);
-    observations[key] = _bounded(value, 12000);
+    observations[key] = _bounded(value, 6000);
     int characters() =>
         observations.values.fold(0, (total, item) => total + item.length);
-    while (observations.length > 8 || characters() > 36000) {
+    while (observations.length > 6 || characters() > 16000) {
       observations.remove(observations.keys.first);
     }
   }
@@ -797,12 +836,13 @@ After editing, read the changed area to inspect it, then finish without running 
 
   void _trim(List<String> transcript) {
     var characters = transcript.fold(0, (sum, item) => sum + item.length);
-    while (characters > 48000 && transcript.length > 3) {
+    while (characters > 24000 && transcript.length > 3) {
       final removable = transcript.indexWhere(
         (item) =>
             !item.startsWith('Task:') &&
             !item.startsWith('Phase:') &&
-            !item.startsWith('Assistant analysis:'),
+            !item.startsWith('Assistant analysis:') &&
+            !item.startsWith('Host note:'),
       );
       if (removable < 0) break;
       characters -= transcript[removable].length;
