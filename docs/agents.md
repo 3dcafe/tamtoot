@@ -162,15 +162,17 @@ request. The first request also receives a compact project file index once. The
 model then uses literal `search_files` queries (concrete symbols/identifiers,
 not natural-language descriptions), directory listing and ranged reads to select
 relevant content. The host enforces at most two consecutive `search_files`
-calls, rejects near-duplicate search queries, and after implementation-file hits
-requires `read_files` / `read_file` before another search. Prefer `read_files`
-to load several matching files in one iteration instead of repeating single
-`read_file` calls. Recent search results and listings remain in a bounded
-investigation history, while a small set of recent file excerpts remains in the
-working set. Small edits use `replace_in_file`, so the model can change a
-verified fragment without reconstructing an entire large file. Older context is
-still evicted when the combined limits are reached, preventing every iteration
-from resending all attachments and every file inspected earlier.
+calls since the last read/edit, soft-rejects duplicate/similar queries under
+overlapping paths (returning known matches without counting a mistake), and
+after ≤4 implementation-file hits requires `read_file` / `read_files` before
+another search. Reads without an explicit range focus ~40 lines around prior
+search hits instead of lines 1–N. Active file context keeps at most two compact
+excerpts. Prefer `read_files` only when several files are necessary. Recent
+search results and listings remain in a bounded investigation history. Small
+edits use `replace_in_file`, so the model can change a verified fragment without
+reconstructing an entire large file. Older context is still evicted when the
+combined limits are reached, preventing every iteration from resending all
+attachments and every file inspected earlier.
 
 ## YOLO Mode
 

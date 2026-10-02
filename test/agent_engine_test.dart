@@ -534,13 +534,29 @@ void main() {
     final store = RepositoryMemory();
     await store.writeText('lib/a.dart', 'const alpha = 1;');
     final events = <AgentEvent>[];
+    final bodies = <String>[];
     final actions = [
       '{"action":"search_files","query":"zzzone","path":"lib"}',
       '{"action":"search_files","query":"zzztwo","path":"lib"}',
       '{"action":"search_files","query":"zzzthree","path":"lib"}',
-      '{"action":"list_files","path":"lib"}',
       '{"action":"finish","summary":"done"}',
     ];
+    ModelClient client() => ModelClient(
+      client: MockClient((request) async {
+        bodies.add(request.body);
+        return http.Response(
+          jsonEncode({
+            'choices': [
+              {
+                'message': {'content': actions.removeAt(0)},
+                'finish_reason': 'stop',
+              },
+            ],
+          }),
+          200,
+        );
+      }),
+    );
     final engine = AgentTaskEngine(
       profile: agentProfile(),
       store: store,
@@ -549,7 +565,7 @@ void main() {
       apiKey: '',
       onEvent: events.add,
       approve: (_, _) async => true,
-      clientFactory: () => queueClient(actions),
+      clientFactory: client,
       hooks: NoHooks(),
       commands: FakeCommands(),
     );
@@ -559,20 +575,143 @@ void main() {
     );
     expect(result.success, isTrue);
     expect(
-      events.where((event) => event.type == 'error').map((e) => e.text),
-      anyElement(contains('Stop searching')),
+      events.where((event) => event.type == 'denied').map((e) => e.text),
+      anyElement(contains('search_files blocked')),
     );
+    expect(bodies[3], contains('Search rejected'));
+    expect(bodies[3], contains('2 search_files'));
+  });
+
+  test('agent soft-rejects duplicate search with known matches', () async {
+    final store = RepositoryMemory();
+    await store.writeText(
+      'lib/session_commands.dart',
+      '${List.generate(80, (i) => 'line${i + 1};').join('\n')}\n'
+      'documents.open();\n'
+      'documents.open();\n',
+    );
+    final events = <AgentEvent>[];
+    final bodies = <String>[];
+    final actions = [
+      '{"action":"search_files","query":"documents.open","path":"lib"}',
+      '{"action":"search_files","query":"documents.open","path":"lib"}',
+      '{"action":"read_file","path":"lib/session_commands.dart"}',
+      '{"action":"finish","summary":"done"}',
+    ];
+    ModelClient client() => ModelClient(
+      client: MockClient((request) async {
+        bodies.add(request.body);
+        return http.Response(
+          jsonEncode({
+            'choices': [
+              {
+                'message': {'content': actions.removeAt(0)},
+                'finish_reason': 'stop',
+              },
+            ],
+          }),
+          200,
+        );
+      }),
+    );
+    final engine = AgentTaskEngine(
+      profile: agentProfile(),
+      store: store,
+      git: AgentGit(),
+      root: root,
+      apiKey: '',
+      onEvent: events.add,
+      approve: (_, _) async => true,
+      clientFactory: client,
+      hooks: NoHooks(),
+      commands: FakeCommands(),
+    );
+    final result = await engine.run(
+      'Open documents',
+      const AgentRunOptions(maxConsecutiveMistakes: 1, maxIterations: 10),
+    );
+    expect(result.success, isTrue);
+    expect(bodies[2], contains('Search rejected'));
+    expect(bodies[2], contains('already searched'));
+    expect(bodies[2], contains('Known matches'));
+    expect(bodies[2], contains('session_commands.dart'));
+    expect(events.where((e) => e.type == 'error'), isEmpty);
+  });
+
+  test('agent reads around search match lines not from line 1', () async {
+    final store = RepositoryMemory();
+    final lines = [
+      for (var i = 1; i <= 120; i++)
+        i == 59 ? 'const targetMarker = 1;' : 'const filler$i = $i;',
+    ];
+    await store.writeText('lib/session_commands.dart', lines.join('\n'));
+    final bodies = <String>[];
+    final actions = [
+      '{"action":"search_files","query":"targetMarker","path":"lib"}',
+      '{"action":"read_file","path":"lib/session_commands.dart"}',
+      '{"action":"finish","summary":"done"}',
+    ];
+    ModelClient client() => ModelClient(
+      client: MockClient((request) async {
+        bodies.add(request.body);
+        return http.Response(
+          jsonEncode({
+            'choices': [
+              {
+                'message': {'content': actions.removeAt(0)},
+                'finish_reason': 'stop',
+              },
+            ],
+          }),
+          200,
+        );
+      }),
+    );
+    final engine = AgentTaskEngine(
+      profile: agentProfile(),
+      store: store,
+      git: AgentGit(),
+      root: root,
+      apiKey: '',
+      onEvent: (_) {},
+      approve: (_, _) async => true,
+      clientFactory: client,
+      hooks: NoHooks(),
+      commands: FakeCommands(),
+    );
+    await engine.run('Find marker', const AgentRunOptions());
+    expect(bodies[2], contains('targetMarker'));
+    expect(bodies[2], contains('around search matches'));
+    expect(bodies[2], isNot(contains('filler1 =')));
+    expect(bodies[2], contains('filler39'));
   });
 
   test('agent rejects similar search queries', () async {
     final store = RepositoryMemory();
     await store.writeText('lib/a.dart', 'const x = 1;');
     final events = <AgentEvent>[];
+    final bodies = <String>[];
     final actions = [
       '{"action":"search_files","query":"locked input","path":"lib"}',
       '{"action":"search_files","query":"locked input field","path":"lib"}',
       '{"action":"finish","summary":"done"}',
     ];
+    ModelClient client() => ModelClient(
+      client: MockClient((request) async {
+        bodies.add(request.body);
+        return http.Response(
+          jsonEncode({
+            'choices': [
+              {
+                'message': {'content': actions.removeAt(0)},
+                'finish_reason': 'stop',
+              },
+            ],
+          }),
+          200,
+        );
+      }),
+    );
     final engine = AgentTaskEngine(
       profile: agentProfile(),
       store: store,
@@ -581,31 +720,46 @@ void main() {
       apiKey: '',
       onEvent: events.add,
       approve: (_, _) async => true,
-      clientFactory: () => queueClient(actions),
+      clientFactory: client,
       hooks: NoHooks(),
       commands: FakeCommands(),
     );
     final result = await engine.run(
       'Find lock',
-      const AgentRunOptions(maxConsecutiveMistakes: 3, maxIterations: 10),
+      const AgentRunOptions(maxConsecutiveMistakes: 1, maxIterations: 10),
     );
     expect(result.success, isTrue);
-    expect(
-      events.where((event) => event.type == 'error').map((e) => e.text),
-      anyElement(contains('too similar')),
-    );
+    expect(bodies[2], contains('Search rejected'));
+    expect(events.where((e) => e.type == 'error'), isEmpty);
   });
 
   test('agent requires read after search hits before another search', () async {
     final store = RepositoryMemory();
     await store.writeText('lib/target.dart', 'const TextField = 1;');
     final events = <AgentEvent>[];
+    final bodies = <String>[];
     final actions = [
       '{"action":"search_files","query":"TextField","path":"lib"}',
       '{"action":"search_files","query":"AgentDialog","path":"lib"}',
       '{"action":"read_file","path":"lib/target.dart"}',
       '{"action":"finish","summary":"done"}',
     ];
+    ModelClient client() => ModelClient(
+      client: MockClient((request) async {
+        bodies.add(request.body);
+        return http.Response(
+          jsonEncode({
+            'choices': [
+              {
+                'message': {'content': actions.removeAt(0)},
+                'finish_reason': 'stop',
+              },
+            ],
+          }),
+          200,
+        );
+      }),
+    );
     final engine = AgentTaskEngine(
       profile: agentProfile(),
       store: store,
@@ -614,19 +768,18 @@ void main() {
       apiKey: '',
       onEvent: events.add,
       approve: (_, _) async => true,
-      clientFactory: () => queueClient(actions),
+      clientFactory: client,
       hooks: NoHooks(),
       commands: FakeCommands(),
     );
     final result = await engine.run(
       'Inspect TextField',
-      const AgentRunOptions(maxConsecutiveMistakes: 3, maxIterations: 10),
+      const AgentRunOptions(maxConsecutiveMistakes: 1, maxIterations: 10),
     );
     expect(result.success, isTrue);
-    expect(
-      events.where((event) => event.type == 'error').map((e) => e.text),
-      anyElement(contains('Stop searching')),
-    );
+    expect(bodies[2], contains('Search rejected'));
+    expect(bodies[2], contains('≤4 implementation'));
+    expect(events.where((e) => e.type == 'error'), isEmpty);
   });
 
   test('agent caps max_tokens for JSON actions', () async {

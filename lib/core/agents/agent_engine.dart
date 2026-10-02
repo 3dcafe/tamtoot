@@ -101,10 +101,13 @@ Reply with exactly ONE JSON object. No markdown fences, no commentary outside JS
 
 Investigation rules:
 - search_files is literal text search. Search concrete symbols/identifiers ("TextField", "AgentDialog", "_running"), not natural-language descriptions.
-- Maximum 2 consecutive search_files calls.
-- When a search returns plausible implementation files, READ THEM NEXT.
-- Prefer read_files with up to 4 files.
-- Never repeat a search with slightly different wording.
+- Maximum 2 consecutive search_files calls since the last read/edit.
+- When a search returns ≤4 plausible implementation files, READ THEM NEXT.
+- Never repeat a search with the same/similar query under the same or overlapping path.
+- Read the smallest useful context.
+- If search results include line numbers, read ~40 lines around each match.
+- Do not read files from line 1 unless the file structure is actually needed.
+- Prefer 1-2 highly relevant files; use up to 4 only when necessary.
 - If you already have the edit location, edit immediately.
 - After editing, read the changed area once and finish.
 
@@ -112,8 +115,8 @@ Actions:
 - say: {"action":"say","text":"..."}
 - list_files: {"action":"list_files","path":"relative/folder"}
 - search_files: {"action":"search_files","query":"literal symbol or text","path":"optional/relative/folder"}
-- read_file: {"action":"read_file","path":"relative/file","startLine":1,"lineCount":160}
-- read_files: {"action":"read_files","paths":["a.dart","b.dart"],"startLine":1,"lineCount":160}
+- read_file: {"action":"read_file","path":"relative/file","startLine":optional,"lineCount":optional}
+- read_files: {"action":"read_files","paths":["a.dart","b.dart"],"startLine":optional,"lineCount":optional}
 - replace_in_file: {"action":"replace_in_file","path":"relative/file","oldText":"exact existing text","newText":"replacement text"}
 - write_file: {"action":"write_file","path":"relative/file","content":"..."}
 - mcp_call: {"action":"mcp_call","server":"name","tool":"tool_name","arguments":{}}
@@ -124,6 +127,16 @@ Reuse retained excerpts — do not re-read unchanged files.
 
   /// Agent replies are one JSON action; large completion budgets only waste latency.
   static const int agentMaxTokens = 1200;
+
+  /// Default window when the model does not specify a range.
+  static const int defaultReadLineCount = 70;
+
+  /// Lines kept around each search hit when auto-focusing a read.
+  static const int matchContextRadius = 20;
+
+  static const int maxActiveFiles = 2;
+  static const int maxActiveCharacters = 8000;
+  static const int maxExcerptCharacters = 3000;
 
   Future<AgentRunResult> run(String task, AgentRunOptions options) async {
     if (task.trim().isEmpty) {
@@ -196,7 +209,8 @@ Reuse retained excerpts — do not re-read unchanged files.
     var consecutiveSays = 0;
     var consecutiveSearches = 0;
     var requireReadAfterSearch = false;
-    final recentSearchQueries = <String>[];
+    final completedSearches = <_CompletedSearch>[];
+    final focusLinesByPath = <String, List<int>>{};
     final agentProfile = _withAgentTokenBudget(profile);
     for (var iteration = 1; iteration <= options.maxIterations; iteration++) {
       if (_stopped) {
@@ -285,7 +299,15 @@ Reuse retained excerpts — do not re-read unchanged files.
             );
           case 'list_files':
             consecutiveSays = 0;
-            consecutiveSearches = 0;
+            if (requireReadAfterSearch) {
+              _softRejectSearch(
+                transcript,
+                'list_files',
+                'Search returned implementation files. '
+                    'Read them with read_file/read_files before listing or searching again.',
+              );
+              continue;
+            }
             final path = _path(action['path'] ?? '', allowEmpty: true);
             final files = await store.listFiles(path);
             final visible = files.where(_useful).take(120).join('\n');
@@ -298,30 +320,64 @@ Reuse retained excerpts — do not re-read unchanged files.
             _compactProjectIndex(observations);
           case 'search_files':
             consecutiveSays = 0;
-            if (requireReadAfterSearch || consecutiveSearches >= 2) {
-              throw const ModelApiException(
-                'Stop searching. Read the most relevant files from previous '
-                'results with read_files (up to 4 paths), or list_files / edit / finish.',
-              );
-            }
             final query = _string(action, 'query').trim();
             if (query.length < 2) {
               throw const ModelApiException(
                 'search_files query must contain at least 2 characters.',
               );
             }
-            if (recentSearchQueries.any(
-              (previous) => _similarSearchQuery(previous, query),
-            )) {
-              throw const ModelApiException(
-                'Stop searching. That query is too similar to a previous search. '
-                'Read the most relevant files from previous results.',
-              );
-            }
             final path = _path(action['path'] ?? '', allowEmpty: true);
+            final duplicate = _findDuplicateSearch(
+              completedSearches,
+              query,
+              path,
+            );
+            if (duplicate != null) {
+              _softRejectSearch(
+                transcript,
+                'search_files',
+                'Search rejected: "$query" was already searched.\n'
+                    '${_formatKnownMatches(duplicate)}\n'
+                    'Read the relevant area or edit it.',
+              );
+              continue;
+            }
+            if (requireReadAfterSearch) {
+              _softRejectSearch(
+                transcript,
+                'search_files',
+                'Search rejected: previous search returned ≤4 implementation files.\n'
+                    '${_formatKnownMatchesFromAll(completedSearches)}\n'
+                    'Read the relevant area or edit it.',
+              );
+              continue;
+            }
+            if (consecutiveSearches >= 2) {
+              _softRejectSearch(
+                transcript,
+                'search_files',
+                'Search rejected: already ran 2 search_files since the last read/edit.\n'
+                    '${_formatKnownMatchesFromAll(completedSearches)}\n'
+                    'Read the relevant area or edit it.',
+              );
+              continue;
+            }
             final result = await _searchFiles(query, path);
-            recentSearchQueries.add(query);
+            final hits = _parseSearchHits(result);
+            final completed = _CompletedSearch(
+              query: query,
+              path: path,
+              result: result,
+              hits: hits,
+            );
+            completedSearches.add(completed);
             consecutiveSearches++;
+            for (final hit in hits) {
+              if (hit.line == null) continue;
+              focusLinesByPath
+                  .putIfAbsent(hit.path, () => <int>[])
+                  .add(hit.line!);
+            }
             onEvent(AgentEvent('tool', 'Searched project for “$query”'));
             _rememberObservation(
               observations,
@@ -329,22 +385,27 @@ Reuse retained excerpts — do not re-read unchanged files.
               'Tool search_files result for "$query":\n$result',
             );
             _compactProjectIndex(observations);
-            final hits = _implementationPathsFromSearch(result);
-            if (hits.isNotEmpty) {
+            final implementationPaths = hits
+                .map((hit) => hit.path)
+                .where(_looksLikeImplementationPath)
+                .toSet()
+                .toList();
+            if (implementationPaths.isNotEmpty &&
+                implementationPaths.length <= 4) {
               requireReadAfterSearch = true;
               _replaceNote(
                 transcript,
                 'Host note:',
-                'Host note: Search returned implementation files '
-                    '(${hits.join(', ')}). READ THEM NEXT with read_files. '
-                    'Do not refine the search.',
+                'Host note: Search returned ${implementationPaths.length} '
+                    'implementation file(s) (${implementationPaths.join(', ')}). '
+                    'READ ~40 lines around the matched lines next. Do not search again.',
               );
             } else {
               _replaceNote(
                 transcript,
                 'Host note:',
-                'Host note: After search, batch relevant files with read_files '
-                    '(up to 4 paths) instead of many single read_file calls.',
+                'Host note: After search, read ~40 lines around matches in the '
+                    'most relevant 1-2 files. Prefer read_files only when needed.',
               );
             }
           case 'read_file':
@@ -359,7 +420,12 @@ Reuse retained excerpts — do not re-read unchanged files.
               );
             }
             final content = utf8.decode(bytes);
-            final excerpt = _fileExcerpt(path, content, action);
+            final excerpt = _fileExcerpt(
+              path,
+              content,
+              action,
+              focusLines: focusLinesByPath[path],
+            );
             _rememberFile(
               activeFiles,
               excerpt.key,
@@ -405,7 +471,12 @@ Reuse retained excerpts — do not re-read unchanged files.
                 );
               }
               final content = utf8.decode(bytes);
-              final excerpt = _fileExcerpt(path, content, action);
+              final excerpt = _fileExcerpt(
+                path,
+                content,
+                action,
+                focusLines: focusLinesByPath[path],
+              );
               _rememberFile(
                 activeFiles,
                 excerpt.key,
@@ -429,7 +500,7 @@ Reuse retained excerpts — do not re-read unchanged files.
             _replaceNote(
               transcript,
               'Host note:',
-              'Host note: Multiple files are in context. Prefer replace_in_file or finish over another say.',
+              'Host note: Relevant excerpts are in context. Prefer replace_in_file or finish over another say.',
             );
           case 'replace_in_file':
             consecutiveSays = 0;
@@ -781,19 +852,83 @@ Reuse retained excerpts — do not re-read unchanged files.
     return intersection >= 2 && intersection / smaller >= 0.6;
   }
 
-  static List<String> _implementationPathsFromSearch(String result) {
-    if (result.startsWith('No matches')) return const [];
-    final found = <String>[];
-    final pattern = RegExp(
-      r'^([\w./+-]+\.(?:dart|kt|swift|ts|tsx|js|jsx|java|go|rs|py|cs|cpp|h|m|mm))(?::|\s|\()',
-      multiLine: true,
-    );
-    for (final match in pattern.allMatches(result)) {
-      final path = match.group(1)!;
-      if (!found.contains(path)) found.add(path);
-      if (found.length >= 4) break;
+  static bool _pathsOverlap(String a, String b) {
+    if (a.isEmpty || b.isEmpty || a == b) return true;
+    return a.startsWith('$b/') || b.startsWith('$a/');
+  }
+
+  static _CompletedSearch? _findDuplicateSearch(
+    List<_CompletedSearch> searches,
+    String query,
+    String path,
+  ) {
+    for (final previous in searches.reversed) {
+      if (!_pathsOverlap(previous.path, path)) continue;
+      if (_similarSearchQuery(previous.query, query)) return previous;
     }
-    return found;
+    return null;
+  }
+
+  static bool _looksLikeImplementationPath(String path) {
+    return RegExp(
+      r'\.(dart|kt|swift|ts|tsx|js|jsx|java|go|rs|py|cs|cpp|h|m|mm)$',
+      caseSensitive: false,
+    ).hasMatch(path);
+  }
+
+  static List<_SearchHit> _parseSearchHits(String result) {
+    if (result.startsWith('No matches')) return const [];
+    final hits = <_SearchHit>[];
+    final withLine = RegExp(
+      r'^([\w./+-]+\.(?:dart|kt|swift|ts|tsx|js|jsx|java|go|rs|py|cs|cpp|h|m|mm)):(\d+):',
+      multiLine: true,
+      caseSensitive: false,
+    );
+    final pathOnly = RegExp(
+      r'^([\w./+-]+\.(?:dart|kt|swift|ts|tsx|js|jsx|java|go|rs|py|cs|cpp|h|m|mm)) \(path match\)',
+      multiLine: true,
+      caseSensitive: false,
+    );
+    for (final match in withLine.allMatches(result)) {
+      hits.add(
+        _SearchHit(match.group(1)!, int.parse(match.group(2)!)),
+      );
+    }
+    for (final match in pathOnly.allMatches(result)) {
+      final path = match.group(1)!;
+      if (hits.any((hit) => hit.path == path)) continue;
+      hits.add(_SearchHit(path, null));
+    }
+    return hits;
+  }
+
+  void _softRejectSearch(
+    List<String> transcript,
+    String tool,
+    String message,
+  ) {
+    onEvent(AgentEvent('denied', '$tool blocked'));
+    _replaceNote(transcript, 'Host note:', 'Host note: $message');
+  }
+
+  static String _formatKnownMatches(_CompletedSearch search) {
+    final lines = <String>[];
+    for (final hit in search.hits.take(8)) {
+      lines.add(
+        hit.line == null ? '- ${hit.path}' : '- ${hit.path}:${hit.line}',
+      );
+    }
+    if (lines.isEmpty) {
+      return 'Known matches: (none retained; use previous search result in context)';
+    }
+    return 'Known matches:\n${lines.join('\n')}';
+  }
+
+  static String _formatKnownMatchesFromAll(List<_CompletedSearch> searches) {
+    if (searches.isEmpty) {
+      return 'Known matches: (none yet)';
+    }
+    return _formatKnownMatches(searches.last);
   }
 
   Future<String> _searchFiles(String query, String directory) async {
@@ -882,8 +1017,9 @@ Reuse retained excerpts — do not re-read unchanged files.
   _AgentFileExcerpt _fileExcerpt(
     String path,
     String content,
-    Map<String, dynamic> action,
-  ) {
+    Map<String, dynamic> action, {
+    List<int>? focusLines,
+  }) {
     int? integer(String key) {
       final value = action[key];
       if (value == null) return null;
@@ -903,26 +1039,90 @@ Reuse retained excerpts — do not re-read unchanged files.
         (requestedCount < 1 || requestedCount > 500)) {
       throw const ModelApiException('lineCount must be between 1 and 500.');
     }
-    final needsExcerpt =
-        requestedStart != null ||
-        requestedCount != null ||
-        content.length > 8000;
-    if (!needsExcerpt) {
+
+    if (requestedStart != null || requestedCount != null) {
+      final start = (requestedStart ?? 1) - 1;
+      if (start >= lines.length) {
+        throw ModelApiException(
+          'startLine exceeds the ${lines.length}-line file.',
+        );
+      }
+      final count = requestedCount ?? defaultReadLineCount;
+      return _sliceExcerpt(path, lines, start, start + count);
+    }
+
+    final uniqueFocus = {
+      for (final line in focusLines ?? const <int>[])
+        if (line >= 1 && line <= lines.length) line,
+    }.toList()
+      ..sort();
+    if (uniqueFocus.isNotEmpty) {
+      return _excerptAroundMatches(path, lines, uniqueFocus);
+    }
+
+    if (lines.length <= defaultReadLineCount &&
+        content.length <= maxExcerptCharacters) {
       return _AgentFileExcerpt(path, content, '$path (${lines.length} lines)');
     }
-    final start = (requestedStart ?? 1) - 1;
-    if (start >= lines.length) {
-      throw ModelApiException(
-        'startLine exceeds the ${lines.length}-line file.',
-      );
+    return _sliceExcerpt(path, lines, 0, defaultReadLineCount);
+  }
+
+  _AgentFileExcerpt _excerptAroundMatches(
+    String path,
+    List<String> lines,
+    List<int> matchLines,
+  ) {
+    final windows = <List<int>>[];
+    for (final line in matchLines) {
+      final start = (line - 1 - matchContextRadius).clamp(0, lines.length);
+      final end = (line + matchContextRadius).clamp(0, lines.length);
+      if (windows.isNotEmpty && start <= windows.last[1]) {
+        windows.last[1] = end > windows.last[1] ? end : windows.last[1];
+      } else {
+        windows.add([start, end]);
+      }
     }
-    final count = requestedCount ?? 160;
-    final end = (start + count).clamp(0, lines.length).toInt();
-    var excerpt = lines.sublist(start, end).join('\n');
-    if (excerpt.length > 8000) {
-      excerpt = '${excerpt.substring(0, 8000)}\n… excerpt character limit';
+    final parts = <String>[];
+    final labels = <String>[];
+    var total = 0;
+    for (final window in windows) {
+      final from = window[0] + 1;
+      final to = window[1];
+      var chunk = lines.sublist(window[0], window[1]).join('\n');
+      if (total + chunk.length > maxExcerptCharacters) {
+        final remaining = maxExcerptCharacters - total;
+        if (remaining <= 0) break;
+        chunk =
+            '${chunk.substring(0, remaining)}\n… excerpt character limit';
+        parts.add('… lines $from-$to …\n$chunk');
+        labels.add('$from-$to');
+        break;
+      }
+      parts.add('… lines $from-$to …\n$chunk');
+      labels.add('$from-$to');
+      total += chunk.length;
     }
-    final from = start + 1;
+    return _AgentFileExcerpt(
+      '$path [lines ${labels.join(',')}]',
+      parts.join('\n\n'),
+      '$path lines ${labels.join(', ')} of ${lines.length} (around search matches)',
+    );
+  }
+
+  _AgentFileExcerpt _sliceExcerpt(
+    String path,
+    List<String> lines,
+    int start,
+    int endExclusive,
+  ) {
+    final end = endExclusive.clamp(0, lines.length).toInt();
+    final safeStart = start.clamp(0, end).toInt();
+    var excerpt = lines.sublist(safeStart, end).join('\n');
+    if (excerpt.length > maxExcerptCharacters) {
+      excerpt =
+          '${excerpt.substring(0, maxExcerptCharacters)}\n… excerpt character limit';
+    }
+    final from = safeStart + 1;
     final to = end;
     return _AgentFileExcerpt(
       '$path [lines $from-$to]',
@@ -937,12 +1137,22 @@ Reuse retained excerpts — do not re-read unchanged files.
     String content,
     List<String> transcript,
   ) {
-    activeFiles.remove(key);
-    activeFiles[key] = content;
+    // Keep one excerpt per path (drop older ranges for the same file).
+    final pathKey = key.split(' ').first;
+    activeFiles.removeWhere(
+      (existing, _) =>
+          existing == key ||
+          existing == pathKey ||
+          existing.startsWith('$pathKey '),
+    );
+    activeFiles[key] = content.length <= maxExcerptCharacters
+        ? content
+        : '${content.substring(0, maxExcerptCharacters)}\n… excerpt character limit';
     final evicted = <String>[];
     int characters() =>
         activeFiles.values.fold(0, (total, value) => total + value.length);
-    while (activeFiles.length > 4 || characters() > 28000) {
+    while (activeFiles.length > maxActiveFiles ||
+        characters() > maxActiveCharacters) {
       final oldest = activeFiles.keys.first;
       activeFiles.remove(oldest);
       evicted.add(oldest);
@@ -1001,6 +1211,25 @@ Reuse retained excerpts — do not re-read unchanged files.
     if (trimmed.length <= max) return trimmed;
     return '${trimmed.substring(0, max)}…';
   }
+}
+
+class _SearchHit {
+  const _SearchHit(this.path, this.line);
+  final String path;
+  final int? line;
+}
+
+class _CompletedSearch {
+  const _CompletedSearch({
+    required this.query,
+    required this.path,
+    required this.result,
+    required this.hits,
+  });
+  final String query;
+  final String path;
+  final String result;
+  final List<_SearchHit> hits;
 }
 
 class _AgentFileExcerpt {
