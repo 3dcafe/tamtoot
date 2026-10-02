@@ -161,6 +161,8 @@ class _AgentPanelState extends State<AgentPanel> {
         ? '${arguments['executable']} ${(arguments['args'] as List?)?.join(' ') ?? ''}\n\nThe command runs directly in the project folder.'
         : action == 'mcp_call'
         ? '${arguments['server']}/${arguments['tool']}\n\nArguments: ${jsonEncode(arguments['arguments'])}'
+        : action == 'replace_in_file'
+        ? '$path\n\nThe agent will replace one exact text fragment in this file.'
         : '$path\n\nThe agent will replace this file.';
     return await showDialog<bool>(
           context: context,

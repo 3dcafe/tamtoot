@@ -135,6 +135,7 @@ before it runs it. The available actions are:
 | `list_files` | Lists one project-relative directory |
 | `search_files` | Searches paths and text, returning a small set of matching lines |
 | `read_file` | Reads one project-relative regular file or a requested line range |
+| `replace_in_file` | Replaces one unique exact fragment in an existing file |
 | `write_file` | Replaces one project-relative regular file |
 | `mcp_call` | Calls a tool advertised by a connected MCP server |
 | `finish` | Completes the task after all run conditions are satisfied |
@@ -160,9 +161,11 @@ Agent context is incremental. User attachments are sent only with the first
 analysis request, where the model is instructed to retain their relevant facts.
 The next request receives a compact project file index once. The model then uses
 `search_files`, directory listing and ranged reads to select relevant content.
-Search results and listings are one-use context, while only four recent file
-excerpts are retained in the bounded working set. Older excerpts are evicted and
-can be read again when needed. This prevents every iteration from resending all
+Recent search results and listings remain in a bounded investigation history,
+while up to eight recent file excerpts remain in the working set. Small edits
+use `replace_in_file`, so the model can change a verified fragment without
+reconstructing an entire large file. Older context is still evicted when the
+combined limits are reached, preventing every iteration from resending all
 attachments and every file inspected earlier.
 
 ## YOLO Mode

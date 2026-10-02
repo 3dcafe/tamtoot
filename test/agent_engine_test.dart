@@ -72,67 +72,124 @@ ModelClient queueClient(List<String> actions) => ModelClient(
 
 void main() {
   final root = Uri.parse('memory:///project/');
-  test('agent sends attachments once and narrows project context', () async {
-    final store = RepositoryMemory();
-    await store.writeText('lib/target.dart', 'const needle = "project-value";');
-    await store.writeText('lib/unrelated.dart', 'const other = 1;');
-    final bodies = <Map<String, dynamic>>[];
-    final actions = [
-      '{"action":"say","text":"I will locate needle and inspect its file."}',
-      '{"action":"search_files","query":"needle","path":"lib"}',
-      '{"action":"read_file","path":"lib/target.dart"}',
-      '{"action":"finish","summary":"Inspected the relevant file."}',
-    ];
-    ModelClient client() => ModelClient(
-      client: MockClient((request) async {
-        bodies.add(
-          Map<String, dynamic>.from(
-            jsonDecode(request.body) as Map<String, dynamic>,
+  test(
+    'agent sends attachments once and retains investigation context',
+    () async {
+      final store = RepositoryMemory();
+      await store.writeText(
+        'lib/target.dart',
+        'const needle = "project-value";',
+      );
+      await store.writeText('lib/unrelated.dart', 'const other = 1;');
+      final bodies = <Map<String, dynamic>>[];
+      final actions = [
+        '{"action":"say","text":"I will locate needle and inspect its file."}',
+        '{"action":"search_files","query":"needle","path":"lib"}',
+        '{"action":"read_file","path":"lib/target.dart"}',
+        '{"action":"finish","summary":"Inspected the relevant file."}',
+      ];
+      ModelClient client() => ModelClient(
+        client: MockClient((request) async {
+          bodies.add(
+            Map<String, dynamic>.from(
+              jsonDecode(request.body) as Map<String, dynamic>,
+            ),
+          );
+          return http.Response(
+            jsonEncode({
+              'choices': [
+                {
+                  'message': {'content': actions.removeAt(0)},
+                  'finish_reason': 'stop',
+                },
+              ],
+            }),
+            200,
+          );
+        }),
+      );
+      final engine = AgentTaskEngine(
+        profile: agentProfile(),
+        store: store,
+        git: AgentGit(),
+        root: root,
+        apiKey: '',
+        attachments: [
+          ModelAttachment(
+            name: 'brief.txt',
+            mimeType: 'text/plain',
+            bytes: Uint8List.fromList(utf8.encode('unique-attachment-context')),
           ),
-        );
-        return http.Response(
-          jsonEncode({
-            'choices': [
-              {
-                'message': {'content': actions.removeAt(0)},
-                'finish_reason': 'stop',
-              },
-            ],
-          }),
-          200,
-        );
-      }),
-    );
-    final engine = AgentTaskEngine(
-      profile: agentProfile(),
-      store: store,
-      git: AgentGit(),
-      root: root,
-      apiKey: '',
-      attachments: [
-        ModelAttachment(
-          name: 'brief.txt',
-          mimeType: 'text/plain',
-          bytes: Uint8List.fromList(utf8.encode('unique-attachment-context')),
-        ),
-      ],
-      onEvent: (_) {},
-      approve: (_, _) async => true,
-      clientFactory: client,
-      hooks: NoHooks(),
-      commands: FakeCommands(),
-    );
+        ],
+        onEvent: (_) {},
+        approve: (_, _) async => true,
+        clientFactory: client,
+        hooks: NoHooks(),
+        commands: FakeCommands(),
+      );
 
-    final result = await engine.run('Inspect needle', const AgentRunOptions());
+      final result = await engine.run(
+        'Inspect needle',
+        const AgentRunOptions(),
+      );
 
-    expect(result.success, isTrue);
-    expect(bodies, hasLength(4));
-    expect(jsonEncode(bodies[0]), contains('unique-attachment-context'));
-    expect(jsonEncode(bodies[1]), isNot(contains('unique-attachment-context')));
-    expect(jsonEncode(bodies[1]), contains('One-time project file index'));
-    expect(jsonEncode(bodies[2]), contains('lib/target.dart:1'));
-    expect(jsonEncode(bodies[3]), contains('project-value'));
-  });
+      expect(result.success, isTrue);
+      expect(bodies, hasLength(4));
+      expect(jsonEncode(bodies[0]), contains('unique-attachment-context'));
+      expect(
+        jsonEncode(bodies[1]),
+        isNot(contains('unique-attachment-context')),
+      );
+      expect(jsonEncode(bodies[1]), contains('Project file index'));
+      expect(jsonEncode(bodies[2]), contains('lib/target.dart:1'));
+      expect(jsonEncode(bodies[3]), contains('project-value'));
+      expect(jsonEncode(bodies[3]), contains('Search lib::needle'));
+    },
+  );
+
+  test(
+    'agent can replace an exact fragment without rewriting a file',
+    () async {
+      final store = RepositoryMemory();
+      await store.writeText(
+        'lib/example.dart',
+        'class Example {\n  final value = 1;\n}\n',
+      );
+      final actions = [
+        '{"action":"read_file","path":"lib/example.dart"}',
+        '{"action":"replace_in_file","path":"lib/example.dart",'
+            '"oldText":"final value = 1;","newText":"final value = 2;"}',
+        '{"action":"read_file","path":"lib/example.dart"}',
+        '{"action":"finish","summary":"Updated the value."}',
+      ];
+      var approvals = 0;
+      final engine = AgentTaskEngine(
+        profile: agentProfile(),
+        store: store,
+        git: AgentGit(),
+        root: root,
+        apiKey: '',
+        onEvent: (_) {},
+        approve: (action, _) async {
+          expect(action, 'replace_in_file');
+          approvals++;
+          return true;
+        },
+        clientFactory: () => queueClient(actions),
+        hooks: NoHooks(),
+        commands: FakeCommands(),
+      );
+
+      final result = await engine.run(
+        'Change the value',
+        const AgentRunOptions(),
+      );
+
+      expect(result.success, isTrue);
+      expect(await store.readText('lib/example.dart'), contains('value = 2'));
+      expect(approvals, 1);
+    },
+  );
 
   test(
     'agent accepts the first JSON object when the model emits NDJSON',

@@ -111,13 +111,16 @@ Allowed actions (examples only — emit one of these shapes):
 - list_files: {"action":"list_files","path":"relative/folder"}
 - search_files: {"action":"search_files","query":"symbol or text","path":"optional/relative/folder"}
 - read_file: {"action":"read_file","path":"relative/file","startLine":1,"lineCount":240}
+- replace_in_file: {"action":"replace_in_file","path":"relative/file","oldText":"exact existing text","newText":"replacement text"}
 - write_file: {"action":"write_file","path":"relative/file","content":"..."}
 - mcp_call: {"action":"mcp_call","server":"name","tool":"tool_name","arguments":{}}
 - finish: {"action":"finish","summary":"..."}
 Use relative paths only. Never access .git or .tamtoot. Read relevant files before writing.
 Keep the working set small. Use the one-time project index and search_files to locate candidates, then read only the files and line ranges needed for the task.
-The host keeps only a few recent file excerpts in context. If an older excerpt is evicted, read that file again only when it becomes relevant.
-After writing, read the changed file to inspect it, then finish without running commands.
+The host preserves a bounded investigation history and several recent file excerpts between requests. Use that retained evidence instead of repeating searches and reads.
+Prefer replace_in_file for a small, exact edit. Use write_file when creating a file or when the complete replacement is intentional.
+Do not repeat an identical list, search, or read unless an edit changed the relevant file. Once you have enough evidence, make the edit instead of continuing to inspect unrelated files.
+After editing, read the changed area to inspect it, then finish without running commands.
 ''';
 
   Future<AgentRunResult> run(String task, AgentRunOptions options) async {
@@ -181,7 +184,7 @@ After writing, read the changed file to inspect it, then finish without running 
       if (promptHook.context.isNotEmpty) 'Hook context:\n${promptHook.context}',
     ];
     final activeFiles = LinkedHashMap<String, String>();
-    var oneShotContext = '';
+    final observations = LinkedHashMap<String, String>();
     var mistakes = 0;
     for (var iteration = 1; iteration <= options.maxIterations; iteration++) {
       if (_stopped) {
@@ -193,11 +196,7 @@ After writing, read the changed file to inspect it, then finish without running 
       _active = client;
       ModelReply reply;
       try {
-        final userPrompt = _buildPrompt(
-          transcript,
-          activeFiles,
-          oneShotContext: oneShotContext,
-        );
+        final userPrompt = _buildPrompt(transcript, activeFiles, observations);
         reply = await client.send(
           profile,
           {
@@ -212,7 +211,6 @@ After writing, read the changed file to inspect it, then finish without running 
           apiKey: apiKey,
           attachments: iteration == 1 ? attachments : const [],
         );
-        oneShotContext = '';
       } finally {
         _active = null;
       }
@@ -256,24 +254,36 @@ After writing, read the changed file to inspect it, then finish without running 
           case 'say':
             final text = _string(action, 'text');
             onEvent(AgentEvent('say', text));
-            _replaceNote(
-              transcript,
-              'Assistant analysis:',
-              'Assistant analysis: $text',
-            );
             if (iteration == 1) {
+              _replaceNote(
+                transcript,
+                'Assistant analysis:',
+                'Assistant analysis: $text',
+              );
               transcript[1] =
                   'Phase: implementation. Select only relevant files; inspect before editing.';
-              oneShotContext = await _projectIndex();
+              _rememberObservation(
+                observations,
+                'Project index',
+                await _projectIndex(),
+              );
+            } else {
+              _replaceNote(
+                transcript,
+                'Assistant update:',
+                'Assistant update: ${_bounded(text, 4000)}',
+              );
             }
           case 'list_files':
             final path = _path(action['path'] ?? '', allowEmpty: true);
             final files = await store.listFiles(path);
             final visible = files.where(_useful).take(300).join('\n');
             onEvent(AgentEvent('tool', 'Listed ${path.isEmpty ? '.' : path}'));
-            oneShotContext =
-                'Tool list_files result for ${path.isEmpty ? '.' : path} '
-                '(one-time result):\n$visible';
+            _rememberObservation(
+              observations,
+              'List ${path.isEmpty ? '.' : path}',
+              'Tool list_files result for ${path.isEmpty ? '.' : path}:\n$visible',
+            );
           case 'search_files':
             final query = _string(action, 'query').trim();
             if (query.length < 2) {
@@ -284,9 +294,11 @@ After writing, read the changed file to inspect it, then finish without running 
             final path = _path(action['path'] ?? '', allowEmpty: true);
             final result = await _searchFiles(query, path);
             onEvent(AgentEvent('tool', 'Searched project for “$query”'));
-            oneShotContext =
-                'Tool search_files result for "$query" (one-time result):\n'
-                '$result';
+            _rememberObservation(
+              observations,
+              'Search $path::$query',
+              'Tool search_files result for "$query":\n$result',
+            );
           case 'read_file':
             final path = _path(action['path']);
             final bytes = await store.readBytes(path);
@@ -308,6 +320,52 @@ After writing, read the changed file to inspect it, then finish without running 
               transcript,
               'Tool read_file result:',
               'Tool read_file result: ${excerpt.description}. The content is in Active file context.',
+            );
+          case 'replace_in_file':
+            final path = _path(action['path']);
+            final oldText = _string(action, 'oldText');
+            final newText = action['newText'];
+            if (newText is! String) {
+              throw const ModelApiException('Agent action is missing newText.');
+            }
+            final allowed =
+                options.yolo || await approve('replace_in_file', action);
+            if (!allowed) {
+              transcript.add(
+                'Tool replace_in_file denied by the user. Choose another action or explain.',
+              );
+              onEvent(AgentEvent('denied', 'Edit denied: $path'));
+              continue;
+            }
+            final content = await store.readText(path);
+            final first = content.indexOf(oldText);
+            if (first < 0) {
+              throw const ModelApiException(
+                'oldText was not found. Read the current file and copy the exact text.',
+              );
+            }
+            if (content.indexOf(oldText, first + oldText.length) >= 0) {
+              throw const ModelApiException(
+                'oldText is not unique. Include more surrounding text.',
+              );
+            }
+            final updated = content.replaceRange(
+              first,
+              first + oldText.length,
+              newText,
+            );
+            if (utf8.encode(updated).length > 1024 * 1024) {
+              throw const ModelApiException(
+                'Edited file exceeds the 1 MiB agent limit.',
+              );
+            }
+            await store.writeText(path, updated);
+            activeFiles.removeWhere(
+              (key, _) => key == path || key.startsWith('$path ['),
+            );
+            onEvent(AgentEvent('tool', 'Edited $path'));
+            transcript.add(
+              'Tool replace_in_file result: edited $path successfully. Read the changed area before finishing.',
             );
           case 'write_file':
             final path = _path(action['path']);
@@ -363,9 +421,11 @@ After writing, read the changed file to inspect it, then finish without running 
             }
             final result = await registry.call(server, tool, rawArguments);
             onEvent(AgentEvent('tool', 'MCP $server/$tool'));
-            oneShotContext =
-                'MCP $server/$tool result (one-time result):\n'
-                '${_bounded(jsonEncode(result), 12000)}';
+            _rememberObservation(
+              observations,
+              'MCP $server/$tool',
+              'MCP $server/$tool result:\n${_bounded(jsonEncode(result), 12000)}',
+            );
           case 'finish':
             final summary = _string(action, 'summary');
             onEvent(AgentEvent('done', summary));
@@ -508,14 +568,17 @@ After writing, read the changed file to inspect it, then finish without running 
 
   String _buildPrompt(
     List<String> transcript,
-    LinkedHashMap<String, String> activeFiles, {
-    required String oneShotContext,
-  }) {
+    LinkedHashMap<String, String> activeFiles,
+    LinkedHashMap<String, String> observations,
+  ) {
     final out = StringBuffer(transcript.join('\n\n'));
-    if (oneShotContext.isNotEmpty) {
-      out
-        ..write('\n\n')
-        ..write(oneShotContext);
+    if (observations.isNotEmpty) {
+      out.write('\n\nRetained investigation context:');
+      for (final entry in observations.entries) {
+        out
+          ..write('\n\n--- ${entry.key} ---\n')
+          ..write(entry.value);
+      }
     }
     if (activeFiles.isNotEmpty) {
       out.write('\n\nActive file context (bounded working set):');
@@ -533,8 +596,7 @@ After writing, read the changed file to inspect it, then finish without running 
     const maxPaths = 300;
     const maxCharacters = 8000;
     final out = StringBuffer(
-      'One-time project file index. It will not be repeated. '
-      'Use search_files or list_files if you need another view:\n',
+      'Project file index. Use search_files or list_files if you need another view:\n',
     );
     var included = 0;
     for (final path in paths.take(maxPaths)) {
@@ -695,7 +757,7 @@ After writing, read the changed file to inspect it, then finish without running 
     final evicted = <String>[];
     int characters() =>
         activeFiles.values.fold(0, (total, value) => total + value.length);
-    while (activeFiles.length > 4 || characters() > 28000) {
+    while (activeFiles.length > 8 || characters() > 72000) {
       final oldest = activeFiles.keys.first;
       activeFiles.remove(oldest);
       evicted.add(oldest);
@@ -706,6 +768,20 @@ After writing, read the changed file to inspect it, then finish without running 
         'Context eviction:',
         'Context eviction: ${evicted.join(', ')}. Read again only if needed.',
       );
+    }
+  }
+
+  void _rememberObservation(
+    LinkedHashMap<String, String> observations,
+    String key,
+    String value,
+  ) {
+    observations.remove(key);
+    observations[key] = _bounded(value, 12000);
+    int characters() =>
+        observations.values.fold(0, (total, item) => total + item.length);
+    while (observations.length > 8 || characters() > 36000) {
+      observations.remove(observations.keys.first);
     }
   }
 
@@ -721,9 +797,16 @@ After writing, read the changed file to inspect it, then finish without running 
 
   void _trim(List<String> transcript) {
     var characters = transcript.fold(0, (sum, item) => sum + item.length);
-    while (characters > 16000 && transcript.length > 3) {
-      characters -= transcript[2].length;
-      transcript.removeAt(2);
+    while (characters > 48000 && transcript.length > 3) {
+      final removable = transcript.indexWhere(
+        (item) =>
+            !item.startsWith('Task:') &&
+            !item.startsWith('Phase:') &&
+            !item.startsWith('Assistant analysis:'),
+      );
+      if (removable < 0) break;
+      characters -= transcript[removable].length;
+      transcript.removeAt(removable);
     }
   }
 
