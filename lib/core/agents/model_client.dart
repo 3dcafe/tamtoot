@@ -112,9 +112,24 @@ class ModelClient {
         request: redactAttachmentPayload(body),
       );
     } on ModelApiException catch (e) {
-      final safe = redact(e.message);
+      var safe = redact(e.message);
+      if (safe.startsWith('No text answer returned')) {
+        final extra = <String>[
+          if (profile.provider.trim().isNotEmpty)
+            'provider: ${profile.provider.trim()}',
+          if (profile.model.trim().isNotEmpty &&
+              !safe.contains('model: ${profile.model.trim()}'))
+            'model: ${profile.model.trim()}',
+        ];
+        if (extra.isNotEmpty) {
+          final lines = safe.split('\n');
+          final insertAt = lines.length > 1 ? 1 : lines.length;
+          lines.insertAll(insertAt, extra);
+          safe = lines.join('\n');
+        }
+      }
       throw ModelApiException(
-        safe.length > 1000 ? '${safe.substring(0, 1000)}…' : safe,
+        safe.length > 2000 ? '${safe.substring(0, 2000)}…' : safe,
       );
     } on FormatException {
       throw const ModelApiException(
@@ -454,11 +469,29 @@ class ModelClient {
     return ModelReply(parts.join(), usage: usage);
   }
 
+  static const _agentActions = {
+    'say',
+    'list_files',
+    'search_files',
+    'read_file',
+    'read_files',
+    'replace_in_file',
+    'write_file',
+    'mcp_call',
+    'finish',
+  };
+
   static ModelReply parseReply(String format, Map<String, dynamic> data) {
     final parts = <String>[];
     String note = '';
     final hints = <String>[];
+    String? finishReason;
+    dynamic rawContent;
+    dynamic rawToolCalls;
+    String? responseModel;
+
     void content(dynamic value) {
+      rawContent ??= value;
       if (value is String) {
         parts.add(value);
         return;
@@ -477,18 +510,23 @@ class ModelClient {
           // Some providers put the answer in reasoning / thinking fields.
           if (block['text'] is String &&
               {'reasoning', 'thinking', 'reasoning_text'}.contains(type)) {
-            // Keep as fallback only; prefer primary text parts.
             if (parts.isEmpty) parts.add(block['text'] as String);
           }
           if (type == 'tool_use' || type == 'function_call') {
-            final name = block['name'] ?? block['call_id'] ?? type;
+            final name = '${block['name'] ?? block['call_id'] ?? type}';
             hints.add('native tool: $name');
+            rawToolCalls ??= [];
+            if (rawToolCalls is List) {
+              (rawToolCalls as List).add(block);
+            }
           }
         }
       }
     }
 
     void noteToolCalls(dynamic raw) {
+      if (raw == null) return;
+      rawToolCalls ??= raw;
       if (raw is! List || raw.isEmpty) return;
       final names = <String>[];
       for (final item in raw) {
@@ -502,6 +540,10 @@ class ModelClient {
       if (names.isNotEmpty) {
         hints.add('tool_calls: ${names.join(', ')}');
       }
+    }
+
+    if (data['model'] is String) {
+      responseModel = data['model'] as String;
     }
 
     if (format == 'ollama') {
@@ -526,6 +568,10 @@ class ModelClient {
           }
           if (item['type'] == 'function_call' || item['type'] == 'tool_call') {
             hints.add('native tool: ${item['name'] ?? item['type']}');
+            rawToolCalls ??= [];
+            if (rawToolCalls is List) {
+              (rawToolCalls as List).add(item);
+            }
           }
         }
       }
@@ -541,6 +587,7 @@ class ModelClient {
         note = 'Output token limit reached; answer may be incomplete.';
       }
       if (data['stop_reason'] == 'tool_use') {
+        finishReason = 'tool_use';
         hints.add('stop_reason: tool_use');
       }
     } else {
@@ -560,6 +607,7 @@ class ModelClient {
           noteToolCalls(message['tool_calls']);
         }
         final finish = first['finish_reason'];
+        if (finish is String) finishReason = finish;
         if (finish == 'length') {
           note = 'Output token limit reached; answer may be incomplete.';
         } else if (finish != null && finish != 'stop') {
@@ -567,12 +615,28 @@ class ModelClient {
         }
       }
     }
+
+    // Providers sometimes ignore tool_choice:none and return native tool_calls.
+    // Convert a known Tamtoot action into the text JSON the agent engine expects.
     if (parts.join().trim().isEmpty) {
-      final detail = hints.isEmpty ? '' : ' (${hints.join('; ')})';
+      final converted = _actionFromNativeTools(rawToolCalls);
+      if (converted != null) {
+        parts.add(converted);
+        note = note.isEmpty
+            ? 'Converted native tool_calls into a JSON action.'
+            : '$note Converted native tool_calls into a JSON action.';
+      }
+    }
+
+    if (parts.join().trim().isEmpty) {
       throw ModelApiException(
-        'No text answer returned$detail. '
-        'Tamtoot needs a plain-text JSON action, not native tool calls. '
-        'Retry, or check the model response in Agent logs.',
+        _emptyAnswerMessage(
+          finishReason: finishReason,
+          content: rawContent,
+          toolCalls: rawToolCalls,
+          model: responseModel,
+          hints: hints,
+        ),
       );
     }
     final rawUsage = data['usage'];
@@ -589,5 +653,75 @@ class ModelClient {
       }
     }
     return ModelReply(parts.join('\n'), note: note, usage: usage);
+  }
+
+  /// Maps OpenAI/Anthropic-style tool calls onto Tamtoot's one-JSON-action protocol.
+  static String? _actionFromNativeTools(dynamic raw) {
+    if (raw is! List || raw.isEmpty) return null;
+    for (final item in raw) {
+      if (item is! Map) continue;
+      String? name;
+      dynamic arguments;
+      final fn = item['function'];
+      if (fn is Map) {
+        name = fn['name'] is String ? fn['name'] as String : null;
+        arguments = fn['arguments'] ?? fn['parameters'];
+      } else {
+        name = item['name'] is String ? item['name'] as String : null;
+        arguments = item['input'] ?? item['arguments'] ?? item['parameters'];
+      }
+      if (name == null || !_agentActions.contains(name)) continue;
+      Map<String, dynamic> args;
+      if (arguments is Map) {
+        args = Map<String, dynamic>.from(arguments);
+      } else if (arguments is String && arguments.trim().isNotEmpty) {
+        try {
+          final decoded = jsonDecode(arguments);
+          if (decoded is! Map) continue;
+          args = Map<String, dynamic>.from(decoded);
+        } catch (_) {
+          continue;
+        }
+      } else {
+        args = {};
+      }
+      args.remove('action');
+      return jsonEncode({'action': name, ...args});
+    }
+    return null;
+  }
+
+  static String _emptyAnswerMessage({
+    required String? finishReason,
+    required dynamic content,
+    required dynamic toolCalls,
+    required String? model,
+    required List<String> hints,
+  }) {
+    final lines = <String>[
+      'No text answer returned.',
+      if (finishReason != null) 'finish_reason: $finishReason',
+      'content: ${_previewDiagnostic(content)}',
+      if (toolCalls != null) 'tool_calls: ${_previewDiagnostic(toolCalls)}',
+      if (model != null && model.isNotEmpty) 'model: $model',
+      if (hints.isNotEmpty) 'hints: ${hints.join('; ')}',
+      'Tamtoot needs a plain-text JSON action, not native tool calls. '
+          'Retry, or inspect the raw response in Agent logs.',
+    ];
+    return lines.join('\n');
+  }
+
+  static String _previewDiagnostic(dynamic value, {int max = 600}) {
+    if (value == null) return 'null';
+    late final String text;
+    try {
+      text = value is String ? value : jsonEncode(value);
+    } catch (_) {
+      text = '$value';
+    }
+    final compact = text.replaceAll(RegExp(r'\s+'), ' ').trim();
+    if (compact.isEmpty) return '""';
+    if (compact.length <= max) return compact;
+    return '${compact.substring(0, max)}…';
   }
 }

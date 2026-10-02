@@ -436,6 +436,7 @@ void main() {
   test('parseReply explains empty tool_calls answers', () {
     expect(
       () => ModelClient.parseReply('chat-completions', {
+        'model': 'glm-5.3-flash',
         'choices': [
           {
             'finish_reason': 'tool_calls',
@@ -445,7 +446,10 @@ void main() {
               'tool_calls': [
                 {
                   'type': 'function',
-                  'function': {'name': 'replace_in_file', 'arguments': '{}'},
+                  'function': {
+                    'name': 'unknown_native_tool',
+                    'arguments': '{}',
+                  },
                 },
               ],
             },
@@ -457,12 +461,69 @@ void main() {
           (e) => e.message,
           'message',
           allOf(
-            contains('tool_calls: replace_in_file'),
+            contains('No text answer returned.'),
+            contains('finish_reason: tool_calls'),
+            contains('content: null'),
+            contains('tool_calls:'),
+            contains('unknown_native_tool'),
+            contains('model: glm-5.3-flash'),
             contains('plain-text JSON'),
           ),
         ),
       ),
     );
+  });
+
+  test('parseReply converts known tool_calls into JSON actions', () {
+    final reply = ModelClient.parseReply('chat-completions', {
+      'choices': [
+        {
+          'finish_reason': 'tool_calls',
+          'message': {
+            'role': 'assistant',
+            'content': null,
+            'tool_calls': [
+              {
+                'type': 'function',
+                'function': {
+                  'name': 'search_files',
+                  'arguments': '{"query":"openEntry","path":"lib"}',
+                },
+              },
+            ],
+          },
+        },
+      ],
+    });
+    expect(jsonDecode(reply.text), {
+      'action': 'search_files',
+      'query': 'openEntry',
+      'path': 'lib',
+    });
+    expect(reply.note, contains('Converted native tool_calls'));
+  });
+
+  test('parseReply converts Anthropic tool_use blocks', () {
+    final reply = ModelClient.parseReply('anthropic', {
+      'stop_reason': 'tool_use',
+      'content': [
+        {
+          'type': 'tool_use',
+          'name': 'read_file',
+          'input': {
+            'path': 'lib/app/session_commands.dart',
+            'startLine': 40,
+            'lineCount': 80,
+          },
+        },
+      ],
+    });
+    expect(jsonDecode(reply.text), {
+      'action': 'read_file',
+      'path': 'lib/app/session_commands.dart',
+      'startLine': 40,
+      'lineCount': 80,
+    });
   });
 
   test('parseReply accepts ordinary chat text', () {
