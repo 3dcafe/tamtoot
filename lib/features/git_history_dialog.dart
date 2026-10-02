@@ -85,11 +85,13 @@ class GitHistoryDialog extends StatelessWidget {
   ) async {
     final histories = await Future.wait([
       provider.history(root, limit: 100),
-      provider.history(
-        root,
-        limit: 100,
-        startRef: 'refs/remotes/origin/$branch',
-      ),
+      provider
+          .history(
+            root,
+            limit: 100,
+            startRef: 'refs/remotes/origin/$branch',
+          )
+          .catchError((Object error) => <GitCommitSummary>[]),
     ]);
     final byHash = <String, GitCommitSummary>{};
     for (final history in histories) {
