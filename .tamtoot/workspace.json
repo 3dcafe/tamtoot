@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "kind": "repository",
+  "remoteUrl": "https://gitverse.ru/latin/tamtoot.git",
+  "branch": "master",
+  "head": "refs/heads/master",
+  "clonedAt": "2026-10-02T03:11:04.996837Z",
+  "lastOpenedAt": "2026-10-02T03:11:04.996842Z",
+  "client": "tamtoot-http-git/0.1"
+}

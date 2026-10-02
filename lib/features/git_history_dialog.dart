@@ -1,7 +1,6 @@
-import 'dart:ui';
-
 import 'package:flutter/material.dart';
 
+import '../app/git_file_changes.dart';
 import '../app/ide_session.dart';
 import '../core/git/git_service.dart';
 import '../core/git/text_diff.dart';

@@ -15,6 +15,10 @@ class KanbanDialog extends StatefulWidget {
 
 class _KanbanDialogState extends State<KanbanDialog> {
   final title = TextEditingController(), description = TextEditingController();
+  final horizontalScroll = ScrollController();
+  final columnScroll = <KanbanStatus, ScrollController>{
+    for (final status in KanbanStatus.values) status: ScrollController(),
+  };
   KanbanStore? store;
   KanbanBoard board = const KanbanBoard([]);
   String? error;
@@ -31,6 +35,10 @@ class _KanbanDialogState extends State<KanbanDialog> {
   void dispose() {
     title.dispose();
     description.dispose();
+    horizontalScroll.dispose();
+    for (final controller in columnScroll.values) {
+      controller.dispose();
+    }
     super.dispose();
   }
 
@@ -94,6 +102,144 @@ class _KanbanDialogState extends State<KanbanDialog> {
     for (final item in board.cards)
       if (item.id == card.id) item.copyWith(status: status) else item,
   ]);
+
+  String _statusTitle(KanbanStatus status) => switch (status) {
+    KanbanStatus.todo => 'Todo',
+    KanbanStatus.inProgress => 'In Progress',
+    KanbanStatus.review => 'Review',
+    KanbanStatus.done => 'Done',
+  };
+
+  Widget _card(BuildContext context, KanbanCard card, {bool feedback = false}) {
+    final content = Card(
+      elevation: feedback ? 8 : null,
+      margin: const EdgeInsets.only(bottom: 8),
+      child: Padding(
+        padding: const EdgeInsets.all(8),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(card.title),
+            if (card.description.isNotEmpty) Text(card.description),
+            if (!feedback && card.worktree.isNotEmpty)
+              SelectableText(
+                card.worktree,
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+            if (!feedback)
+              DropdownButton<KanbanStatus>(
+                value: card.status,
+                isExpanded: true,
+                items: [
+                  for (final value in KanbanStatus.values)
+                    DropdownMenuItem(
+                      value: value,
+                      child: Text(_statusTitle(value)),
+                    ),
+                ],
+                onChanged: busy
+                    ? null
+                    : (value) {
+                        if (value != null && value != card.status) {
+                          _move(card, value);
+                        }
+                      },
+              ),
+            if (!feedback && card.worktree.isEmpty)
+              TextButton.icon(
+                onPressed: busy ? null : () => _worktree(card),
+                icon: const Icon(Icons.play_arrow),
+                label: const Text('Create worktree'),
+              ),
+          ],
+        ),
+      ),
+    );
+    if (feedback) {
+      return Material(
+        color: Colors.transparent,
+        child: SizedBox(width: 244, child: content),
+      );
+    }
+    if (busy) return content;
+    return LongPressDraggable<KanbanCard>(
+      data: card,
+      feedback: _card(context, card, feedback: true),
+      childWhenDragging: Opacity(opacity: .35, child: content),
+      child: Tooltip(message: 'Hold and drag to move', child: content),
+    );
+  }
+
+  Widget _column(BuildContext context, KanbanStatus status, double height) {
+    final cards = board.cards
+        .where((card) => card.status == status)
+        .toList(growable: false);
+    return SizedBox(
+      width: 260,
+      height: height,
+      child: DragTarget<KanbanCard>(
+        onWillAcceptWithDetails: (details) =>
+            !busy && details.data.status != status,
+        onAcceptWithDetails: (details) => _move(details.data, status),
+        builder: (context, candidates, rejected) {
+          final highlighted = candidates.isNotEmpty;
+          return Card(
+            color: highlighted
+                ? Theme.of(context).colorScheme.primaryContainer
+                : null,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(8, 8, 8, 0),
+              child: Column(
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          _statusTitle(status),
+                          style: Theme.of(context).textTheme.titleMedium,
+                        ),
+                      ),
+                      Text('${cards.length}'),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Expanded(
+                    child: Scrollbar(
+                      controller: columnScroll[status],
+                      thumbVisibility: cards.length > 2,
+                      child: ListView.builder(
+                        controller: columnScroll[status],
+                        padding: const EdgeInsets.only(right: 4, bottom: 8),
+                        itemCount: cards.length + (highlighted ? 1 : 0),
+                        itemBuilder: (context, index) {
+                          if (index == cards.length) {
+                            return Container(
+                              height: 54,
+                              margin: const EdgeInsets.only(bottom: 8),
+                              alignment: Alignment.center,
+                              decoration: BoxDecoration(
+                                border: Border.all(
+                                  color: Theme.of(context).colorScheme.primary,
+                                ),
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              child: const Text('Move here'),
+                            );
+                          }
+                          return _card(context, cards[index]);
+                        },
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
 
   Future<void> _worktree(KanbanCard card) async {
     setState(() {
@@ -163,88 +309,25 @@ class _KanbanDialogState extends State<KanbanDialog> {
             ),
           const SizedBox(height: 8),
           Expanded(
-            child: SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  for (final status in KanbanStatus.values)
-                    SizedBox(
-                      width: 260,
-                      child: Card(
-                        child: Padding(
-                          padding: const EdgeInsets.all(8),
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Text(
-                                switch (status) {
-                                  KanbanStatus.todo => 'Todo',
-                                  KanbanStatus.inProgress => 'In Progress',
-                                  KanbanStatus.review => 'Review',
-                                  KanbanStatus.done => 'Done',
-                                },
-                                style: Theme.of(context).textTheme.titleMedium,
-                              ),
-                              for (final card in board.cards.where(
-                                (card) => card.status == status,
-                              ))
-                                Card(
-                                  child: Padding(
-                                    padding: const EdgeInsets.all(8),
-                                    child: Column(
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.stretch,
-                                      children: [
-                                        Text(card.title),
-                                        if (card.description.isNotEmpty)
-                                          Text(card.description),
-                                        if (card.worktree.isNotEmpty)
-                                          SelectableText(
-                                            card.worktree,
-                                            style: Theme.of(
-                                              context,
-                                            ).textTheme.bodySmall,
-                                          ),
-                                        DropdownButton<KanbanStatus>(
-                                          value: card.status,
-                                          isExpanded: true,
-                                          items: [
-                                            for (final value
-                                                in KanbanStatus.values)
-                                              DropdownMenuItem(
-                                                value: value,
-                                                child: Text(value.name),
-                                              ),
-                                          ],
-                                          onChanged: busy
-                                              ? null
-                                              : (value) {
-                                                  if (value != null) {
-                                                    _move(card, value);
-                                                  }
-                                                },
-                                        ),
-                                        if (card.worktree.isEmpty)
-                                          TextButton.icon(
-                                            onPressed: busy
-                                                ? null
-                                                : () => _worktree(card),
-                                            icon: const Icon(Icons.play_arrow),
-                                            label: const Text(
-                                              'Create worktree',
-                                            ),
-                                          ),
-                                      ],
-                                    ),
-                                  ),
-                                ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ),
-                ],
+            child: LayoutBuilder(
+              builder: (context, constraints) => Scrollbar(
+                controller: horizontalScroll,
+                thumbVisibility: true,
+                child: SingleChildScrollView(
+                  controller: horizontalScroll,
+                  scrollDirection: Axis.horizontal,
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      for (final status in KanbanStatus.values) ...[
+                        _column(context, status, constraints.maxHeight - 12),
+                        if (status != KanbanStatus.values.last)
+                          const SizedBox(width: 8),
+                      ],
+                    ],
+                  ),
+                ),
               ),
             ),
           ),
