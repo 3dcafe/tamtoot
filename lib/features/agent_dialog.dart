@@ -55,6 +55,12 @@ class _AgentPanelState extends State<AgentPanel> {
   McpRegistry? activeMcp;
   late final Uri? root = widget.session.workspaceRoot;
 
+  /// Last user task that actually started a run (not the Continue wrapper).
+  String? _lastTask;
+
+  /// Why the last run stopped; non-null enables the Continue button.
+  String? _lastFailure;
+
   @override
   void initState() {
     super.initState();
@@ -269,11 +275,22 @@ class _AgentPanelState extends State<AgentPanel> {
     }
   }
 
-  Future<void> _start() async {
+  bool get _canContinue =>
+      !running &&
+      root != null &&
+      selected != null &&
+      (_lastTask?.trim().isNotEmpty ?? false) &&
+      _lastFailure != null;
+
+  Future<void> _start({bool continuePrevious = false}) async {
     final path = selected;
-    final prompt = task.text.trim();
+    final typed = task.text.trim();
     if (running || path == null || root == null) return;
-    if (prompt.isEmpty && attachments.isEmpty) return;
+    if (continuePrevious) {
+      if (!_canContinue) return;
+    } else if (typed.isEmpty && attachments.isEmpty) {
+      return;
+    }
     if (widget.session.workspaceRoot != root) {
       setState(() => error = 'The active project changed. Reopen Agent.');
       return;
@@ -297,6 +314,21 @@ class _AgentPanelState extends State<AgentPanel> {
       return;
     }
     if (yolo && !await _confirmYolo()) return;
+
+    final originalTask = continuePrevious
+        ? _lastTask!.trim()
+        : (typed.isEmpty ? 'Please inspect the attached files.' : typed);
+    final failure = _lastFailure;
+    final prompt = continuePrevious
+        ? buildAgentContinuationPrompt(
+            originalTask: originalTask,
+            stopReason: failure ?? 'unknown',
+          )
+        : originalTask;
+    final runAttachments = continuePrevious
+        ? const <ModelAttachment>[]
+        : List<ModelAttachment>.from(attachments);
+
     final git = widget.session.git as HttpGitService;
     McpRegistry? mcp;
     try {
@@ -317,7 +349,7 @@ class _AgentPanelState extends State<AgentPanel> {
       git: git,
       root: root!,
       apiKey: apiKey.text.trim(),
-      attachments: List<ModelAttachment>.from(attachments),
+      attachments: runAttachments,
       onEvent: (event) {
         if (mounted) {
           setState(() => events.add(event));
@@ -332,23 +364,29 @@ class _AgentPanelState extends State<AgentPanel> {
       activeMcp = mcp;
       running = true;
       error = null;
+      _lastTask = originalTask;
+      _lastFailure = null;
       events.add(
         AgentEvent(
           'user',
-          [
-            prompt,
-            if (attachments.isNotEmpty)
-              'Attachments: ${attachments.map((item) => item.name).join(', ')}',
-          ].join('\n'),
+          continuePrevious
+              ? 'Continue previous task\n\n$originalTask'
+              : [
+                  originalTask,
+                  if (runAttachments.isNotEmpty)
+                    'Attachments: ${runAttachments.map((item) => item.name).join(', ')}',
+                ].join('\n'),
         ),
       );
-      task.clear();
-      attachments.clear();
+      if (!continuePrevious) {
+        task.clear();
+        attachments.clear();
+      }
     });
     _scrollToEnd();
     try {
       await runner.run(
-        prompt.isEmpty ? 'Please inspect the attached files.' : prompt,
+        prompt,
         AgentRunOptions(
           yolo: yolo,
           timeout: Duration(seconds: timeoutSeconds),
@@ -356,8 +394,21 @@ class _AgentPanelState extends State<AgentPanel> {
         ),
       );
       await widget.session.refreshExplorer();
+      if (mounted) {
+        setState(() {
+          _lastFailure = null;
+          error = null;
+        });
+      }
     } catch (e) {
-      if (mounted) setState(() => error = '$e');
+      if (mounted) {
+        setState(() {
+          error = '$e';
+          _lastFailure = '$e';
+          // Put the original task back so it is obvious what Continue will redo.
+          if (task.text.trim().isEmpty) task.text = originalTask;
+        });
+      }
     } finally {
       // Keep the API key in memory for the Agent panel session.
       activeMcp?.close();
@@ -502,9 +553,25 @@ class _AgentPanelState extends State<AgentPanel> {
                   horizontal: 10,
                   vertical: 4,
                 ),
-                child: SelectableText(
-                  error!,
-                  style: TextStyle(fontSize: 12, color: colors.error),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    SelectableText(
+                      error!,
+                      style: TextStyle(fontSize: 12, color: colors.error),
+                    ),
+                    if (_canContinue)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 4),
+                        child: Text(
+                          'Press Continue to retry without restarting from scratch.',
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: colors.onSurfaceVariant,
+                          ),
+                        ),
+                      ),
+                  ],
                 ),
               ),
             Padding(
@@ -664,7 +731,12 @@ class _AgentPanelState extends State<AgentPanel> {
                           visualDensity: VisualDensity.compact,
                           onPressed: running
                               ? null
-                              : () => setState(events.clear),
+                              : () => setState(() {
+                                  events.clear();
+                                  _lastFailure = null;
+                                  _lastTask = null;
+                                  error = null;
+                                }),
                           icon: const Icon(
                             Icons.delete_sweep_outlined,
                             size: 18,
@@ -699,7 +771,17 @@ class _AgentPanelState extends State<AgentPanel> {
                           icon: const Icon(Icons.stop, size: 18),
                           label: const Text('Stop'),
                         )
-                      else
+                      else ...[
+                        if (_canContinue) ...[
+                          FilledButton.tonalIcon(
+                            key: const ValueKey('agent-continue'),
+                            onPressed: () =>
+                                unawaited(_start(continuePrevious: true)),
+                            icon: const Icon(Icons.replay, size: 18),
+                            label: const Text('Continue'),
+                          ),
+                          const SizedBox(width: 8),
+                        ],
                         IconButton.filled(
                           tooltip: 'Send',
                           onPressed:
@@ -711,6 +793,7 @@ class _AgentPanelState extends State<AgentPanel> {
                               : () => unawaited(_start()),
                           icon: const Icon(Icons.arrow_upward, size: 18),
                         ),
+                      ],
                     ],
                   ),
                 ],
@@ -1013,4 +1096,21 @@ class _AgentPanelState extends State<AgentPanel> {
       },
     );
   }
+}
+
+/// Prompt used when the user presses Continue after timeout / stop / mistakes.
+@visibleForTesting
+String buildAgentContinuationPrompt({
+  required String originalTask,
+  required String stopReason,
+}) {
+  final reason = stopReason.trim().isEmpty
+      ? 'unknown'
+      : stopReason.trim().split('\n').first;
+  return 'Continue the unfinished agent task. '
+      'Previous run stopped: $reason\n'
+      'Do not restart investigation from scratch. '
+      'Prefer replace_in_file, write_file, or finish over more search_files.\n'
+      'Reuse retained project memory and already known files.\n\n'
+      'Original task:\n$originalTask';
 }

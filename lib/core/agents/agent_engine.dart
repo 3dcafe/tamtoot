@@ -421,15 +421,26 @@ Reuse retained excerpts — do not re-read unchanged files.
       late final Map<String, dynamic> action;
       late final String name;
       try {
-        if (_looksTruncated(reply.text, reply.note)) {
-          throw ModelApiException(
-            'Model output was truncated before a complete JSON action '
-            '(${reply.note.isEmpty ? 'incomplete JSON' : reply.note}). '
-            'Emit a MUCH smaller action next. For edits, use replace_in_file '
-            'with a few-line unique oldText/newText only — never a whole file.',
+        final objects = _extractJsonObjects(reply.text);
+        if (objects.isEmpty) {
+          if (_looksTruncated(reply.text, reply.note)) {
+            throw ModelApiException(
+              'Model output was truncated before a complete JSON action '
+              '(${reply.note.isEmpty ? 'incomplete JSON' : reply.note}). '
+              'Emit a MUCH smaller action next. For edits, use replace_in_file '
+              'with a few-line unique oldText/newText only — never a whole file.',
+            );
+          }
+          throw const ModelApiException(
+            'Model returned an invalid agent action.',
           );
         }
-        action = _decodeAction(reply.text);
+        action = _selectAction(
+          objects,
+          budgetReached: budgetReached,
+          finalReadUsed: finalReadUsed,
+          transcript: transcript,
+        );
         name = action['action'] as String;
         if (name == 'replace_in_file' || name == 'write_file') {
           _assertCompactEditPayload(name, action);
@@ -1100,13 +1111,66 @@ Reuse retained excerpts — do not re-read unchanged files.
     return result;
   }
 
-  Map<String, dynamic> _decodeAction(String text) {
-    final source = _extractJsonObject(text);
+  Map<String, dynamic> _decodeActionObject(String source) {
     final decoded = jsonDecode(source);
     if (decoded is! Map<String, dynamic> || decoded['action'] is! String) {
       throw const ModelApiException('Model returned an invalid agent action.');
     }
     return decoded;
+  }
+
+  /// When the model emits NDJSON and the first action is a read the host would
+  /// soft-block, prefer the next edit/finish from the same reply.
+  Map<String, dynamic> _selectAction(
+    List<String> objects, {
+    required bool budgetReached,
+    required bool finalReadUsed,
+    required List<String> transcript,
+  }) {
+    final first = _decodeActionObject(objects.first);
+    final firstName = first['action'] as String;
+    final canPreferFollowUp = _wouldBlockRead(
+      firstName,
+      budgetReached: budgetReached,
+      finalReadUsed: finalReadUsed,
+    );
+    if (!canPreferFollowUp || objects.length < 2) {
+      return first;
+    }
+    try {
+      final next = _decodeActionObject(objects[1]);
+      final nextName = next['action'] as String;
+      if (nextName == 'replace_in_file' ||
+          nextName == 'write_file' ||
+          nextName == 'finish') {
+        onEvent(
+          AgentEvent(
+            'context',
+            'Normalized: skipped blocked $firstName, ran $nextName',
+          ),
+        );
+        _replaceNote(
+          transcript,
+          'Host note:',
+          'Host note: Skipped blocked $firstName from a multi-action reply; '
+              'ran $nextName instead.',
+        );
+        return next;
+      }
+    } catch (_) {
+      // Keep the blocked read as the selected action; the soft-reject path
+      // below will tell the model to edit instead.
+    }
+    return first;
+  }
+
+  static bool _wouldBlockRead(
+    String action, {
+    required bool budgetReached,
+    required bool finalReadUsed,
+  }) {
+    if (action != 'read_file' && action != 'read_files') return false;
+    return budgetReached && finalReadUsed;
   }
 
   void _assertCompactEditPayload(String name, Map<String, dynamic> action) {
@@ -1172,48 +1236,54 @@ Reuse retained excerpts — do not re-read unchanged files.
     return false;
   }
 
-  /// Models sometimes emit NDJSON / several actions; keep the first object only.
-  String _extractJsonObject(String text) {
+  /// Models sometimes emit NDJSON / several actions. Return complete objects
+  /// only (trailing truncated JSON is ignored when at least one object parsed).
+  static List<String> _extractJsonObjects(String text, {int max = 3}) {
     var source = text.trim();
     if (source.startsWith('```')) {
       source = source.replaceFirst(RegExp(r'^```(?:json)?\s*'), '');
       source = source.replaceFirst(RegExp(r'\s*```$'), '');
       source = source.trim();
     }
-    final start = source.indexOf('{');
-    if (start < 0) {
-      throw const ModelApiException('Model returned an invalid agent action.');
-    }
-    var depth = 0;
-    var inString = false;
-    var escaped = false;
-    for (var i = start; i < source.length; i++) {
-      final ch = source[i];
-      if (inString) {
-        if (escaped) {
-          escaped = false;
-        } else if (ch == '\\') {
-          escaped = true;
-        } else if (ch == '"') {
-          inString = false;
+    final out = <String>[];
+    var cursor = 0;
+    while (out.length < max) {
+      final start = source.indexOf('{', cursor);
+      if (start < 0) break;
+      var depth = 0;
+      var inString = false;
+      var escaped = false;
+      var end = -1;
+      for (var i = start; i < source.length; i++) {
+        final ch = source[i];
+        if (inString) {
+          if (escaped) {
+            escaped = false;
+          } else if (ch == '\\') {
+            escaped = true;
+          } else if (ch == '"') {
+            inString = false;
+          }
+          continue;
         }
-        continue;
+        if (ch == '"') {
+          inString = true;
+          continue;
+        }
+        if (ch == '{') depth++;
+        if (ch == '}') {
+          depth--;
+          if (depth == 0) {
+            end = i;
+            break;
+          }
+        }
       }
-      if (ch == '"') {
-        inString = true;
-        continue;
-      }
-      if (ch == '{') depth++;
-      if (ch == '}') {
-        depth--;
-        if (depth == 0) return source.substring(start, i + 1);
-      }
+      if (end < 0) break;
+      out.add(source.substring(start, end + 1));
+      cursor = end + 1;
     }
-    throw ModelApiException(
-      inString || depth != 0
-          ? 'Model returned truncated JSON (incomplete agent action).'
-          : 'Model returned an invalid agent action.',
-    );
+    return out;
   }
 
   String _string(Map<String, dynamic> action, String key) {

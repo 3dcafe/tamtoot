@@ -1211,6 +1211,70 @@ void main() {
     expect(events.map((e) => e.text), contains(contains('Read 2 files')));
   });
 
+  test(
+    'blocked read in NDJSON yields the following edit from the same reply',
+    () async {
+      final store = RepositoryMemory();
+      for (final name in ['a', 'b', 'c']) {
+        await store.writeText(
+          'lib/$name.dart',
+          List.generate(40, (i) => 'const ${name}_$i = $i;').join('\n'),
+        );
+      }
+      final events = <AgentEvent>[];
+      final actions = [
+        '{"action":"search_files","query":"a_0","path":"lib"}',
+        '{"action":"read_file","path":"lib/a.dart"}',
+        '{"action":"search_files","query":"b_0","path":"lib"}',
+        '{"action":"read_file","path":"lib/b.dart"}',
+        // Budget reached (2 reads); this consumes the one final targeted read.
+        '{"action":"read_file","path":"lib/c.dart"}',
+        // Another read would be blocked — but the same reply also has an edit.
+        '{"action":"read_file","path":"lib/c.dart","startLine":1,"lineCount":60}\n'
+            '{"action":"replace_in_file","path":"lib/c.dart",'
+            '"oldText":"const c_0 = 0;","newText":"const c_0 = 1;"}',
+        '{"action":"finish","summary":"done"}',
+      ];
+      final engine = AgentTaskEngine(
+        profile: agentProfile(),
+        store: store,
+        git: AgentGit(),
+        root: root,
+        apiKey: '',
+        onEvent: events.add,
+        approve: (_, _) async => true,
+        clientFactory: () => queueClient(actions),
+        hooks: NoHooks(),
+        commands: FakeCommands(),
+      );
+      final result = await engine.run(
+        'Fix c',
+        const AgentRunOptions(
+          yolo: false,
+          maxConsecutiveMistakes: 1,
+          maxReadsBeforeFirstEdit: 2,
+        ),
+      );
+      expect(result.success, isTrue);
+      expect(await store.readText('lib/c.dart'), contains('const c_0 = 1;'));
+      expect(
+        events.map((e) => e.text),
+        contains(
+          contains(
+            'Normalized: skipped blocked read_file, ran replace_in_file',
+          ),
+        ),
+      );
+      expect(
+        events.where((e) => e.type == 'denied'),
+        isEmpty,
+        reason:
+            'blocked read must be skipped, not soft-denied as a wasted turn',
+      );
+      expect(actions, isEmpty);
+    },
+  );
+
   test('aborted runs still persist what they learned', () async {
     final store = RepositoryMemory();
     await store.writeText('lib/platform_services.dart', 'String readLocal();');
