@@ -129,6 +129,53 @@ void main() {
       expect(restored.get('flutterSdkPath'), '');
     },
   );
+  test(
+    'SDK Test executes version and device discovery and reports failures',
+    () async {
+      final argsSeen = <List<String>>[];
+      final runner = FlutterRunner(
+        log: (_) {},
+        changed: () {},
+        starter: (_, args, _) async {
+          argsSeen.add(args);
+          final process = AdapterProcess();
+          process.output.add(
+            utf8.encode(
+              jsonEncode(
+                args.first == '--version'
+                    ? {'frameworkVersion': '3.44.0', 'dartSdkVersion': '3.12.0'}
+                    : [
+                        {'id': 'linux', 'name': 'Linux'},
+                      ],
+              ),
+            ),
+          );
+          unawaited(process.output.close());
+          unawaited(process.errors.close());
+          process.exit.complete(0);
+          return process;
+        },
+      );
+      await runner.testSdk('/sdk');
+      expect(argsSeen, [
+        ['--version', '--machine'],
+        ['devices', '--machine'],
+      ]);
+      expect(runner.sdkResult, contains('3.44.0'));
+      expect(runner.devices.single['id'], 'linux');
+      await runner.dispose();
+      final failed = FlutterRunner(
+        log: (_) {},
+        changed: () {},
+        starter: (_, _, _) async => throw StateError('Cannot start SDK'),
+      );
+      await failed.testSdk('/missing');
+      expect(failed.checking, false);
+      expect(failed.sdkResult, contains('SDK test failed'));
+      await failed.dispose();
+    },
+  );
+
   test('mobile platforms cannot invoke SDK processes', () async {
     for (final platform in [TargetPlatform.android, TargetPlatform.iOS]) {
       debugDefaultTargetPlatformOverride = platform;
@@ -256,10 +303,27 @@ void main() {
     },
   );
   final sdk = Platform.environment['TAMTOOT_TEST_FLUTTER_SDK'];
-  test('real SDK version, devices and DAP handshake', () async {
+  test('real SDK version and DAP handshake', () async {
     final runner = FlutterRunner(log: (_) {}, changed: () {});
-    await runner.testSdk(sdk!);
-    expect(runner.sdkResult, startsWith('Flutter '));
+    final versionProcess = await startFlutterProcess(sdk!, [
+      '--version',
+      '--machine',
+    ], null);
+    final versionOutput = versionProcess.stdout.transform(utf8.decoder).join();
+    final versionError = versionProcess.stderr.transform(utf8.decoder).join();
+    try {
+      expect(
+        await versionProcess.exitCode.timeout(const Duration(seconds: 30)),
+        0,
+      );
+      expect(
+        jsonDecode(await versionOutput)['frameworkVersion'],
+        isA<String>(),
+      );
+      await versionError;
+    } finally {
+      versionProcess.kill();
+    }
     final process = await startFlutterProcess(sdk, ['debug-adapter'], null);
     final initialized = Completer<void>();
     final client = DapClient(process, (event, body) {

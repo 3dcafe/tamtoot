@@ -44,7 +44,7 @@ class IdeSession {
   Uri? workspaceRoot;
   final List<Uri> additionalWorkspaceRoots = [];
   List<Uri> get workspaceRoots => [
-    if (workspaceRoot != null) workspaceRoot!,
+    ?workspaceRoot,
     ...additionalWorkspaceRoots,
   ];
 

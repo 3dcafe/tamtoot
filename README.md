@@ -207,7 +207,7 @@ On Windows, Linux and macOS, **Tools → Settings → Flutter SDK** accepts the 
 
 Open a local Flutter project containing `pubspec.yaml`. The toolbar and **Run** menu provide Run, Debug, Stop, Hot reload and Hot restart. Modified documents are saved first; cancelling a save cancels the launch/update. **View → Debug** provides Pause, Continue, Step over/into/out, call stacks and variables. Use **Run → Toggle breakpoint at cursor** in a saved `.dart` file to add/remove a breakpoint. Breakpoints currently last for the window session. Build output and application logs appear in Output.
 
-Tamtoot uses `flutter debug-adapter` from your SDK; no editor plugin is needed. Controls are hidden on Android, iOS and Web. Native platform build dependencies are still required. **The current macOS App Sandbox remains enabled and may prevent external SDK execution/cache access; changing those permissions requires separate approval.** Native code debugging, attach, conditional breakpoints, watches and Flutter Inspector are not included.
+Tamtoot uses `flutter debug-adapter` from your SDK; no editor plugin is needed. Controls are hidden on Android, iOS and Web. Native platform build dependencies are still required. **Desktop macOS builds disable App Sandbox to run the selected external SDK and its build tools with normal user permissions. Restart the rebuilt app after entitlement changes. This configuration is for distribution outside the Mac App Store.** Native code debugging, attach, conditional breakpoints, watches and Flutter Inspector are not included.
 
 [Detailed setup and usage in Russian](docs/ru/flutter-run-and-debug.md). Protocol reference: [Flutter DAP](https://github.com/flutter/flutter/blob/main/packages/flutter_tools/lib/src/debug_adapters/README.md).
 

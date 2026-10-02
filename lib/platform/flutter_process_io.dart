@@ -36,15 +36,27 @@ Future<FlutterToolProcess> startFlutterProcess(
       'Initialize this SDK by running flutter --version once in a terminal',
     );
   }
-  return _ToolProcess(
-    await Process.start(
-      executable,
-      args,
-      workingDirectory: workingDirectory,
-      environment: {'FLUTTER_ROOT': sdk.path},
-      runInShell: false,
-    ),
-  );
+  try {
+    return _ToolProcess(
+      await Process.start(
+        executable,
+        args,
+        workingDirectory: workingDirectory,
+        environment: {'FLUTTER_ROOT': sdk.path},
+        runInShell: false,
+      ),
+    );
+  } on ProcessException catch (e) {
+    if (Platform.isMacOS && e.errorCode == 1) {
+      throw StateError(
+        'macOS denied launching Flutter SDK. '
+        'The current Tamtoot App Sandbox can block external SDK tools. '
+        'Use a desktop developer build with suitable process permissions. '
+        'SDK path: ${sdk.path}',
+      );
+    }
+    rethrow;
+  }
 }
 
 Future<String> flutterProjectPath(Uri root, String entryPoint) async {
