@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:collection';
 import 'dart:convert';
 
 import '../git/git_service.dart';
@@ -100,6 +101,7 @@ Do not ask the user to run them during the agent loop. Do not spend iterations l
 Verify edits by reading the changed files. State in the final summary that runtime checks were not executed in the mobile IDE.
 FIRST RESPONSE RULE: your first response for every new task must only analyze the request.
 For that first response, emit one say action with a concise plan: restate the goal, identify what you need to inspect, name likely files or areas, and mention important risks or ambiguities.
+Attachments are sent only with this first request. Extract and retain the task-relevant facts from them in your analysis instead of asking for them again.
 Do not list files, read files, write files, call MCP tools, or finish in the first response.
 Begin project inspection and implementation only after the host returns your analysis to you for the next iteration.
 Reply with exactly ONE JSON object for the next step. Never return two actions.
@@ -107,11 +109,14 @@ Do not wrap the object in markdown. Do not add commentary before or after it.
 Allowed actions (examples only — emit one of these shapes):
 - say: {"action":"say","text":"..."}
 - list_files: {"action":"list_files","path":"relative/folder"}
-- read_file: {"action":"read_file","path":"relative/file"}
+- search_files: {"action":"search_files","query":"symbol or text","path":"optional/relative/folder"}
+- read_file: {"action":"read_file","path":"relative/file","startLine":1,"lineCount":240}
 - write_file: {"action":"write_file","path":"relative/file","content":"..."}
 - mcp_call: {"action":"mcp_call","server":"name","tool":"tool_name","arguments":{}}
 - finish: {"action":"finish","summary":"..."}
 Use relative paths only. Never access .git or .tamtoot. Read relevant files before writing.
+Keep the working set small. Use the one-time project index and search_files to locate candidates, then read only the files and line ranges needed for the task.
+The host keeps only a few recent file excerpts in context. If an older excerpt is evicted, read that file again only when it becomes relevant.
 After writing, read the changed file to inspect it, then finish without running commands.
 ''';
 
@@ -175,6 +180,8 @@ After writing, read the changed file to inspect it, then finish without running 
       'Phase: analysis. Your first response must be a say action containing only the task analysis and implementation plan. Do not use a tool yet.',
       if (promptHook.context.isNotEmpty) 'Hook context:\n${promptHook.context}',
     ];
+    final activeFiles = LinkedHashMap<String, String>();
+    var oneShotContext = '';
     var mistakes = 0;
     for (var iteration = 1; iteration <= options.maxIterations; iteration++) {
       if (_stopped) {
@@ -186,6 +193,11 @@ After writing, read the changed file to inspect it, then finish without running 
       _active = client;
       ModelReply reply;
       try {
+        final userPrompt = _buildPrompt(
+          transcript,
+          activeFiles,
+          oneShotContext: oneShotContext,
+        );
         reply = await client.send(
           profile,
           {
@@ -195,11 +207,12 @@ After writing, read the changed file to inspect it, then finish without running 
               if (mcp != null && mcp!.tools.isNotEmpty)
                 'Available MCP tools:\n${mcp!.describe()}',
             ].join('\n\n'),
-            'userPrompt': transcript.join('\n\n'),
+            'userPrompt': userPrompt,
           },
           apiKey: apiKey,
-          attachments: attachments,
+          attachments: iteration == 1 ? attachments : const [],
         );
+        oneShotContext = '';
       } finally {
         _active = null;
       }
@@ -243,15 +256,37 @@ After writing, read the changed file to inspect it, then finish without running 
           case 'say':
             final text = _string(action, 'text');
             onEvent(AgentEvent('say', text));
-            transcript.add(
-              'Assistant update: $text\nContinue with the next action.',
+            _replaceNote(
+              transcript,
+              'Assistant analysis:',
+              'Assistant analysis: $text',
             );
+            if (iteration == 1) {
+              transcript[1] =
+                  'Phase: implementation. Select only relevant files; inspect before editing.';
+              oneShotContext = await _projectIndex();
+            }
           case 'list_files':
             final path = _path(action['path'] ?? '', allowEmpty: true);
             final files = await store.listFiles(path);
-            final visible = files.where(_allowed).take(500).join('\n');
+            final visible = files.where(_useful).take(300).join('\n');
             onEvent(AgentEvent('tool', 'Listed ${path.isEmpty ? '.' : path}'));
-            transcript.add('Tool list_files result:\n$visible');
+            oneShotContext =
+                'Tool list_files result for ${path.isEmpty ? '.' : path} '
+                '(one-time result):\n$visible';
+          case 'search_files':
+            final query = _string(action, 'query').trim();
+            if (query.length < 2) {
+              throw const ModelApiException(
+                'search_files query must contain at least 2 characters.',
+              );
+            }
+            final path = _path(action['path'] ?? '', allowEmpty: true);
+            final result = await _searchFiles(query, path);
+            onEvent(AgentEvent('tool', 'Searched project for “$query”'));
+            oneShotContext =
+                'Tool search_files result for "$query" (one-time result):\n'
+                '$result';
           case 'read_file':
             final path = _path(action['path']);
             final bytes = await store.readBytes(path);
@@ -261,8 +296,19 @@ After writing, read the changed file to inspect it, then finish without running 
               );
             }
             final content = utf8.decode(bytes);
+            final excerpt = _fileExcerpt(path, content, action);
+            _rememberFile(
+              activeFiles,
+              excerpt.key,
+              excerpt.content,
+              transcript,
+            );
             onEvent(AgentEvent('tool', 'Read $path'));
-            transcript.add('Tool read_file $path result:\n$content');
+            _replaceNote(
+              transcript,
+              'Tool read_file result:',
+              'Tool read_file result: ${excerpt.description}. The content is in Active file context.',
+            );
           case 'write_file':
             final path = _path(action['path']);
             final content = _string(action, 'content');
@@ -281,6 +327,9 @@ After writing, read the changed file to inspect it, then finish without running 
             }
             await store.validateRegularFilePath(path);
             await store.writeText(path, content);
+            activeFiles.removeWhere(
+              (key, _) => key == path || key.startsWith('$path ['),
+            );
             onEvent(AgentEvent('tool', 'Wrote $path'));
             transcript.add(
               'Tool write_file result: wrote $path successfully. Inspect it before finishing.',
@@ -314,7 +363,9 @@ After writing, read the changed file to inspect it, then finish without running 
             }
             final result = await registry.call(server, tool, rawArguments);
             onEvent(AgentEvent('tool', 'MCP $server/$tool'));
-            transcript.add('MCP $server/$tool result:\n${jsonEncode(result)}');
+            oneShotContext =
+                'MCP $server/$tool result (one-time result):\n'
+                '${_bounded(jsonEncode(result), 12000)}';
           case 'finish':
             final summary = _string(action, 'summary');
             onEvent(AgentEvent('done', summary));
@@ -440,11 +491,239 @@ After writing, read the changed file to inspect it, then finish without running 
       path != '.tamtoot' &&
       !path.startsWith('.tamtoot/');
 
+  bool _useful(String path) {
+    if (!_allowed(path)) return false;
+    final parts = path.split('/');
+    const generated = {
+      '.dart_tool',
+      '.gradle',
+      '.idea',
+      'build',
+      'DerivedData',
+      'node_modules',
+      'Pods',
+    };
+    return !parts.any(generated.contains);
+  }
+
+  String _buildPrompt(
+    List<String> transcript,
+    LinkedHashMap<String, String> activeFiles, {
+    required String oneShotContext,
+  }) {
+    final out = StringBuffer(transcript.join('\n\n'));
+    if (oneShotContext.isNotEmpty) {
+      out
+        ..write('\n\n')
+        ..write(oneShotContext);
+    }
+    if (activeFiles.isNotEmpty) {
+      out.write('\n\nActive file context (bounded working set):');
+      for (final entry in activeFiles.entries) {
+        out
+          ..write('\n\n--- ${entry.key} ---\n')
+          ..write(entry.value);
+      }
+    }
+    return out.toString();
+  }
+
+  Future<String> _projectIndex() async {
+    final paths = (await store.listFiles('')).where(_useful).toList()..sort();
+    const maxPaths = 300;
+    const maxCharacters = 8000;
+    final out = StringBuffer(
+      'One-time project file index. It will not be repeated. '
+      'Use search_files or list_files if you need another view:\n',
+    );
+    var included = 0;
+    for (final path in paths.take(maxPaths)) {
+      if (out.length + path.length + 1 > maxCharacters) break;
+      out.writeln(path);
+      included++;
+    }
+    if (included < paths.length) {
+      out.write('… ${paths.length - included} more files omitted');
+    }
+    onEvent(AgentEvent('context', 'Indexed $included project files once'));
+    return out.toString();
+  }
+
+  Future<String> _searchFiles(String query, String directory) async {
+    final lower = query.toLowerCase();
+    final files = (await store.listFiles(directory)).where(_useful).toList()
+      ..sort();
+    final matches = <String>[];
+    var scanned = 0;
+    for (final path in files) {
+      if (matches.length >= 24 || scanned >= 800) break;
+      if (path.toLowerCase().contains(lower)) {
+        matches.add('$path (path match)');
+        if (matches.length >= 24) break;
+      }
+      if (!_searchable(path)) continue;
+      scanned++;
+      try {
+        final bytes = await store.readBytes(path);
+        if (bytes.length > 256 * 1024 || bytes.contains(0)) continue;
+        final lines = utf8.decode(bytes, allowMalformed: true).split('\n');
+        for (var index = 0; index < lines.length; index++) {
+          final line = lines[index];
+          final position = line.toLowerCase().indexOf(lower);
+          if (position < 0) continue;
+          final start = position > 60 ? position - 60 : 0;
+          final end = (position + query.length + 100)
+              .clamp(0, line.length)
+              .toInt();
+          final snippet = line
+              .substring(start, end)
+              .replaceAll(RegExp(r'\s+'), ' ')
+              .trim();
+          matches.add('$path:${index + 1}: $snippet');
+          if (matches.length >= 24) break;
+        }
+      } catch (_) {
+        // Unreadable and transient files are omitted from search results.
+      }
+    }
+    if (matches.isEmpty) {
+      return 'No matches in $scanned searchable files.';
+    }
+    return '${matches.join('\n')}\n'
+        'Returned ${matches.length} matches from $scanned searchable files.';
+  }
+
+  bool _searchable(String path) {
+    final dot = path.lastIndexOf('.');
+    if (dot < 0) return true;
+    const extensions = {
+      'c',
+      'cc',
+      'cpp',
+      'cs',
+      'css',
+      'dart',
+      'go',
+      'gradle',
+      'h',
+      'html',
+      'java',
+      'js',
+      'json',
+      'kt',
+      'kts',
+      'md',
+      'm',
+      'mm',
+      'properties',
+      'py',
+      'rb',
+      'rs',
+      'sh',
+      'swift',
+      'toml',
+      'ts',
+      'tsx',
+      'txt',
+      'xml',
+      'yaml',
+      'yml',
+    };
+    return extensions.contains(path.substring(dot + 1).toLowerCase());
+  }
+
+  _AgentFileExcerpt _fileExcerpt(
+    String path,
+    String content,
+    Map<String, dynamic> action,
+  ) {
+    int? integer(String key) {
+      final value = action[key];
+      if (value == null) return null;
+      if (value is! int) {
+        throw ModelApiException('$key must be an integer.');
+      }
+      return value;
+    }
+
+    final lines = content.split('\n');
+    final requestedStart = integer('startLine');
+    final requestedCount = integer('lineCount');
+    if (requestedStart != null && requestedStart < 1) {
+      throw const ModelApiException('startLine must be positive.');
+    }
+    if (requestedCount != null &&
+        (requestedCount < 1 || requestedCount > 500)) {
+      throw const ModelApiException('lineCount must be between 1 and 500.');
+    }
+    final needsExcerpt =
+        requestedStart != null ||
+        requestedCount != null ||
+        content.length > 14000;
+    if (!needsExcerpt) {
+      return _AgentFileExcerpt(path, content, '$path (${lines.length} lines)');
+    }
+    final start = (requestedStart ?? 1) - 1;
+    if (start >= lines.length) {
+      throw ModelApiException(
+        'startLine exceeds the ${lines.length}-line file.',
+      );
+    }
+    final count = requestedCount ?? 240;
+    final end = (start + count).clamp(0, lines.length).toInt();
+    var excerpt = lines.sublist(start, end).join('\n');
+    if (excerpt.length > 14000) {
+      excerpt = '${excerpt.substring(0, 14000)}\n… excerpt character limit';
+    }
+    final from = start + 1;
+    final to = end;
+    return _AgentFileExcerpt(
+      '$path [lines $from-$to]',
+      excerpt,
+      '$path lines $from-$to of ${lines.length}',
+    );
+  }
+
+  void _rememberFile(
+    LinkedHashMap<String, String> activeFiles,
+    String key,
+    String content,
+    List<String> transcript,
+  ) {
+    activeFiles.remove(key);
+    activeFiles[key] = content;
+    final evicted = <String>[];
+    int characters() =>
+        activeFiles.values.fold(0, (total, value) => total + value.length);
+    while (activeFiles.length > 4 || characters() > 28000) {
+      final oldest = activeFiles.keys.first;
+      activeFiles.remove(oldest);
+      evicted.add(oldest);
+    }
+    if (evicted.isNotEmpty) {
+      _replaceNote(
+        transcript,
+        'Context eviction:',
+        'Context eviction: ${evicted.join(', ')}. Read again only if needed.',
+      );
+    }
+  }
+
+  void _replaceNote(List<String> transcript, String prefix, String value) {
+    transcript.removeWhere((item) => item.startsWith(prefix));
+    transcript.add(value);
+  }
+
+  String _bounded(String value, int maxCharacters) =>
+      value.length <= maxCharacters
+      ? value
+      : '${value.substring(0, maxCharacters)}\n… result truncated';
+
   void _trim(List<String> transcript) {
     var characters = transcript.fold(0, (sum, item) => sum + item.length);
-    while (characters > 120000 && transcript.length > 2) {
-      characters -= transcript[1].length;
-      transcript.removeAt(1);
+    while (characters > 16000 && transcript.length > 3) {
+      characters -= transcript[2].length;
+      transcript.removeAt(2);
     }
   }
 
@@ -453,4 +732,9 @@ After writing, read the changed file to inspect it, then finish without running 
     if (trimmed.length <= max) return trimmed;
     return '${trimmed.substring(0, max)}…';
   }
+}
+
+class _AgentFileExcerpt {
+  const _AgentFileExcerpt(this.key, this.content, this.description);
+  final String key, content, description;
 }

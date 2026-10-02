@@ -1,10 +1,12 @@
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:tamtoot/core/agents/agent_engine.dart';
 import 'package:tamtoot/core/agents/model_client.dart';
+import 'package:tamtoot/core/agents/model_attachment.dart';
 import 'package:tamtoot/core/agents/model_profile.dart';
 import 'package:tamtoot/core/agents/hook_runner.dart';
 import 'package:tamtoot/core/agents/command_runner.dart';
@@ -70,6 +72,68 @@ ModelClient queueClient(List<String> actions) => ModelClient(
 
 void main() {
   final root = Uri.parse('memory:///project/');
+  test('agent sends attachments once and narrows project context', () async {
+    final store = RepositoryMemory();
+    await store.writeText('lib/target.dart', 'const needle = "project-value";');
+    await store.writeText('lib/unrelated.dart', 'const other = 1;');
+    final bodies = <Map<String, dynamic>>[];
+    final actions = [
+      '{"action":"say","text":"I will locate needle and inspect its file."}',
+      '{"action":"search_files","query":"needle","path":"lib"}',
+      '{"action":"read_file","path":"lib/target.dart"}',
+      '{"action":"finish","summary":"Inspected the relevant file."}',
+    ];
+    ModelClient client() => ModelClient(
+      client: MockClient((request) async {
+        bodies.add(
+          Map<String, dynamic>.from(
+            jsonDecode(request.body) as Map<String, dynamic>,
+          ),
+        );
+        return http.Response(
+          jsonEncode({
+            'choices': [
+              {
+                'message': {'content': actions.removeAt(0)},
+                'finish_reason': 'stop',
+              },
+            ],
+          }),
+          200,
+        );
+      }),
+    );
+    final engine = AgentTaskEngine(
+      profile: agentProfile(),
+      store: store,
+      git: AgentGit(),
+      root: root,
+      apiKey: '',
+      attachments: [
+        ModelAttachment(
+          name: 'brief.txt',
+          mimeType: 'text/plain',
+          bytes: Uint8List.fromList(utf8.encode('unique-attachment-context')),
+        ),
+      ],
+      onEvent: (_) {},
+      approve: (_, _) async => true,
+      clientFactory: client,
+      hooks: NoHooks(),
+      commands: FakeCommands(),
+    );
+
+    final result = await engine.run('Inspect needle', const AgentRunOptions());
+
+    expect(result.success, isTrue);
+    expect(bodies, hasLength(4));
+    expect(jsonEncode(bodies[0]), contains('unique-attachment-context'));
+    expect(jsonEncode(bodies[1]), isNot(contains('unique-attachment-context')));
+    expect(jsonEncode(bodies[1]), contains('One-time project file index'));
+    expect(jsonEncode(bodies[2]), contains('lib/target.dart:1'));
+    expect(jsonEncode(bodies[3]), contains('project-value'));
+  });
+
   test(
     'agent accepts the first JSON object when the model emits NDJSON',
     () async {

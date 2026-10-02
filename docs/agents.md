@@ -133,7 +133,8 @@ before it runs it. The available actions are:
 | --- | --- |
 | `say` | Adds a progress message to the run log |
 | `list_files` | Lists one project-relative directory |
-| `read_file` | Reads one project-relative regular file |
+| `search_files` | Searches paths and text, returning a small set of matching lines |
+| `read_file` | Reads one project-relative regular file or a requested line range |
 | `write_file` | Replaces one project-relative regular file |
 | `mcp_call` | Calls a tool advertised by a connected MCP server |
 | `finish` | Completes the task after all run conditions are satisfied |
@@ -154,6 +155,15 @@ Each task starts with a separate analysis turn. The model first posts a concise
 plan through `say`: the goal, intended inspection, likely files, and relevant
 risks or ambiguities. File and MCP actions begin on the following model request,
 so the plan appears in the Agent conversation before implementation starts.
+
+Agent context is incremental. User attachments are sent only with the first
+analysis request, where the model is instructed to retain their relevant facts.
+The next request receives a compact project file index once. The model then uses
+`search_files`, directory listing and ranged reads to select relevant content.
+Search results and listings are one-use context, while only four recent file
+excerpts are retained in the bounded working set. Older excerpts are evicted and
+can be read again when needed. This prevents every iteration from resending all
+attachments and every file inspected earlier.
 
 ## YOLO Mode
 

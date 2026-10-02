@@ -205,6 +205,12 @@ MCP tools. Tamtoot targets mobile devices, so every agent request explicitly
 forbids attempts to run tests, builds, interpreters, debuggers, shells or other
 executables. File writes require one-time approval in normal mode.
 
+Context is loaded incrementally to limit token use. Attachments are sent only on
+the analysis request, a compact project index is supplied once, and the model
+uses path/text search plus ranged file reads to choose relevant code. Listings
+and search results are one-use context; the working set retains at most four
+recent file excerpts and evicts older content automatically.
+
 **YOLO Mode** auto-approves these actions after a visible first-use warning and a
 clean-Git check. It has a 600-second default timeout, a configurable consecutive
 mistake limit, an iteration limit, a live log and a **Stop** button. The agent
