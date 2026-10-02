@@ -34,6 +34,20 @@ class DocumentService {
     return doc;
   }
 
+  static const _binaryExtensions = [
+    '.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.ico', '.icns',
+    '.pdf', '.zip', '.gz', '.tar', '.7z',
+    '.mp3', '.mp4', '.mov', '.wav', '.ogg',
+    '.ttf', '.otf', '.woff', '.woff2',
+    '.exe', '.dll', '.dylib', '.so', '.a', '.o', '.bin', '.jar',
+  ];
+
+  /// Binary assets cannot be decoded as UTF-8 text by [FileSystemProvider.read].
+  static bool isBinary(String name) {
+    final lower = name.toLowerCase();
+    return _binaryExtensions.any(lower.endsWith);
+  }
+
   Future<OpenDocument> open(FileEntry entry) async {
     final existing = documents.where((d) => d.uri == entry.uri).firstOrNull;
     if (existing != null) {

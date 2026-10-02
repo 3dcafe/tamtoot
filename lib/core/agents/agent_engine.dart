@@ -100,6 +100,10 @@ class AgentTaskEngine {
   }
 
   static const protocol = '''
+CRITICAL: Your entire reply must be one JSON object starting with {.
+Put the action in message content. Do not use reasoning_content / chain-of-thought.
+If you think first, you will hit the token limit and fail.
+
 You are an autonomous coding agent in Tamtoot (mobile IDE: no terminal, builds, tests, or shell).
 Never run or ask for runtime checks; verify by reading files and say so in the finish summary.
 Work quickly and make progress every iteration.
@@ -274,6 +278,7 @@ Reuse retained excerpts — do not re-read unchanged files.
     var consecutiveSays = 0;
     var consecutiveSearches = 0;
     var requireReadAfterSearch = false;
+    var reasoningBudgetFailures = 0;
     final completedSearches = <_CompletedSearch>[];
     final focusLinesByPath = <String, List<int>>{};
     var searchesBeforeEdit = 0;
@@ -304,12 +309,23 @@ Reuse retained excerpts — do not re-read unchanged files.
           activeFiles,
           observations,
         );
+        final requestProfile = reasoningBudgetFailures > 0
+            ? _withAgentTokenBudget(
+                profile,
+                maxTokensOverride: 600,
+                disableThinking: true,
+              )
+            : agentProfile;
         reply = await client.send(
-          agentProfile,
+          requestProfile,
           {
             'systemPrompt': [
-              agentProfile.systemPrompt,
+              requestProfile.systemPrompt,
               protocol,
+              if (reasoningBudgetFailures > 0)
+                'HOST OVERRIDE: Previous reply used reasoning_content and left '
+                    'content empty. Answer with ONLY one JSON action object. '
+                    'First character must be {. No analysis text.',
               if (mcp != null && mcp!.tools.isNotEmpty)
                 'Available MCP tools:\n${mcp!.describe()}',
             ].join('\n\n'),
@@ -320,12 +336,16 @@ Reuse retained excerpts — do not re-read unchanged files.
         );
       } on ModelApiException catch (e) {
         mistakes++;
+        if (e.message.contains('reasoning_content')) {
+          reasoningBudgetFailures++;
+        }
         onEvent(AgentEvent('error', e.message));
         _replaceNote(
           transcript,
           'Host note:',
           'Host note: Model request failed: ${_bounded(e.message, 800)}\n'
-              'Emit exactly one short JSON action next. Do not explain.',
+              'Emit exactly one short JSON action next. First character must be {. '
+              'Do not write reasoning_content or analysis.',
         );
         if (mistakes >= options.maxConsecutiveMistakes) {
           throw ModelApiException(
@@ -1066,13 +1086,33 @@ Reuse retained excerpts — do not re-read unchanged files.
         'Prefer literal search_files or list_files; do not re-list the tree.';
   }
 
-  ModelProfile _withAgentTokenBudget(ModelProfile source) {
+  ModelProfile _withAgentTokenBudget(
+    ModelProfile source, {
+    int? maxTokensOverride,
+    bool disableThinking = true,
+  }) {
     final params = Map<String, dynamic>.from(source.parameters);
     final existing = params['max_tokens'];
-    final capped = existing is num
-        ? existing.clamp(1, agentMaxTokens).toInt()
-        : agentMaxTokens;
+    final capped = maxTokensOverride ??
+        (existing is num
+            ? existing.clamp(1, agentMaxTokens).toInt()
+            : agentMaxTokens);
     params['max_tokens'] = capped;
+    // GLM / AI STAR thinking builds otherwise fill reasoning_content and leave
+    // message.content empty until max_tokens, which breaks the JSON protocol.
+    if (disableThinking) {
+      params['enable_thinking'] = false;
+      params['thinking'] = const {'type': 'disabled'};
+      final template = params['chat_template_kwargs'];
+      if (template is Map) {
+        params['chat_template_kwargs'] = {
+          ...Map<String, dynamic>.from(template),
+          'enable_thinking': false,
+        };
+      } else {
+        params['chat_template_kwargs'] = const {'enable_thinking': false};
+      }
+    }
     return ModelProfile(
       id: source.id,
       name: source.name,

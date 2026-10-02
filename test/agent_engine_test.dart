@@ -1048,8 +1048,8 @@ void main() {
       profile: ModelProfile(
         id: 'agent',
         name: 'Agent',
-        provider: 'test',
-        model: 'model',
+        provider: 'ai-star',
+        model: 'glm-5.3-flash',
         endpoint: 'https://example.test/v1/chat/completions',
         parameters: const {'temperature': 0.1, 'max_tokens': 8192},
       ),
@@ -1065,5 +1065,82 @@ void main() {
     );
     await engine.run('Done', const AgentRunOptions());
     expect(bodies.single['max_tokens'], AgentTaskEngine.agentMaxTokens);
+    expect(bodies.single['enable_thinking'], isFalse);
+    expect(bodies.single['thinking'], {'type': 'disabled'});
+  });
+
+  test('agent tightens tokens after reasoning_content budget failure', () async {
+    final store = RepositoryMemory();
+    await store.writeText('lib/a.dart', 'const x = 1;');
+    final bodies = <Map<String, dynamic>>[];
+    final actions = <String?>[
+      null, // reasoning-only failure
+      '{"action":"finish","summary":"recovered"}',
+    ];
+    ModelClient client() => ModelClient(
+      client: MockClient((request) async {
+        bodies.add(
+          Map<String, dynamic>.from(
+            jsonDecode(request.body) as Map<String, dynamic>,
+          ),
+        );
+        final next = actions.removeAt(0);
+        if (next == null) {
+          return http.Response(
+            jsonEncode({
+              'model': 'glm-5.3-flash',
+              'choices': [
+                {
+                  'finish_reason': 'length',
+                  'message': {
+                    'role': 'assistant',
+                    'content': '',
+                    'reasoning_content': 'Long analysis without a JSON action.',
+                  },
+                },
+              ],
+            }),
+            200,
+          );
+        }
+        return http.Response(
+          jsonEncode({
+            'choices': [
+              {
+                'message': {'content': next},
+                'finish_reason': 'stop',
+              },
+            ],
+          }),
+          200,
+        );
+      }),
+    );
+    final engine = AgentTaskEngine(
+      profile: ModelProfile(
+        id: 'agent',
+        name: 'Agent',
+        provider: 'ai-star',
+        model: 'glm-5.3-flash',
+        endpoint: 'https://example.test/v1/chat/completions',
+      ),
+      store: store,
+      git: AgentGit(),
+      root: root,
+      apiKey: '',
+      onEvent: (_) {},
+      approve: (_, _) async => true,
+      clientFactory: client,
+      hooks: NoHooks(),
+      commands: FakeCommands(),
+    );
+    final result = await engine.run(
+      'Recover',
+      const AgentRunOptions(maxConsecutiveMistakes: 2),
+    );
+    expect(result.success, isTrue);
+    expect(bodies, hasLength(2));
+    expect(bodies[1]['max_tokens'], 600);
+    expect(jsonEncode(bodies[1]), contains('HOST OVERRIDE'));
   });
 }
