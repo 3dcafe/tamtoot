@@ -11,6 +11,7 @@ class SettingsService {
     'readOnly': false,
     'flutterSdkPath': '',
     'flutterDeviceId': '',
+    'flutterDeviceName': '',
     'flutterEntryPoint': 'lib/main.dart',
   };
   final Map<String, Object> user = {}, workspace = {};
@@ -27,7 +28,9 @@ class SettingsService {
   static void _validate(String key, Object value) {
     if (!defaults.containsKey(key)) return;
     final valid = switch (key) {
-      'flutterSdkPath' || 'flutterDeviceId' => value is String,
+      'flutterSdkPath' ||
+      'flutterDeviceId' ||
+      'flutterDeviceName' => value is String,
       'fontSize' => value is num && value >= 8 && value <= 40,
       'tabSize' => value is int && value >= 1 && value <= 8,
       'insertSpaces' || 'readOnly' => value is bool,

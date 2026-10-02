@@ -6,8 +6,54 @@ import 'package:tamtoot/app/app.dart';
 import 'package:tamtoot/app/providers.dart';
 import 'package:tamtoot/features/dialogs.dart';
 import 'support.dart';
+import 'package:tamtoot/features/flutter_settings.dart';
 
 void main() {
+  testWidgets(
+    'device picker saves IDs internally and keeps disconnected selections',
+    (tester) async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.windows;
+      final session = await testSession();
+      session.settings.set('flutterSdkPath', '/sdk');
+      session.flutter.devices = [
+        {'id': 'phone-secret-id', 'name': 'Pixel 9', 'emulator': false},
+        {'id': 'emulator-5554', 'name': 'Pixel emulator', 'emulator': true},
+      ];
+      session.flutter.devicesLoaded = true;
+      try {
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Scaffold(body: FlutterSettings(session: session)),
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(find.text('Device ID'), findsNothing);
+        expect(find.textContaining('phone-secret-id'), findsNothing);
+        await tester.tap(find.byKey(const ValueKey('flutter-device-picker')));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Pixel 9').last);
+        await tester.pumpAndSettle();
+        expect(session.settings.get('flutterDeviceId'), 'phone-secret-id');
+        expect(session.settings.get('flutterDeviceName'), 'Pixel 9');
+        session.flutter.devices = [];
+        session.changed(persist: false);
+        await tester.pumpAndSettle();
+        expect(find.text('Pixel 9 (not connected)'), findsOneWidget);
+        await tester.tap(find.byKey(const ValueKey('flutter-device-picker')));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('This computer (Windows)').last);
+        await tester.pumpAndSettle();
+        expect(session.settings.get('flutterDeviceId'), '');
+        expect(tester.takeException(), isNull);
+      } finally {
+        await tester.pumpWidget(const SizedBox());
+        await tester.pumpAndSettle();
+        await tester.runAsync(session.dispose);
+        debugDefaultTargetPlatformOverride = null;
+      }
+    },
+  );
+
   for (final platform in [
     TargetPlatform.windows,
     TargetPlatform.linux,

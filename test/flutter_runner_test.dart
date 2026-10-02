@@ -163,6 +163,11 @@ void main() {
       ]);
       expect(runner.sdkResult, contains('3.44.0'));
       expect(runner.devices.single['id'], 'linux');
+      await runner.refreshDevices('/sdk');
+      expect(argsSeen, hasLength(3));
+      expect(argsSeen.last, ['devices', '--machine']);
+      expect(runner.devicesLoaded, true);
+      expect(runner.deviceError, isNull);
       await runner.dispose();
       final failed = FlutterRunner(
         log: (_) {},

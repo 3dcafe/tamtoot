@@ -203,7 +203,7 @@ actual browser permission behavior requires a writable folder grant.
 
 ## Flutter run and debug (desktop)
 
-On Windows, Linux and macOS, **Tools → Settings → Flutter SDK** accepts the absolute SDK folder path. **Test Flutter** runs `flutter --version --machine`, displays SDK versions and discovers devices with `flutter devices --machine`. It verifies CLI communication, not the complete build toolchain. Settings are saved for the user; the default entry point is `lib/main.dart` and the default target is the current desktop. Initialize a Windows SDK with `flutter --version` once before using it here.
+On Windows, Linux and macOS, **Tools → Settings → Flutter SDK** accepts the absolute SDK folder path. **Test Flutter** runs `flutter --version --machine`, displays SDK versions and discovers devices with `flutter devices --machine`. It verifies CLI communication, not the complete build toolchain. The **Device** dropdown shows friendly device names; **Refresh** discovers connected devices and running emulators. IDs are saved internally. Settings are saved for the user; the default entry point is `lib/main.dart` and the default target is the current desktop. Initialize a Windows SDK with `flutter --version` once before using it here.
 
 Open a local Flutter project containing `pubspec.yaml`. The toolbar and **Run** menu provide Run, Debug, Stop, Hot reload and Hot restart. Modified documents are saved first; cancelling a save cancels the launch/update. **View → Debug** provides Pause, Continue, Step over/into/out, call stacks and variables. Use **Run → Toggle breakpoint at cursor** in a saved `.dart` file to add/remove a breakpoint. Breakpoints currently last for the window session. Build output and application logs appear in Output.
 

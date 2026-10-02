@@ -13,9 +13,6 @@ class _FlutterSettingsState extends State<FlutterSettings> {
   late final _sdk = TextEditingController(
     text: widget.session.settings.get('flutterSdkPath') as String,
   );
-  late final _device = TextEditingController(
-    text: widget.session.settings.get('flutterDeviceId') as String,
-  );
   late final _entry = TextEditingController(
     text: widget.session.settings.get('flutterEntryPoint') as String,
   );
@@ -29,6 +26,7 @@ class _FlutterSettingsState extends State<FlutterSettings> {
       final root = await widget.session.documents.dialogs.openWorkspace();
       if (root == null || !mounted) return;
       _sdk.text = root.toFilePath();
+      widget.session.flutter.clearDevices();
       _save('flutterSdkPath', _sdk.text.trim());
     } catch (e) {
       widget.session.log('Flutter SDK: $e', error: true);
@@ -38,7 +36,6 @@ class _FlutterSettingsState extends State<FlutterSettings> {
   @override
   void dispose() {
     _sdk.dispose();
-    _device.dispose();
     _entry.dispose();
     super.dispose();
   }
@@ -48,6 +45,15 @@ class _FlutterSettingsState extends State<FlutterSettings> {
     stream: widget.session.changes,
     builder: (context, _) {
       final runner = widget.session.flutter;
+      final selected = widget.session.settings.get('flutterDeviceId') as String;
+      final savedName =
+          widget.session.settings.get('flutterDeviceName') as String;
+      final known = runner.devices.any((device) => device['id'] == selected);
+      final computer = switch (defaultFlutterDevice) {
+        'windows' => 'Windows',
+        'linux' => 'Linux',
+        _ => 'macOS',
+      };
       return Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -65,7 +71,10 @@ class _FlutterSettingsState extends State<FlutterSettings> {
               labelText: 'Flutter SDK folder',
               hintText: '/path/to/flutter or C:\\src\\flutter',
             ),
-            onChanged: (text) => _save('flutterSdkPath', text.trim()),
+            onChanged: (text) {
+              runner.clearDevices();
+              _save('flutterSdkPath', text.trim());
+            },
           ),
           Wrap(
             spacing: 8,
@@ -95,33 +104,79 @@ class _FlutterSettingsState extends State<FlutterSettings> {
               key: const ValueKey('flutter-sdk-result'),
             ),
           const SizedBox(height: 8),
-          TextField(
-            controller: _device,
-            enabled: !runner.active,
-            decoration: InputDecoration(
-              labelText: 'Device ID',
-              hintText: defaultFlutterDevice,
-              helperText:
-                  'Empty selects this desktop. Test Flutter lists available devices.',
-            ),
-            onChanged: (text) => _save('flutterDeviceId', text.trim()),
-          ),
-          if (runner.devices.isNotEmpty)
-            Wrap(
-              spacing: 6,
-              children: [
-                for (final device in runner.devices)
-                  ActionChip(
-                    label: Text('${device['name']} (${device['id']})'),
-                    onPressed: runner.active
-                        ? null
-                        : () {
-                            _device.text = device['id'] as String;
-                            _save('flutterDeviceId', _device.text);
-                          },
+          Row(
+            children: [
+              Expanded(
+                child: InputDecorator(
+                  decoration: const InputDecoration(labelText: 'Device'),
+                  child: DropdownButtonHideUnderline(
+                    child: DropdownButton<String>(
+                      key: const ValueKey('flutter-device-picker'),
+                      isExpanded: true,
+                      value: selected,
+                      items: [
+                        DropdownMenuItem(
+                          value: '',
+                          child: Text('This computer ($computer)'),
+                        ),
+                        for (final device in runner.devices)
+                          DropdownMenuItem(
+                            value: device['id'] as String,
+                            child: Text(
+                              '${device['name'] ?? 'Unnamed device'}${device['emulator'] == true ? ' (emulator)' : ''}',
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        if (selected.isNotEmpty && !known)
+                          DropdownMenuItem(
+                            value: selected,
+                            enabled: false,
+                            child: Text(
+                              '${savedName.isEmpty ? 'Previously selected device' : savedName} (${runner.devicesLoaded ? 'not connected' : 'refresh to check'})',
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                      ],
+                      onChanged: runner.active || runner.checking
+                          ? null
+                          : (value) {
+                              if (value == null) return;
+                              final name =
+                                  runner.devices
+                                          .where(
+                                            (device) => device['id'] == value,
+                                          )
+                                          .firstOrNull?['name']
+                                      as String? ??
+                                  '';
+                              _save('flutterDeviceId', value);
+                              _save('flutterDeviceName', name);
+                            },
+                    ),
                   ),
-              ],
-            ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              TextButton.icon(
+                key: const ValueKey('flutter-devices-refresh'),
+                icon: const Icon(Icons.refresh),
+                label: Text(runner.checking ? 'Loading…' : 'Refresh'),
+                onPressed:
+                    runner.active || runner.checking || _sdk.text.trim().isEmpty
+                    ? null
+                    : () => runner.refreshDevices(_sdk.text.trim()),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Text(
+            runner.deviceError ??
+                (runner.devicesLoaded
+                    ? runner.devices.isEmpty
+                          ? 'No devices found. Connect a device or start an emulator, then refresh.'
+                          : 'Select the device where the app should run.'
+                    : 'Press Refresh or Test Flutter to find connected devices and running emulators.'),
+          ),
           const SizedBox(height: 8),
           TextField(
             controller: _entry,

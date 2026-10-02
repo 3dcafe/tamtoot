@@ -33,6 +33,8 @@ class FlutterRunner {
   bool debugging = false;
   bool disposed = false;
   String? sdkResult;
+  String? deviceError;
+  bool devicesLoaded = false;
   List<Map<String, dynamic>> devices = [];
   final Map<String, Set<int>> breakpoints = {};
   List<Map<String, dynamic>> frames = [];
@@ -82,6 +84,8 @@ class FlutterRunner {
     checking = true;
     sdkResult = null;
     devices = [];
+    deviceError = null;
+    devicesLoaded = false;
     _changed();
     try {
       final version =
@@ -92,22 +96,54 @@ class FlutterRunner {
       sdkResult =
           'Flutter ${version['frameworkVersion']} · Dart ${version['dartSdkVersion']}';
       log(sdkResult!);
-      try {
-        final items =
-            jsonDecode(await _capture(sdk, ['devices', '--machine'])) as List;
-        devices = items
-            .cast<Map>()
-            .map((item) => Map<String, dynamic>.from(item))
-            .toList();
-        log(
-          'Available Flutter devices: ${devices.map((item) => item['id']).join(', ')}',
-        );
-      } catch (e) {
-        sdkResult = '$sdkResult\nDevice detection failed: $e';
-      }
+      await _discoverDevices(sdk);
     } catch (e) {
       sdkResult = 'SDK test failed: $e';
       log(sdkResult!);
+    } finally {
+      checking = false;
+      _changed();
+    }
+  }
+
+  void clearDevices() {
+    devices = [];
+    devicesLoaded = false;
+    deviceError = null;
+    sdkResult = null;
+    _changed();
+  }
+
+  Future<void> _discoverDevices(String sdk) async {
+    devices = [];
+    deviceError = null;
+    devicesLoaded = false;
+    try {
+      final items =
+          jsonDecode(await _capture(sdk, ['devices', '--machine'])) as List;
+      final byId = <String, Map<String, dynamic>>{};
+      for (final item in items.cast<Map>()) {
+        if (item['id'] is! String || item['isSupported'] == false) continue;
+        byId[item['id'] as String] = Map<String, dynamic>.from(item);
+      }
+      devices = byId.values.toList();
+      devicesLoaded = true;
+      log(
+        'Available Flutter devices: ${devices.map((item) => item['name'] ?? item['id']).join(', ')}',
+      );
+    } catch (e) {
+      deviceError = 'Could not load devices: $e';
+      log(deviceError!);
+    }
+  }
+
+  Future<void> refreshDevices(String sdk) async {
+    if (!supportsFlutterTools) throw UnsupportedError('Desktop only');
+    if (checking || active) return;
+    checking = true;
+    _changed();
+    try {
+      await _discoverDevices(sdk);
     } finally {
       checking = false;
       _changed();
