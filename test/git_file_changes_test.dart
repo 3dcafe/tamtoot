@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:math';
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -23,6 +24,8 @@ class ChangeFiles extends MemoryFileSystem {
   String path(Uri uri) => uri.path.substring('/project/'.length);
   @override
   Future<String> read(Uri uri) => store.readText(path(uri));
+  @override
+  Future<Uint8List> readBytes(Uri uri) => store.readBytes(path(uri));
   @override
   Future<void> write(Uri uri, String text) => store.writeText(path(uri), text);
   @override

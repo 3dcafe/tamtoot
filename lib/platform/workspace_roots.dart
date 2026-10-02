@@ -1,6 +1,8 @@
 /// In-process registry of workspace stores (used by web File System Access roots).
 library;
 
+import 'dart:typed_data';
+
 import '../core/filesystem/filesystem.dart';
 import '../core/git/git_store.dart';
 
@@ -64,6 +66,21 @@ final class WorkspaceRoots {
       if (relative == null) continue;
       try {
         return await entry.value.readText(Uri.decodeComponent(relative));
+      } catch (_) {
+        return null;
+      }
+    }
+    return null;
+  }
+
+  static Future<Uint8List?> readBytes(Uri fileUri) async {
+    for (final entry in _stores.entries) {
+      final root = Uri.parse(entry.key);
+      if (!_isUnder(root, fileUri)) continue;
+      final relative = _relative(root, fileUri);
+      if (relative == null) continue;
+      try {
+        return await entry.value.readBytes(Uri.decodeComponent(relative));
       } catch (_) {
         return null;
       }

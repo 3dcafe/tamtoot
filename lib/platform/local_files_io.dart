@@ -1,7 +1,9 @@
 import 'dart:io';
+import 'dart:typed_data';
 import '../core/filesystem/filesystem.dart';
 
 Future<String> readLocal(Uri uri) => File.fromUri(uri).readAsString();
+Future<Uint8List> readLocalBytes(Uri uri) => File.fromUri(uri).readAsBytes();
 Future<void> writeLocal(Uri uri, String text) async {
   await File.fromUri(uri).writeAsString(text, flush: true);
 }

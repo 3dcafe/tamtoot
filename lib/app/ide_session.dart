@@ -378,7 +378,8 @@ class IdeSession {
   void configure(OpenDocument doc) {
     doc.editor.tabSize = settings.get('tabSize') as int;
     doc.editor.insertSpaces = settings.get('insertSpaces') as bool;
-    doc.editor.readOnly = false;
+    // Raster previews are view-only; SVG source stays editable.
+    doc.editor.readOnly = doc.kind == DocumentKind.image;
   }
 
   Future<void> run(String id, [Object? argument]) async {
@@ -466,7 +467,8 @@ class IdeSession {
         requiredString(d, 'name');
         if (d['text'] is! String ||
             (d['savedText'] != null && d['savedText'] is! String) ||
-            (d['uri'] != null && d['uri'] is! String)) {
+            (d['uri'] != null && d['uri'] is! String) ||
+            (d['kind'] != null && d['kind'] is! String)) {
           throw const SchemaException('Invalid document fields');
         }
         normalized.add(d);
@@ -477,20 +479,33 @@ class IdeSession {
       );
       final active = data['activeIndex'];
       String? restoredActive;
+      final pendingImageReloads = <OpenDocument>[];
       for (var i = 0; i < normalized.length; i++) {
         final d = normalized[i];
         if (_isLegacyExample(d)) continue;
+        final kindName = d['kind'] as String?;
+        final kind = DocumentKind.values.where((k) => k.name == kindName).firstOrNull ??
+            DocumentService.kindForName(d['name'] as String);
         final doc = documents.create(
           d['name'] as String,
-          d['text'] as String,
+          kind == DocumentKind.image ? '' : d['text'] as String,
           uri: d['uri'] == null ? null : Uri.parse(d['uri'] as String),
-          savedText: d['savedText'] as String?,
+          savedText: kind == DocumentKind.image
+              ? ''
+              : d['savedText'] as String?,
+          kind: kind,
         );
         observe(doc);
+        if (kind == DocumentKind.image && doc.uri != null) {
+          pendingImageReloads.add(doc);
+        }
         if (i == active) restoredActive = doc.id;
       }
       if (restoredActive != null) documents.activeId = restoredActive;
       recentWorkspaces.addAll(recent.take(10));
+      for (final doc in pendingImageReloads) {
+        unawaited(_reloadImageBytes(doc));
+      }
     });
     log('Foundation ready · API v1');
     if (recentWorkspaces.isNotEmpty) {
@@ -518,6 +533,17 @@ class IdeSession {
           error: true,
         );
       }
+    }
+  }
+
+  Future<void> _reloadImageBytes(OpenDocument doc) async {
+    final uri = doc.uri;
+    if (uri == null || doc.kind != DocumentKind.image) return;
+    try {
+      doc.bytes = await documents.files.readBytes(uri);
+      changed(persist: false);
+    } catch (error) {
+      log('Could not reload image ${doc.name}: $error', error: true);
     }
   }
 
@@ -552,8 +578,10 @@ class IdeSession {
             {
               'name': d.name,
               'uri': d.uri?.toString(),
-              'text': d.editor.text,
-              'savedText': d.savedText,
+              'kind': d.kind.name,
+              // Do not persist raw image bytes in the session snapshot.
+              'text': d.kind == DocumentKind.image ? '' : d.editor.text,
+              'savedText': d.kind == DocumentKind.image ? '' : d.savedText,
             },
         ],
       }),

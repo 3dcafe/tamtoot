@@ -75,6 +75,21 @@ class PlatformFiles implements FileSystemProvider, FileDialogs {
   }
 
   @override
+  Future<Uint8List> readBytes(Uri uri) async {
+    if (_isAndroid && _androidDocuments.contains(uri)) {
+      // SAF text channel has no byte reader yet; decode only works for text.
+      final text = await read(uri);
+      return Uint8List.fromList(utf8.encode(text));
+    }
+    if (_opened.containsKey(uri)) {
+      return await _opened[uri]!.readAsBytes();
+    }
+    final virtual = await WorkspaceRoots.readBytes(uri);
+    if (virtual != null) return virtual;
+    return readLocalBytes(uri);
+  }
+
+  @override
   Future<void> write(Uri uri, String text) async {
     if (_isAndroid && _androidDocuments.contains(uri)) {
       await _android.invokeMethod<bool>('writeText', {

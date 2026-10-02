@@ -15,6 +15,7 @@ import 'git_changes_dialog.dart';
 import 'git_diff.dart';
 import 'http_requests_dialog.dart';
 import 'dock_view.dart';
+import 'media_document_view.dart';
 
 class IdeShell extends ConsumerStatefulWidget {
   const IdeShell({super.key});
@@ -446,6 +447,12 @@ class _IdeShellState extends ConsumerState<IdeShell> {
                         ),
                       ],
                     ),
+                  )
+                : active.isMediaPreview
+                ? MediaDocumentView(
+                    key: ValueKey('media-${active.id}'),
+                    document: active,
+                    session: session,
                   )
                 : CodeEditor(
                     key: const ValueKey('editor'),
