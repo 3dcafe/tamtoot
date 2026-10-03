@@ -19,6 +19,7 @@ import '../platform/project_storage.dart';
 import '../platform/security_scoped_roots.dart';
 import 'new_project_dialog.dart';
 import 'flutter_settings.dart';
+import 'dotnet_settings.dart';
 import '../core/flutter/flutter_runner.dart';
 
 class ShellActions implements PresentationActions {
@@ -317,6 +318,7 @@ class _SettingsDialogState extends State<SettingsDialog> {
             children: [
               if (supportsFlutterTools)
                 FlutterSettings(session: widget.session),
+              if (supportsFlutterTools) DotnetSettings(session: widget.session),
               Row(
                 children: [
                   const Text('IDE theme'),

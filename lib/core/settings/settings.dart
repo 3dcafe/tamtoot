@@ -10,12 +10,14 @@ class SettingsService {
     'insertSpaces': true,
     'readOnly': false,
     'flutterSdkPath': '',
+    'dotnetPath': '',
     'flutterDeviceId': '',
     'flutterDeviceName': '',
     'flutterEntryPoint': 'lib/main.dart',
   };
   final Map<String, Object> user = {}, workspace = {};
-  Object get(String key) => key == 'theme' || key.startsWith('flutter')
+  Object get(String key) =>
+      key == 'theme' || key.startsWith('flutter') || key.startsWith('dotnet')
       ? user[key] ?? defaults[key]!
       : workspace[key] ?? user[key] ?? defaults[key]!;
   double get fontSize => (get('fontSize') as num).toDouble();
@@ -28,6 +30,7 @@ class SettingsService {
   static void _validate(String key, Object value) {
     if (!defaults.containsKey(key)) return;
     final valid = switch (key) {
+      'dotnetPath' ||
       'flutterSdkPath' ||
       'flutterDeviceId' ||
       'flutterDeviceName' => value is String,

@@ -10,6 +10,7 @@
 struct _MyApplication {
   GtkApplication parent_instance;
   char** dart_entrypoint_arguments;
+  FlMethodChannel* file_drop_channel;
 };
 
 G_DEFINE_TYPE(MyApplication, my_application, GTK_TYPE_APPLICATION)
@@ -17,6 +18,36 @@ G_DEFINE_TYPE(MyApplication, my_application, GTK_TYPE_APPLICATION)
 // Called when first Flutter frame received.
 static void first_frame_cb(MyApplication* self, FlView* view) {
   gtk_widget_show(gtk_widget_get_toplevel(GTK_WIDGET(view)));
+}
+
+static void file_drop_cb(GtkWidget*,
+                         GdkDragContext* context,
+                         gint,
+                         gint,
+                         GtkSelectionData* data,
+                         guint,
+                         guint time,
+                         gpointer user_data) {
+  MyApplication* self = MY_APPLICATION(user_data);
+  g_auto(GStrv) uris = gtk_selection_data_get_uris(data);
+  if (uris == nullptr) {
+    gtk_drag_finish(context, FALSE, FALSE, time);
+    return;
+  }
+
+  g_autoptr(FlValue) paths = fl_value_new_list();
+  for (gsize index = 0; uris[index] != nullptr; ++index) {
+    g_autofree gchar* path = g_filename_from_uri(uris[index], nullptr, nullptr);
+    if (path != nullptr) {
+      fl_value_append_take(paths, fl_value_new_string(path));
+    }
+  }
+  const gboolean accepted = fl_value_get_length(paths) > 0;
+  if (accepted && self->file_drop_channel != nullptr) {
+    fl_method_channel_invoke_method(self->file_drop_channel, "filesDropped",
+                                    paths, nullptr, nullptr, nullptr);
+  }
+  gtk_drag_finish(context, accepted, FALSE, time);
 }
 
 // Implements GApplication::activate.
@@ -75,6 +106,18 @@ static void my_application_activate(GApplication* application) {
 
   fl_register_plugins(FL_PLUGIN_REGISTRY(view));
 
+  g_autoptr(FlStandardMethodCodec) file_drop_codec =
+      fl_standard_method_codec_new();
+  self->file_drop_channel = fl_method_channel_new(
+      fl_engine_get_binary_messenger(fl_view_get_engine(view)),
+      "dev.tamtoot/file_drop", FL_METHOD_CODEC(file_drop_codec));
+  GtkTargetEntry drop_targets[] = {
+      {const_cast<gchar*>("text/uri-list"), 0, 0},
+  };
+  gtk_drag_dest_set(GTK_WIDGET(view), GTK_DEST_DEFAULT_ALL, drop_targets,
+                    G_N_ELEMENTS(drop_targets), GDK_ACTION_COPY);
+  g_signal_connect(view, "drag-data-received", G_CALLBACK(file_drop_cb), self);
+
   gtk_widget_grab_focus(GTK_WIDGET(view));
 }
 
@@ -120,6 +163,7 @@ static void my_application_shutdown(GApplication* application) {
 // Implements GObject::dispose.
 static void my_application_dispose(GObject* object) {
   MyApplication* self = MY_APPLICATION(object);
+  g_clear_object(&self->file_drop_channel);
   g_clear_pointer(&self->dart_entrypoint_arguments, g_strfreev);
   G_OBJECT_CLASS(my_application_parent_class)->dispose(object);
 }

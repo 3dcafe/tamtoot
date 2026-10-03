@@ -127,7 +127,22 @@ cross-origin requests.
 
 Open **Tools → Agent…**, select a saved profile and enter a task. The model must
 answer with one structured action per iteration. Tamtoot validates the action
-before it runs it. The available actions are:
+before it runs it.
+
+The paperclip accepts any file type. Desktop and tablet users can also drag files
+from another app into the visible Agent tab when the platform exposes file
+drag-and-drop. Attachments are limited to four files, 8 MiB per file and 12 MiB
+in total. Text and images are sent in the form
+supported by the selected API; other binary files require an API with file-part
+support.
+
+The visible conversation is saved after every update and restored when the
+project is reopened. It is stored locally in
+`.tamtoot/agents/chat_history.json`. Internal model request payloads and source
+snapshots are omitted to keep the file bounded. **Clear conversation** deletes
+the stored history as well.
+
+The available actions are:
 
 | Action | Behavior |
 | --- | --- |
@@ -385,6 +400,7 @@ All agent configuration belongs to the open project:
 .tamtoot/
 ├── agents/
 │   ├── instructions.md
+│   ├── chat_history.json
 │   ├── kanban.json
 │   └── models/
 │       └── <profile-id>.json

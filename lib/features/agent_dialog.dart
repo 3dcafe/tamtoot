@@ -7,12 +7,14 @@ import 'package:flutter/services.dart';
 
 import '../app/ide_session.dart';
 import '../core/agents/agent_engine.dart';
+import '../core/agents/agent_history.dart';
 import '../core/agents/model_attachment.dart';
 import '../core/agents/model_profile.dart';
 import '../core/agents/mcp_client.dart';
 import '../core/agents/profile_store.dart';
 import '../core/git/http_git_service.dart';
 import '../core/git/multi_root_store.dart';
+import '../platform/file_drop.dart';
 
 class AgentDialog extends StatelessWidget {
   const AgentDialog({super.key, required this.session});
@@ -30,10 +32,16 @@ class AgentDialog extends StatelessWidget {
 }
 
 class AgentPanel extends StatefulWidget {
-  const AgentPanel({super.key, required this.session, this.embedded = true});
+  const AgentPanel({
+    super.key,
+    required this.session,
+    this.embedded = true,
+    this.visible = true,
+  });
 
   final IdeSession session;
   final bool embedded;
+  final bool visible;
 
   @override
   State<AgentPanel> createState() => _AgentPanelState();
@@ -52,6 +60,11 @@ class _AgentPanelState extends State<AgentPanel> {
   int timeoutSeconds = 600, maxMistakes = 3;
   int _catalogRevision = -1;
   StreamSubscription<int>? _sessionSub;
+  VoidCallback? _stopListeningForDrops;
+  Timer? _historySaveTimer;
+  AgentHistoryStore? _historyStore;
+  Future<void> _historyWrites = Future.value();
+  bool _historyLoaded = false;
   AgentTaskEngine? engine;
   McpRegistry? activeMcp;
   late final Uri? root = widget.session.workspaceRoot;
@@ -72,12 +85,20 @@ class _AgentPanelState extends State<AgentPanel> {
       _catalogRevision = widget.session.agentCatalogRevision;
       unawaited(_load(preserveSelection: true));
     });
+    _stopListeningForDrops = FileDropService.listen((paths) {
+      if (!mounted || !widget.visible || running || root == null) return false;
+      unawaited(_attachFiles([for (final path in paths) XFile(path)]));
+      return true;
+    });
     _load();
   }
 
   @override
   void dispose() {
     _sessionSub?.cancel();
+    _stopListeningForDrops?.call();
+    _historySaveTimer?.cancel();
+    if (_historyLoaded) unawaited(_saveHistory());
     engine?.stop();
     activeMcp?.close();
     apiKey.clear();
@@ -119,6 +140,15 @@ class _AgentPanelState extends State<AgentPanel> {
         return;
       }
       final git = widget.session.git as HttpGitService;
+      _historyStore ??= AgentHistoryStore(git.openStore(root!));
+      if (!_historyLoaded) {
+        final restored = await _historyStore!.load();
+        if (mounted && events.isEmpty && restored.isNotEmpty) {
+          setState(() => events.addAll(restored));
+          _scrollToEnd();
+        }
+        _historyLoaded = true;
+      }
       final store = ProfileStore(git.openStore(root!));
       final instructions =
           await store.read(ProfileStore.instructionsPath) ?? '';
@@ -219,46 +249,42 @@ class _AgentPanelState extends State<AgentPanel> {
 
   Future<void> _pickAttachments() async {
     if (running) return;
-    final files = await openFiles(
-      acceptedTypeGroups: [
-        const XTypeGroup(
-          label: 'Images',
-          extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp'],
-        ),
-        const XTypeGroup(
-          label: 'Documents',
-          extensions: [
-            'pdf',
-            'txt',
-            'md',
-            'csv',
-            'json',
-            'xml',
-            'html',
-            'doc',
-            'docx',
-            'xls',
-            'xlsx',
-            'dart',
-            'py',
-            'js',
-            'ts',
-            'yaml',
-            'yml',
-          ],
-        ),
-      ],
-    );
-    if (files.isEmpty || !mounted) return;
+    final files = await openFiles();
+    await _attachFiles(files);
+  }
+
+  Future<void> _attachFiles(Iterable<XFile> files) async {
+    if (running) return;
+    final selectedFiles = files.toList(growable: false);
+    if (selectedFiles.isEmpty || !mounted) return;
     final next = List<ModelAttachment>.from(attachments);
     try {
-      for (final file in files) {
+      for (final file in selectedFiles) {
+        if (next.length >= ModelAttachment.maxCount) {
+          throw FormatException(
+            'Attach at most ${ModelAttachment.maxCount} files.',
+          );
+        }
+        final length = await file.length();
+        if (length > ModelAttachment.maxBytesEach) {
+          throw FormatException('${file.name} is larger than 8 MiB.');
+        }
+        final total = next.fold<int>(
+          length,
+          (sum, item) => sum + item.bytes.length,
+        );
+        if (total > ModelAttachment.maxBytesTotal) {
+          throw const FormatException(
+            'Attachments are larger than 12 MiB in total.',
+          );
+        }
         final bytes = await file.readAsBytes();
+        final name = _uniqueAttachmentName(file.name, next);
         next.add(
           ModelAttachment(
-            name: file.name,
-            mimeType: ModelAttachment.mimeForName(file.name),
-            bytes: Uint8List.fromList(bytes),
+            name: name,
+            mimeType: ModelAttachment.mimeForName(name),
+            bytes: bytes,
           ),
         );
       }
@@ -273,6 +299,75 @@ class _AgentPanelState extends State<AgentPanel> {
       if (mounted) setState(() => error = e.message);
     } catch (e) {
       if (mounted) setState(() => error = 'Could not attach file: $e');
+    }
+  }
+
+  String _uniqueAttachmentName(
+    String original,
+    List<ModelAttachment> existing,
+  ) {
+    if (existing.every((item) => item.name != original)) return original;
+    final dot = original.lastIndexOf('.');
+    final stem = dot > 0 ? original.substring(0, dot) : original;
+    final extension = dot > 0 ? original.substring(dot) : '';
+    var index = 2;
+    while (existing.any((item) => item.name == '$stem ($index)$extension')) {
+      index++;
+    }
+    return '$stem ($index)$extension';
+  }
+
+  void _appendEvent(AgentEvent event) {
+    if (!mounted) return;
+    setState(() {
+      events.add(event);
+      if (events.length > AgentHistoryStore.maxEvents) events.removeAt(0);
+    });
+    _scheduleHistorySave();
+    _scrollToEnd();
+  }
+
+  void _scheduleHistorySave() {
+    if (!_historyLoaded || _historyStore == null) return;
+    _historySaveTimer?.cancel();
+    _historySaveTimer = Timer(
+      const Duration(milliseconds: 350),
+      () => unawaited(_saveHistory()),
+    );
+  }
+
+  Future<void> _saveHistory() async {
+    final store = _historyStore;
+    if (store == null) return;
+    final snapshot = List<AgentEvent>.of(events);
+    final operation = _historyWrites.then((_) => store.save(snapshot));
+    _historyWrites = operation.catchError((Object _) {});
+    try {
+      await operation;
+    } catch (e) {
+      if (mounted && error == null) {
+        setState(() => error = 'Could not save agent history: $e');
+      }
+    }
+  }
+
+  Future<void> _clearConversation() async {
+    _historySaveTimer?.cancel();
+    setState(() {
+      events.clear();
+      _lastFailure = null;
+      _lastTask = null;
+      error = null;
+    });
+    try {
+      final store = _historyStore;
+      if (store != null) {
+        final operation = _historyWrites.then((_) => store.clear());
+        _historyWrites = operation.catchError((Object _) {});
+        await operation;
+      }
+    } catch (e) {
+      if (mounted) setState(() => error = 'Could not clear agent history: $e');
     }
   }
 
@@ -359,10 +454,7 @@ class _AgentPanelState extends State<AgentPanel> {
       apiKey: apiKey.text.trim(),
       attachments: runAttachments,
       onEvent: (event) {
-        if (mounted) {
-          setState(() => events.add(event));
-          _scrollToEnd();
-        }
+        _appendEvent(event);
       },
       approve: _approve,
       mcp: mcp,
@@ -374,24 +466,23 @@ class _AgentPanelState extends State<AgentPanel> {
       error = null;
       _lastTask = originalTask;
       _lastFailure = null;
-      events.add(
-        AgentEvent(
-          'user',
-          continuePrevious
-              ? 'Continue previous task\n\n$originalTask'
-              : [
-                  originalTask,
-                  if (runAttachments.isNotEmpty)
-                    'Attachments: ${runAttachments.map((item) => item.name).join(', ')}',
-                ].join('\n'),
-        ),
-      );
       if (!continuePrevious) {
         task.clear();
         attachments.clear();
       }
     });
-    _scrollToEnd();
+    _appendEvent(
+      AgentEvent(
+        'user',
+        continuePrevious
+            ? 'Continue previous task\n\n$originalTask'
+            : [
+                originalTask,
+                if (runAttachments.isNotEmpty)
+                  'Attachments: ${runAttachments.map((item) => item.name).join(', ')}',
+              ].join('\n'),
+      ),
+    );
     try {
       await runner.run(
         prompt,
@@ -739,19 +830,15 @@ class _AgentPanelState extends State<AgentPanel> {
                           visualDensity: VisualDensity.compact,
                           onPressed: running
                               ? null
-                              : () => setState(() {
-                                  events.clear();
-                                  _lastFailure = null;
-                                  _lastTask = null;
-                                  error = null;
-                                }),
+                              : () => unawaited(_clearConversation()),
                           icon: const Icon(
                             Icons.delete_sweep_outlined,
                             size: 18,
                           ),
                         ),
                       IconButton(
-                        tooltip: 'Attach image or file',
+                        tooltip:
+                            'Attach any file, or drag files into the Agent tab',
                         visualDensity: VisualDensity.compact,
                         onPressed: running || root == null
                             ? null

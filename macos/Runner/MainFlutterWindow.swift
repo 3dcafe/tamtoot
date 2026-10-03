@@ -4,6 +4,7 @@ import FlutterMacOS
 class MainFlutterWindow: NSWindow {
   private var windowChannel: FlutterMethodChannel?
   private var bookmarkChannel: FlutterMethodChannel?
+  private var fileDropChannel: FlutterMethodChannel?
   private var scopedUrls: [String: URL] = [:]
 
   override func awakeFromNib() {
@@ -18,6 +19,11 @@ class MainFlutterWindow: NSWindow {
     self.title = "TamToot"
 
     let messenger = flutterViewController.engine.binaryMessenger
+    fileDropChannel = FlutterMethodChannel(
+      name: "dev.tamtoot/file_drop",
+      binaryMessenger: messenger
+    )
+    registerForDraggedTypes([.fileURL])
     let window = FlutterMethodChannel(
       name: "dev.tamtoot/window",
       binaryMessenger: messenger
@@ -51,6 +57,28 @@ class MainFlutterWindow: NSWindow {
     bookmarks.setMethodCallHandler { [weak self] call, result in
       self?.handleBookmark(call: call, result: result)
     }
+  }
+
+  override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+    let urls = sender.draggingPasteboard.readObjects(
+      forClasses: [NSURL.self],
+      options: [.urlReadingFileURLsOnly: true]
+    ) as? [URL]
+    return urls?.isEmpty == false ? .copy : []
+  }
+
+  override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+    guard let urls = sender.draggingPasteboard.readObjects(
+      forClasses: [NSURL.self],
+      options: [.urlReadingFileURLsOnly: true]
+    ) as? [URL], !urls.isEmpty else {
+      return false
+    }
+    fileDropChannel?.invokeMethod(
+      "filesDropped",
+      arguments: urls.map { $0.path }
+    )
+    return true
   }
 
   private func handleBookmark(

@@ -4,6 +4,8 @@ import android.app.Activity
 import android.content.Intent
 import android.net.Uri
 import android.provider.OpenableColumns
+import android.view.DragEvent
+import java.io.File
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -14,9 +16,15 @@ class MainActivity : FlutterActivity() {
     private var pendingText: String? = null
     private val createDocumentRequest = 4810
     private val openDocumentRequest = 4811
+    private var fileDropChannel: MethodChannel? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        fileDropChannel = MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            "dev.tamtoot/file_drop",
+        )
+        window.decorView.setOnDragListener { _, event -> handleFileDrop(event) }
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "dev.tamtoot/documents")
             .setMethodCallHandler { call, result ->
                 when (call.method) {
@@ -51,6 +59,59 @@ class MainActivity : FlutterActivity() {
                     else -> result.notImplemented()
                 }
             }
+    }
+
+    private fun handleFileDrop(event: DragEvent): Boolean {
+        if (event.action == DragEvent.ACTION_DRAG_STARTED) {
+            return event.clipDescription != null
+        }
+        if (event.action != DragEvent.ACTION_DROP) return true
+        val clip = event.clipData ?: return false
+        Thread {
+            val paths = mutableListOf<String>()
+            val temporaryFolders = mutableListOf<File>()
+            val folder = File(cacheDir, "agent-drops").apply { mkdirs() }
+            for (index in 0 until clip.itemCount) {
+                val uri = clip.getItemAt(index).uri ?: continue
+                try {
+                    var name = uri.lastPathSegment ?: "attachment"
+                    contentResolver.query(
+                        uri,
+                        arrayOf(OpenableColumns.DISPLAY_NAME),
+                        null,
+                        null,
+                        null,
+                    )?.use { cursor ->
+                        if (cursor.moveToFirst()) name = cursor.getString(0) ?: name
+                    }
+                    val safeName = name.replace(Regex("[^A-Za-z0-9._ -]"), "_")
+                    val targetFolder = File(folder, System.nanoTime().toString()).apply {
+                        mkdirs()
+                    }
+                    val target = File(targetFolder, safeName)
+                    val input = contentResolver.openInputStream(uri) ?: continue
+                    input.use { source ->
+                        target.outputStream().use { output -> source.copyTo(output) }
+                    }
+                    paths.add(target.absolutePath)
+                    temporaryFolders.add(targetFolder)
+                } catch (_: Exception) {
+                    // Unreadable items are skipped; readable items still attach.
+                }
+            }
+            if (paths.isNotEmpty()) {
+                runOnUiThread {
+                    fileDropChannel?.invokeMethod("filesDropped", paths)
+                    window.decorView.postDelayed(
+                        {
+                            temporaryFolders.forEach { folder -> folder.deleteRecursively() }
+                        },
+                        300_000,
+                    )
+                }
+            }
+        }.start()
+        return true
     }
 
     private fun openText(result: MethodChannel.Result) {
