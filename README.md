@@ -309,6 +309,16 @@ The editor, command system, layout model, schemas and language definitions are i
 
 Some development documentation is currently in Russian.
 
+## License and authorship
+
+Tamtoot is free and open under the [MIT License](LICENSE).
+
+**Use it however you like** — copy, modify, study, ship, and fork. Original
+authorship belongs to **Latin Nikolay**.
+
+See also [CONTRIBUTING](CONTRIBUTING.md), [CODE_OF_CONDUCT](CODE_OF_CONDUCT.md),
+and [SECURITY](SECURITY.md).
+
 ## Third-party notices
 
-JetBrains Mono is bundled under the [SIL Open Font License](assets/fonts/OFL.txt), from the official JetBrains/JetBrainsMono repository. UI icons are Material Icons supplied with Flutter. Microsoft branding and assets are not used. A separate license for this repository's original source has not yet been selected.
+JetBrains Mono is bundled under the [SIL Open Font License](assets/fonts/OFL.txt), from the official JetBrains/JetBrainsMono repository. UI icons are Material Icons supplied with Flutter. Microsoft branding and assets are not used.

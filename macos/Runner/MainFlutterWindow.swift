@@ -59,7 +59,7 @@ class MainFlutterWindow: NSWindow {
     }
   }
 
-  override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+  func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
     let urls = sender.draggingPasteboard.readObjects(
       forClasses: [NSURL.self],
       options: [.urlReadingFileURLsOnly: true]
@@ -67,7 +67,7 @@ class MainFlutterWindow: NSWindow {
     return urls?.isEmpty == false ? .copy : []
   }
 
-  override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+  func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
     guard let urls = sender.draggingPasteboard.readObjects(
       forClasses: [NSURL.self],
       options: [.urlReadingFileURLsOnly: true]
