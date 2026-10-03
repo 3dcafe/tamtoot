@@ -53,6 +53,34 @@ class HttpGitService
   }
 
   @override
+  Future<GitResult> init(Uri directory, {String branch = 'main'}) async {
+    final name = branch.trim();
+    if (name.isEmpty ||
+        name.startsWith('-') ||
+        RegExp(r'[\s\\~^:?*\[\]@{}\x00-\x1f]').hasMatch(name) ||
+        name.contains('..') ||
+        name.endsWith('.') ||
+        name.endsWith('/')) {
+      return _fail('Enter a valid branch name', const ['init']);
+    }
+    if (await isRepository(directory)) {
+      return _fail('Already a Git repository', const ['init']);
+    }
+    final store = openStore(directory);
+    await store.createDirectory('.git/objects');
+    await store.createDirectory('.git/refs/heads');
+    await store.createDirectory('.git/refs/remotes');
+    await store.writeText('.git/HEAD', 'ref: refs/heads/$name\n');
+    await store.writeText('.git/config', '''
+[core]
+	repositoryformatversion = 0
+	filemode = true
+	bare = false
+''');
+    return _ok('Initialized empty Git repository on $name', const ['init']);
+  }
+
+  @override
   Future<GitResult> clone(
     Uri remote,
     Uri directory, {

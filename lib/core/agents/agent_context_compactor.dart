@@ -39,16 +39,16 @@ final class AgentContextCompactor {
   }) {
     int size() =>
         pinnedCharacters +
-        transcript.fold(0, (total, item) => total + item.length) +
-        observations.entries.fold(
+        transcript.fold<int>(0, (total, item) => total + item.length) +
+        observations.entries.fold<int>(
           0,
           (total, item) => total + item.key.length + item.value.length,
         ) +
-        activeFiles.entries.fold(
+        activeFiles.entries.fold<int>(
           0,
           (total, item) => total + item.key.length + item.value.length,
         ) +
-        summary.fold(0, (total, item) => total + item.length);
+        summary.fold<int>(0, (total, item) => total + item.length);
 
     final before = size();
     if (before <= triggerCharacters) {

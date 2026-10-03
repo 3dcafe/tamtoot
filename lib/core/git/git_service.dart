@@ -118,6 +118,9 @@ abstract interface class GitService {
 
   Future<bool> isRepository(Uri directory);
 
+  /// Creates a local `.git` directory with [branch] as HEAD (no commits yet).
+  Future<GitResult> init(Uri directory, {String branch = 'main'});
+
   Future<GitResult> clone(
     Uri remote,
     Uri directory, {

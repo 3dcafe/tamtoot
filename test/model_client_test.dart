@@ -29,6 +29,63 @@ const prompt = {
 };
 
 void main() {
+  test('css and cshtml attachments are inlined as text for STAR', () {
+    final css = ModelAttachment(
+      name: 'site.css',
+      mimeType: ModelAttachment.mimeForName('site.css'),
+      bytes: Uint8List.fromList(utf8.encode('body { color: red; }')),
+    );
+    final page = ModelAttachment(
+      name: 'Index.cshtml',
+      mimeType: ModelAttachment.mimeForName('Index.cshtml'),
+      bytes: Uint8List.fromList(utf8.encode('<h1>Hello</h1>')),
+    );
+    expect(css.mimeType, 'text/css');
+    expect(page.mimeType, 'text/html');
+    expect(css.asUtf8Text, contains('color: red'));
+    expect(page.asUtf8Text, contains('<h1>Hello</h1>'));
+
+    final body = ModelClient.requestBody(
+      profile(),
+      prompt,
+      attachments: [css, page],
+    );
+    final user = (body['messages'] as List).last as Map;
+    final content = user['content'] as List;
+    expect(content, hasLength(3));
+    expect(content[1]['type'], 'text');
+    expect(content[1]['text'], contains('Attached file `site.css`'));
+    expect(content[1]['text'], contains('color: red'));
+    expect(content[2]['text'], contains('Index.cshtml'));
+    expect(
+      content.any((part) => part is Map && part['type'] == 'file'),
+      isFalse,
+      reason: 'STAR ignores custom file parts; source must be text',
+    );
+  });
+
+  test('fetchAccountBalance reads STAR-style remain_balance', () async {
+    final client = MockClient((request) async {
+      expect(request.url.path, '/v1/balance');
+      expect(request.headers['authorization'], 'Bearer test-key');
+      return http.Response(
+        jsonEncode({
+          'remain_balance': 42.5,
+          'used_balance': 7.5,
+          'unlimited_quota': false,
+        }),
+        200,
+      );
+    });
+    final balance = await ModelClient.fetchAccountBalance(
+      profile('chat-completions', 'https://ai.starimg.ru/v1/chat/completions'),
+      apiKey: 'test-key',
+      client: client,
+    );
+    expect(balance.summary, contains('remaining: 42.5'));
+    expect(balance.summary, contains('used: 7.5'));
+  });
+
   test('chat-completions embeds image and file parts like STAR/OpenAI', () {
     final png = ModelAttachment(
       name: 'shot.png',

@@ -208,10 +208,10 @@ Reuse retained excerpts — do not re-read unchanged files.
       for (final workspace in roots) {
         if (!await git.isRepository(workspace)) continue;
         final changes = await git.statusEntries(workspace);
-        if (changes.isNotEmpty) {
+      if (changes.isNotEmpty) {
           throw ModelApiException(
             'YOLO Mode requires a clean Git working tree. Commit or discard changes in $workspace first.',
-          );
+        );
         }
       }
     }
@@ -1016,6 +1016,24 @@ Reuse retained excerpts — do not re-read unchanged files.
     required String userPrompt,
     List<ModelAttachment> attachments = const [],
   }) async {
+    if (attachments.isNotEmpty) {
+      final summary = attachments
+          .map((item) {
+            final via = item.isImage
+                ? 'image'
+                : item.asUtf8Text != null
+                ? 'text'
+                : 'file';
+            return '${item.name} ($via, ${item.bytes.length} B)';
+          })
+          .join(', ');
+      onEvent(
+        AgentEvent(
+          'context',
+          'Sending ${attachments.length} attachment(s) to the model: $summary',
+        ),
+      );
+    }
     final client =
         clientFactory?.call() ?? ModelClient(timeout: options.timeout);
     _active = client;

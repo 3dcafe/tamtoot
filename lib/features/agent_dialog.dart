@@ -9,6 +9,7 @@ import '../app/ide_session.dart';
 import '../core/agents/agent_engine.dart';
 import '../core/agents/agent_history.dart';
 import '../core/agents/model_attachment.dart';
+import '../core/agents/model_client.dart';
 import '../core/agents/model_profile.dart';
 import '../core/agents/mcp_client.dart';
 import '../core/agents/profile_store.dart';
@@ -54,8 +55,9 @@ class _AgentPanelState extends State<AgentPanel> {
   final events = <AgentEvent>[];
   final profiles = <String, ModelProfile>{};
   final attachments = <ModelAttachment>[];
-  String? selected, error;
+  String? selected, error, balanceNote;
   bool loading = true, running = false, yolo = true, yoloConfirmed = false;
+  bool balanceBusy = false;
   final taskQueue = <String>[];
   int timeoutSeconds = 600, maxMistakes = 3;
   int _catalogRevision = -1;
@@ -532,6 +534,38 @@ class _AgentPanelState extends State<AgentPanel> {
     return profile != null && _profileNeedsApiKey(profile);
   }
 
+  bool get _selectedSupportsBalanceCheck {
+    final profile = selected == null ? null : profiles[selected];
+    if (profile == null) return false;
+    final host = profile.requestUri().host.toLowerCase();
+    return profile.provider.toLowerCase().contains('star') ||
+        host.contains('starimg');
+  }
+
+  Future<void> _checkBalance() async {
+    final path = selected;
+    final profile = path == null ? null : profiles[path];
+    if (profile == null || running || balanceBusy) return;
+    setState(() {
+      balanceBusy = true;
+      balanceNote = null;
+      error = null;
+    });
+    try {
+      final balance = await ModelClient.fetchAccountBalance(
+        profile,
+        apiKey: apiKey.text,
+      );
+      if (!mounted) return;
+      setState(() => balanceNote = balance.summary);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => error = '$e');
+    } finally {
+      if (mounted) setState(() => balanceBusy = false);
+    }
+  }
+
   void _restoreApiKey() {
     final profile = selected == null ? null : profiles[selected];
     apiKey.text = profile == null ? '' : widget.session.modelApiKey(profile.id);
@@ -541,6 +575,7 @@ class _AgentPanelState extends State<AgentPanel> {
     setState(() {
       selected = value;
       error = null;
+      balanceNote = null;
       _restoreApiKey();
     });
   }
@@ -675,36 +710,69 @@ class _AgentPanelState extends State<AgentPanel> {
               ),
             Padding(
               padding: const EdgeInsets.fromLTRB(10, 0, 10, 6),
-              child: TextField(
-                controller: apiKey,
-                enabled: !running,
-                obscureText: true,
-                enableSuggestions: false,
-                autocorrect: false,
-                onChanged: _rememberApiKey,
-                decoration: InputDecoration(
-                  labelText: _selectedNeedsApiKey
-                      ? 'API token'
-                      : 'API token (optional)',
-                  helperText: _selectedNeedsApiKey
-                      ? apiKey.text.isEmpty
-                            ? 'Required. Enter it once; it is saved locally on this device.'
-                            : 'Saved locally for this profile. It is never added to the project.'
-                      : 'Local Ollama usually works without a token.',
-                  suffixIcon: apiKey.text.isEmpty
-                      ? null
-                      : IconButton(
-                          tooltip: 'Forget token',
-                          onPressed: running
-                              ? null
-                              : () {
-                                  apiKey.clear();
-                                  _rememberApiKey('');
-                                },
-                          icon: const Icon(Icons.close, size: 16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  TextField(
+                    controller: apiKey,
+                    enabled: !running,
+                    obscureText: true,
+                    enableSuggestions: false,
+                    autocorrect: false,
+                    onChanged: _rememberApiKey,
+                    decoration: InputDecoration(
+                      labelText: _selectedNeedsApiKey
+                          ? 'API token'
+                          : 'API token (optional)',
+                      helperText: _selectedNeedsApiKey
+                          ? apiKey.text.isEmpty
+                                ? 'Required. Enter it once; it is saved locally on this device.'
+                                : 'Saved locally for this profile. It is never added to the project.'
+                          : 'Local Ollama usually works without a token.',
+                      suffixIcon: apiKey.text.isEmpty
+                          ? null
+                          : IconButton(
+                              tooltip: 'Forget token',
+                              onPressed: running
+                                  ? null
+                                  : () {
+                                      apiKey.clear();
+                                      _rememberApiKey('');
+                                    },
+                              icon: const Icon(Icons.close, size: 16),
+                            ),
+                      isDense: true,
+                    ),
+                  ),
+                  if (_selectedSupportsBalanceCheck) ...[
+                    const SizedBox(height: 4),
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: TextButton.icon(
+                        onPressed: running || balanceBusy || apiKey.text.isEmpty
+                            ? null
+                            : () => unawaited(_checkBalance()),
+                        icon: balanceBusy
+                            ? const SizedBox(
+                                width: 14,
+                                height: 14,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
+                              )
+                            : const Icon(
+                                Icons.account_balance_wallet_outlined,
+                                size: 16,
+                              ),
+                        label: Text(
+                          balanceNote == null
+                              ? 'Check STAR balance'
+                              : balanceNote!,
                         ),
-                  isDense: true,
-                ),
+                      ),
+                    ),
+                  ],
+                ],
               ),
             ),
             ExpansionTile(

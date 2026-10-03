@@ -2,6 +2,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'git_diff.dart';
 import 'git_history_dialog.dart';
+import 'publish_project_dialog.dart';
 import '../app/ide_session.dart';
 import '../core/git/git_service.dart';
 
@@ -489,6 +490,11 @@ class _GitChangesDialogState extends State<GitChangesDialog> {
     }
   }
 
+  Future<void> _publish() async {
+    final published = await showPublishProjectDialog(context, widget.session);
+    if (published && mounted) await _load();
+  }
+
   Future<void> _history() async {
     final provider = git;
     if (provider is! GitHistoryProvider) return;
@@ -542,11 +548,18 @@ class _GitChangesDialogState extends State<GitChangesDialog> {
                     ),
                     IconButton(
                       key: const ValueKey('git-dialog-push'),
-                      tooltip: 'Push',
-                      onPressed: busy || !ready || remote.isEmpty
+                      tooltip: remote.isEmpty
+                          ? 'Push first commit to empty GitHub repo'
+                          : 'Push',
+                      onPressed: busy || !ready
                           ? null
-                          : _push,
-                      icon: const Icon(Icons.arrow_upward, size: 20),
+                          : (remote.isEmpty ? _publish : _push),
+                      icon: Icon(
+                        remote.isEmpty
+                            ? Icons.upload_outlined
+                            : Icons.arrow_upward,
+                        size: 20,
+                      ),
                       visualDensity: VisualDensity.compact,
                     ),
                     IconButton(
@@ -699,9 +712,18 @@ class _GitChangesDialogState extends State<GitChangesDialog> {
                   ),
                   IconButton(
                     key: const ValueKey('git-push'),
-                    tooltip: 'Push',
-                    onPressed: busy || !ready || remote.isEmpty ? null : _push,
-                    icon: const Icon(Icons.arrow_upward, size: 18),
+                    tooltip: remote.isEmpty
+                        ? 'Push first commit to empty GitHub repo'
+                        : 'Push',
+                    onPressed: busy || !ready
+                        ? null
+                        : (remote.isEmpty ? _publish : _push),
+                    icon: Icon(
+                      remote.isEmpty
+                          ? Icons.upload_outlined
+                          : Icons.arrow_upward,
+                      size: 18,
+                    ),
                     visualDensity: VisualDensity.compact,
                   ),
                   IconButton(

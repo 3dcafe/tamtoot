@@ -20,28 +20,61 @@ class ModelAttachment {
 
   String get dataUri => 'data:$mimeType;base64,${base64Encode(bytes)}';
 
-  bool get isImage => mimeType.startsWith('image/');
+  bool get isImage {
+    if (!mimeType.startsWith('image/')) return false;
+    // SVG is XML source for coding tasks; do not send it as a vision image.
+    return !mimeType.contains('svg');
+  }
 
   bool get isPlainText {
     if (mimeType.startsWith('text/')) return true;
+    if (mimeType == 'image/svg+xml') return true;
     const textish = {
       'application/json',
       'application/xml',
       'application/javascript',
       'application/typescript',
+      'application/x-javascript',
       'application/x-yaml',
       'application/yaml',
+      'application/sql',
     };
     return textish.contains(mimeType);
   }
 
+  /// Prefer inlining UTF-8 source into the prompt. STAR / OpenAI-compatible
+  /// gateways often ignore custom `type:file` parts for CSS/HTML/etc.
   String? get asUtf8Text {
-    if (!isPlainText) return null;
+    if (isImage) return null;
+    if (bytes.isEmpty || bytes.contains(0)) return null;
+    if (!isPlainText && mimeType != 'application/octet-stream') {
+      // Known binary office/pdf types stay as file parts.
+      if (mimeType.startsWith('application/') &&
+          !mimeType.contains('json') &&
+          !mimeType.contains('xml') &&
+          !mimeType.contains('javascript') &&
+          !mimeType.contains('yaml') &&
+          !mimeType.contains('sql') &&
+          mimeType != 'application/octet-stream') {
+        return null;
+      }
+    }
     try {
-      return utf8.decode(bytes);
+      final text = utf8.decode(bytes);
+      // Reject mostly-binary noise that happened to decode.
+      if (text.length > 32 && _controlRatio(text) > 0.3) return null;
+      return text;
     } on FormatException {
       return null;
     }
+  }
+
+  static double _controlRatio(String text) {
+    var bad = 0;
+    for (final unit in text.codeUnits) {
+      if (unit < 9 || (unit > 13 && unit < 32)) bad++;
+    }
+    return bad / text.length;
   }
 
   static String mimeForName(String name) {
@@ -58,6 +91,25 @@ class ModelAttachment {
     if (lower.endsWith('.json')) return 'application/json';
     if (lower.endsWith('.xml')) return 'application/xml';
     if (lower.endsWith('.html') || lower.endsWith('.htm')) return 'text/html';
+    if (lower.endsWith('.css') ||
+        lower.endsWith('.scss') ||
+        lower.endsWith('.sass') ||
+        lower.endsWith('.less')) {
+      return 'text/css';
+    }
+    if (lower.endsWith('.cshtml') ||
+        lower.endsWith('.razor') ||
+        lower.endsWith('.vbhtml')) {
+      return 'text/html';
+    }
+    if (lower.endsWith('.svg')) return 'image/svg+xml';
+    if (lower.endsWith('.sql')) return 'application/sql';
+    if (lower.endsWith('.vue') ||
+        lower.endsWith('.svelte') ||
+        lower.endsWith('.jsx') ||
+        lower.endsWith('.tsx')) {
+      return 'text/plain';
+    }
     if (lower.endsWith('.doc')) return 'application/msword';
     if (lower.endsWith('.docx')) {
       return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
@@ -84,7 +136,13 @@ class ModelAttachment {
         lower.endsWith('.toml') ||
         lower.endsWith('.ini') ||
         lower.endsWith('.cfg') ||
-        lower.endsWith('.sh')) {
+        lower.endsWith('.sh') ||
+        lower.endsWith('.bat') ||
+        lower.endsWith('.ps1') ||
+        lower.endsWith('.php') ||
+        lower.endsWith('.rb') ||
+        lower.endsWith('.r') ||
+        lower.endsWith('.pl')) {
       return 'text/plain';
     }
     return 'application/octet-stream';

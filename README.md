@@ -123,6 +123,7 @@ Use **Pull** to fetch the current branch from `origin`. Pull requires a clean wo
 The Git panel provides separate directional actions: **Pull changes** uses a download icon, **Push commits** uses an upload icon, and **Sync** uses a bidirectional icon. Sync performs the same safe pull first and pushes local commits only after pull succeeds.
 
 Push and Sync require an HTTPS access token with repository write permission.
+New projects without Git can use **Push first commit** on the Git tab: it initializes a local repository if needed, attaches an empty GitHub HTTPS remote, creates the first commit when missing, and pushes it. Creating a repository via the GitHub API is optional.
 Git settings save the username and token in local application preferences for
 that remote URL; credentials are never written into the remote URL, project,
 `.git/config`, or commits. A missing token opens Git settings before Push, while

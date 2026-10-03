@@ -15,6 +15,7 @@ import 'agent_dialog.dart';
 import 'git_changes_dialog.dart';
 import 'git_diff.dart';
 import 'http_requests_dialog.dart';
+import 'publish_project_dialog.dart';
 import 'dock_view.dart';
 import 'media_document_view.dart';
 import 'flutter_debug_panel.dart';
@@ -817,12 +818,41 @@ class _IdeShellState extends ConsumerState<IdeShell> {
                   embedded: true,
                   visible: _sidebar == 1,
                 )
+              else if (session.workspaceRoot != null)
+                Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Text(
+                          'This project is not a Git repository yet.\n'
+                          'Attach an empty GitHub repo and push the first commit.',
+                          textAlign: TextAlign.center,
+                        ),
+                        const SizedBox(height: 16),
+                        FilledButton.icon(
+                          key: const ValueKey('git-publish-empty'),
+                          onPressed: () async {
+                            final published = await showPublishProjectDialog(
+                              context,
+                              session,
+                            );
+                            if (published && mounted) setState(() {});
+                          },
+                          icon: const Icon(Icons.upload_outlined),
+                          label: const Text('Push first commit'),
+                        ),
+                      ],
+                    ),
+                  ),
+                )
               else
                 const Center(
                   child: Padding(
                     padding: EdgeInsets.all(12),
                     child: Text(
-                      'Open a Git project to review changes and create commits.',
+                      'Open a project to review changes, publish to GitHub, and create commits.',
                     ),
                   ),
                 ),
