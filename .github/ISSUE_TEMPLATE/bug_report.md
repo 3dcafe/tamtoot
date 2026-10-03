@@ -2,7 +2,9 @@
 name: Bug report
 about: Something in Tamtoot is broken or unexpected
 title: "[Bug] "
-labels: ["bug"]
+labels: bug
+assignees: ''
+
 ---
 
 **Describe the bug**
