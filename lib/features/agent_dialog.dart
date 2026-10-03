@@ -353,11 +353,14 @@ class _AgentPanelState extends State<AgentPanel> {
 
   Future<void> _clearConversation() async {
     _historySaveTimer?.cancel();
+    // Stop first so a long "thinking" stream cannot refill the log immediately.
+    if (running) engine?.stop();
     setState(() {
       events.clear();
       _lastFailure = null;
       _lastTask = null;
       error = null;
+      taskQueue.clear();
     });
     try {
       final store = _historyStore;
@@ -625,6 +628,32 @@ class _AgentPanelState extends State<AgentPanel> {
                 onChanged: running ? null : _selectProfile,
               ),
             ),
+            if (events.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(10, 2, 10, 0),
+                child: Row(
+                  children: [
+                    Text(
+                      '${events.length} log entries',
+                      style: TextStyle(
+                        fontSize: 11,
+                        color: colors.onSurfaceVariant,
+                      ),
+                    ),
+                    const Spacer(),
+                    TextButton.icon(
+                      key: const ValueKey('agent-clear-log'),
+                      onPressed: () => unawaited(_clearConversation()),
+                      icon: const Icon(Icons.delete_sweep_outlined, size: 16),
+                      label: const Text('Clear log'),
+                      style: TextButton.styleFrom(
+                        visualDensity: VisualDensity.compact,
+                        padding: const EdgeInsets.symmetric(horizontal: 8),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
             Expanded(
               child: events.isEmpty
                   ? Center(
@@ -829,18 +858,6 @@ class _AgentPanelState extends State<AgentPanel> {
                   const SizedBox(height: 6),
                   Row(
                     children: [
-                      if (events.isNotEmpty)
-                        IconButton(
-                          tooltip: 'Clear conversation',
-                          visualDensity: VisualDensity.compact,
-                          onPressed: running
-                              ? null
-                              : () => unawaited(_clearConversation()),
-                          icon: const Icon(
-                            Icons.delete_sweep_outlined,
-                            size: 18,
-                          ),
-                        ),
                       IconButton(
                         tooltip:
                             'Attach any file, or drag files into the Agent tab',
@@ -1052,148 +1069,174 @@ class _AgentPanelState extends State<AgentPanel> {
       context: context,
       isScrollControlled: true,
       showDragHandle: true,
-      builder: (ctx) {
-        final colors = Theme.of(ctx).colorScheme;
-        return DraggableScrollableSheet(
-          expand: false,
-          initialChildSize: 0.72,
-          minChildSize: 0.4,
-          maxChildSize: 0.95,
-          builder: (context, scrollController) => DefaultTabController(
-            length: 2,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
+      builder: (ctx) => _AgentJsonLogSheet(exchanges: exchanges),
+    );
+  }
+}
+
+class _AgentJsonLogSheet extends StatefulWidget {
+  const _AgentJsonLogSheet({required this.exchanges});
+  final List<AgentEvent> exchanges;
+
+  @override
+  State<_AgentJsonLogSheet> createState() => _AgentJsonLogSheetState();
+}
+
+class _AgentJsonLogSheetState extends State<_AgentJsonLogSheet>
+    with SingleTickerProviderStateMixin {
+  late final TabController _tabs;
+  final _requestScroll = ScrollController();
+  final _responseScroll = ScrollController();
+
+  @override
+  void initState() {
+    super.initState();
+    _tabs = TabController(length: 2, vsync: this);
+  }
+
+  @override
+  void dispose() {
+    _tabs.dispose();
+    _requestScroll.dispose();
+    _responseScroll.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    final height = MediaQuery.sizeOf(context).height * 0.72;
+    return SizedBox(
+      height: height,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 8, 8),
+            child: Row(
               children: [
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 0, 8, 8),
-                  child: Row(
-                    children: [
-                      const Expanded(
-                        child: Text(
-                          'Client ↔ Agent JSON',
-                          style: TextStyle(
-                            fontWeight: FontWeight.w600,
-                            fontSize: 15,
-                          ),
-                        ),
-                      ),
-                      IconButton(
-                        tooltip: 'Copy all',
-                        onPressed: () {
-                          final payload = exchanges
-                              .map((event) => event.toJson())
-                              .toList();
-                          Clipboard.setData(
-                            ClipboardData(
-                              text: const JsonEncoder.withIndent(
-                                '  ',
-                              ).convert(payload),
-                            ),
-                          );
-                          ScaffoldMessenger.maybeOf(ctx)?.showSnackBar(
-                            const SnackBar(
-                              content: Text('JSON log copied'),
-                              duration: Duration(seconds: 2),
-                            ),
-                          );
-                        },
-                        icon: const Icon(Icons.copy_outlined, size: 18),
-                      ),
-                    ],
+                const Expanded(
+                  child: Text(
+                    'Client ↔ Agent JSON',
+                    style: TextStyle(
+                      fontWeight: FontWeight.w600,
+                      fontSize: 15,
+                    ),
                   ),
                 ),
-                const TabBar(
-                  tabs: [
-                    Tab(text: 'Client → model'),
-                    Tab(text: 'Agent ← model'),
-                  ],
-                ),
-                Expanded(
-                  child: TabBarView(
-                    children: [
-                      _jsonPages(
-                        scrollController,
-                        colors,
-                        exchanges,
-                        requestSide: true,
+                IconButton(
+                  tooltip: 'Copy all',
+                  onPressed: () {
+                    final payload = widget.exchanges
+                        .map((event) => event.toJson())
+                        .toList();
+                    Clipboard.setData(
+                      ClipboardData(
+                        text: const JsonEncoder.withIndent(
+                          '  ',
+                        ).convert(payload),
                       ),
-                      _jsonPages(
-                        scrollController,
-                        colors,
-                        exchanges,
-                        requestSide: false,
+                    );
+                    ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+                      const SnackBar(
+                        content: Text('JSON log copied'),
+                        duration: Duration(seconds: 2),
                       ),
-                    ],
-                  ),
+                    );
+                  },
+                  icon: const Icon(Icons.copy_outlined, size: 18),
                 ),
               ],
             ),
           ),
-        );
-      },
+          TabBar(
+            controller: _tabs,
+            tabs: const [
+              Tab(text: 'Client → model'),
+              Tab(text: 'Agent ← model'),
+            ],
+          ),
+          Expanded(
+            child: TabBarView(
+              controller: _tabs,
+              children: [
+                _jsonPages(_requestScroll, colors, requestSide: true),
+                _jsonPages(_responseScroll, colors, requestSide: false),
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 
   Widget _jsonPages(
     ScrollController controller,
-    ColorScheme colors,
-    List<AgentEvent> exchanges, {
+    ColorScheme colors, {
     required bool requestSide,
   }) {
-    return ListView.separated(
+    final exchanges = widget.exchanges;
+    return Scrollbar(
       controller: controller,
-      padding: const EdgeInsets.all(12),
-      itemCount: exchanges.length,
-      separatorBuilder: (_, _) => const SizedBox(height: 12),
-      itemBuilder: (_, index) {
-        final event = exchanges[index];
-        final payload = requestSide
-            ? {
-                'endpoint': event.data['endpoint'],
-                'apiFormat': event.data['apiFormat'],
-                'request': event.data['request'] ?? {},
-              }
-            : event.data['response'] ?? {'text': event.text};
-        final pretty = const JsonEncoder.withIndent('  ').convert(payload);
-        return Material(
-          color: colors.surfaceContainerHighest,
-          borderRadius: BorderRadius.circular(10),
-          child: Padding(
-            padding: const EdgeInsets.all(10),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        requestSide
-                            ? 'Request #${index + 1}'
-                            : 'Response #${index + 1}',
-                        style: const TextStyle(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
+      thumbVisibility: true,
+      child: ListView.separated(
+        controller: controller,
+        padding: const EdgeInsets.all(12),
+        itemCount: exchanges.length,
+        separatorBuilder: (_, _) => const SizedBox(height: 12),
+        itemBuilder: (_, index) {
+          final event = exchanges[index];
+          final payload = requestSide
+              ? {
+                  'endpoint': event.data['endpoint'],
+                  'apiFormat': event.data['apiFormat'],
+                  'request': event.data['request'] ?? {},
+                }
+              : event.data['response'] ?? {'text': event.text};
+          final pretty = const JsonEncoder.withIndent('  ').convert(payload);
+          return Material(
+            color: colors.surfaceContainerHighest,
+            borderRadius: BorderRadius.circular(10),
+            child: Padding(
+              padding: const EdgeInsets.all(10),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          requestSide
+                              ? 'Request #${index + 1}'
+                              : 'Response #${index + 1}',
+                          style: const TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                          ),
                         ),
                       ),
+                      IconButton(
+                        tooltip: 'Copy',
+                        visualDensity: VisualDensity.compact,
+                        onPressed: () =>
+                            Clipboard.setData(ClipboardData(text: pretty)),
+                        icon: const Icon(Icons.copy_outlined, size: 16),
+                      ),
+                    ],
+                  ),
+                  SelectableText(
+                    pretty,
+                    style: const TextStyle(
+                      fontSize: 11,
+                      fontFamily: 'monospace',
                     ),
-                    IconButton(
-                      tooltip: 'Copy',
-                      visualDensity: VisualDensity.compact,
-                      onPressed: () =>
-                          Clipboard.setData(ClipboardData(text: pretty)),
-                      icon: const Icon(Icons.copy_outlined, size: 16),
-                    ),
-                  ],
-                ),
-                SelectableText(
-                  pretty,
-                  style: const TextStyle(fontSize: 11, fontFamily: 'monospace'),
-                ),
-              ],
+                  ),
+                ],
+              ),
             ),
-          ),
-        );
-      },
+          );
+        },
+      ),
     );
   }
 }

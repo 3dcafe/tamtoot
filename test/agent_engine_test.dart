@@ -1275,6 +1275,126 @@ void main() {
     },
   );
 
+  test(
+    'repeated blocked reads after final targeted read stop the loop',
+    () async {
+      final store = RepositoryMemory();
+      for (final name in ['a', 'b', 'c']) {
+        await store.writeText('lib/$name.dart', 'const ${name}_0 = 0;');
+      }
+      final events = <AgentEvent>[];
+      final actions = [
+        '{"action":"search_files","query":"a_0","path":"lib"}',
+        '{"action":"read_file","path":"lib/a.dart"}',
+        '{"action":"search_files","query":"b_0","path":"lib"}',
+        '{"action":"read_file","path":"lib/b.dart"}',
+        '{"action":"read_file","path":"lib/c.dart"}', // final targeted read
+        '{"action":"read_file","path":"lib/c.dart"}', // blocked #1
+        '{"action":"read_file","path":"lib/c.dart"}', // blocked #2 → stop
+        '{"action":"read_file","path":"lib/c.dart"}',
+        '{"action":"finish","summary":"should not reach"}',
+      ];
+      final engine = AgentTaskEngine(
+        profile: agentProfile(),
+        store: store,
+        git: AgentGit(),
+        root: root,
+        apiKey: '',
+        onEvent: events.add,
+        approve: (_, _) async => true,
+        clientFactory: () => queueClient(actions),
+        hooks: NoHooks(),
+        commands: FakeCommands(),
+      );
+      await expectLater(
+        engine.run(
+          'Fix c',
+          const AgentRunOptions(
+            yolo: false,
+            maxConsecutiveMistakes: 5,
+            maxReadsBeforeFirstEdit: 2,
+            maxIterations: 40,
+          ),
+        ),
+        throwsA(
+          isA<ModelApiException>().having(
+            (e) => e.message,
+            'message',
+            contains('kept calling read_file'),
+          ),
+        ),
+      );
+      expect(
+        events.where((e) => e.type == 'denied').length,
+        greaterThanOrEqualTo(2),
+      );
+      expect(actions, isNot(contains(contains('should not reach'))));
+    },
+  );
+
+  test('build-error line in the task is seeded into active context', () async {
+    final store = RepositoryMemory();
+    await store.writeText(
+      'Pages/Index.cshtml',
+      List.generate(110, (i) => '<!-- line ${i + 1} -->').join('\n') +
+          '\n</body>\n</html>\n',
+    );
+    final events = <AgentEvent>[];
+    final bodies = <Map<String, dynamic>>[];
+    final actions = [
+      '{"action":"replace_in_file","path":"Pages/Index.cshtml",'
+          '"oldText":"<!-- line 103 -->","newText":"<!-- fixed -->"}',
+      '{"action":"finish","summary":"fixed malformed body"}',
+    ];
+    final engine = AgentTaskEngine(
+      profile: agentProfile(),
+      store: store,
+      git: AgentGit(),
+      root: root,
+      apiKey: '',
+      onEvent: events.add,
+      approve: (_, _) async => true,
+      clientFactory: () => ModelClient(
+        client: MockClient((request) async {
+          bodies.add(
+            Map<String, dynamic>.from(
+              jsonDecode(request.body) as Map<String, dynamic>,
+            ),
+          );
+          final next = actions.removeAt(0);
+          return http.Response(
+            jsonEncode({
+              'choices': [
+                {
+                  'message': {'content': next},
+                  'finish_reason': 'stop',
+                },
+              ],
+            }),
+            200,
+          );
+        }),
+      ),
+      hooks: NoHooks(),
+      commands: FakeCommands(),
+    );
+    final result = await engine.run(
+      'dotnet run failed:\n'
+      '/Users/latin/Documents/Source/Krotogon/Pages/Index.cshtml(103,3): '
+      'error RZ1034: Found a malformed body tag helper.\n'
+      'Ошибка сборки.',
+      const AgentRunOptions(yolo: false, maxConsecutiveMistakes: 1),
+    );
+    expect(result.success, isTrue);
+    expect(
+      events.map((e) => e.text),
+      contains(contains('Seeded build-error context')),
+    );
+    final firstPrompt = jsonEncode(bodies.first);
+    expect(firstPrompt, contains('line 103'));
+    expect(firstPrompt, contains('Build error context'));
+  });
+
   test('aborted runs still persist what they learned', () async {
     final store = RepositoryMemory();
     await store.writeText('lib/platform_services.dart', 'String readLocal();');

@@ -192,9 +192,17 @@ Reuse retained excerpts — do not re-read unchanged files.
 
   static const investigationBudgetPrompt =
       'Investigation budget reached. You have enough context.\n'
-      'Next action must be replace_in_file, write_file, finish, or ONE final '
-      'targeted read (max $maxFinalReadFiles files, $maxFinalReadLines lines each).\n'
+      'Next action must be replace_in_file, write_file, or finish.\n'
+      'Do NOT call read_file/read_files again — Active file context already '
+      'has the relevant lines. Emit replace_in_file NOW.\n'
       'search_files and list_files stay disabled until you edit.';
+
+  /// Compiler-style diagnostics: `path/file.cshtml(103,3): error RZ1034: ...`
+  static final _buildErrorPattern = RegExp(
+    r'([^\s\(\)]+\.(?:cshtml|razor|cs|dart|tsx?|jsx?|html?|css|js))\('
+    r'(\d+)(?:,\d+)?\)\s*:\s*error\b',
+    caseSensitive: false,
+  );
 
   Future<AgentRunResult> run(String task, AgentRunOptions options) async {
     if (task.trim().isEmpty) {
@@ -325,6 +333,7 @@ Reuse retained excerpts — do not re-read unchanged files.
     var mistakes = 0;
     var consecutiveSays = 0;
     var consecutiveSearches = 0;
+    var consecutiveBlockedReads = 0;
     var requireReadAfterSearch = false;
     var jsonMode = true;
     final completedSearches = <_CompletedSearch>[];
@@ -333,6 +342,14 @@ Reuse retained excerpts — do not re-read unchanged files.
     var filesReadBeforeEdit = 0;
     var hasEdited = false;
     var finalReadUsed = false;
+    await _seedBuildErrorContext(
+      task: task,
+      activeFiles: activeFiles,
+      transcript: transcript,
+      runReadPaths: runReadPaths,
+      runFingerprints: runFingerprints,
+      focusLinesByPath: focusLinesByPath,
+    );
     final systemPrompt = [
       profile.systemPrompt,
       protocol,
@@ -482,12 +499,25 @@ Reuse retained excerpts — do not re-read unchanged files.
         final isRead = name == 'read_file' || name == 'read_files';
         if (budgetReached && isRead) {
           if (finalReadUsed) {
+            consecutiveBlockedReads++;
             _softRejectSearch(
               transcript,
               name,
               'The final targeted read was already used.\n'
-              '$investigationBudgetPrompt',
+              '$investigationBudgetPrompt\n'
+              'Blocked read #$consecutiveBlockedReads. '
+              'Do not read again — replace_in_file or finish.',
             );
+            // Soft-denies used to burn all iterations for free. Count them.
+            mistakes++;
+            if (consecutiveBlockedReads >= 2 ||
+                mistakes >= options.maxConsecutiveMistakes) {
+              throw ModelApiException(
+                'Agent kept calling $name after the investigation budget. '
+                'Context is already loaded — press Continue and emit '
+                'replace_in_file (or finish) instead of another read.',
+              );
+            }
             continue;
           }
           // Normalize the read instead of denying it: denying would only cost
@@ -518,6 +548,7 @@ Reuse retained excerpts — do not re-read unchanged files.
           );
           continue;
         }
+        if (!isRead) consecutiveBlockedReads = 0;
         if (name != 'say' && name != 'finish') {
           final pre = await _hook('PreToolUse', {
             'toolName': name,
@@ -1357,6 +1388,24 @@ Reuse retained excerpts — do not re-read unchanged files.
     return path;
   }
 
+  /// Suffix candidates from an absolute/relative compiler path.
+  Iterable<String> _projectPathCandidates(String raw) sync* {
+    final segments = raw
+        .replaceAll('\\', '/')
+        .trim()
+        .split('/')
+        .where((part) => part.isNotEmpty && part != '.' && part != '..')
+        .toList();
+    for (var i = 0; i < segments.length; i++) {
+      final candidate = segments.sublist(i).join('/');
+      try {
+        yield _path(candidate);
+      } catch (_) {
+        // Skip escape / protected prefixes.
+      }
+    }
+  }
+
   bool _allowed(String path) =>
       !path.split('/').any((part) => part == '.git' || part == '.tamtoot');
 
@@ -1963,14 +2012,20 @@ Reuse retained excerpts — do not re-read unchanged files.
     String content,
     List<String> transcript,
   ) {
-    // Keep one excerpt per path (drop older ranges for the same file).
     final pathKey = key.split(' ').first;
-    activeFiles.removeWhere(
-      (existing, _) =>
-          existing == key ||
-          existing == pathKey ||
-          existing.startsWith('$pathKey '),
-    );
+    // Keep up to two ranges per file (e.g. open tags + error line / close tags).
+    // Wiping to a single window caused start↔end ping-pong and missed mismatches.
+    final samePath = activeFiles.keys
+        .where(
+          (existing) =>
+              existing == pathKey || existing.startsWith('$pathKey '),
+        )
+        .toList();
+    if (activeFiles.containsKey(key)) {
+      // Refresh the exact same window.
+    } else if (samePath.length >= 2) {
+      activeFiles.remove(samePath.first);
+    }
     activeFiles[key] = content.length <= maxExcerptCharacters
         ? content
         : '${content.substring(0, maxExcerptCharacters)}\n… excerpt character limit';
@@ -1989,6 +2044,67 @@ Reuse retained excerpts — do not re-read unchanged files.
         'Context eviction:',
         'Context eviction: ${evicted.join(', ')}. Read again only if needed.',
       );
+    }
+  }
+
+  /// Pre-load the file/line named in a compiler error so the agent can edit
+  /// immediately instead of burning iterations rediscovering the location.
+  Future<void> _seedBuildErrorContext({
+    required String task,
+    required Map<String, String> activeFiles,
+    required List<String> transcript,
+    required Set<String> runReadPaths,
+    required Map<String, String> runFingerprints,
+    required Map<String, List<int>> focusLinesByPath,
+  }) async {
+    final matches = _buildErrorPattern.allMatches(task).take(3);
+    if (matches.isEmpty) return;
+    for (final match in matches) {
+      final rawPath = match.group(1)!;
+      final line = int.tryParse(match.group(2)!);
+      if (line == null || line < 1) continue;
+      String? path;
+      for (final candidate in _projectPathCandidates(rawPath)) {
+        if (await store.exists(candidate)) {
+          path = candidate;
+          break;
+        }
+      }
+      if (path == null) continue;
+      try {
+        final bytes = await store.readBytes(path);
+        if (bytes.length > 1024 * 1024) continue;
+        final content = utf8.decode(bytes);
+        focusLinesByPath.putIfAbsent(path, () => <int>[]).add(line);
+        final excerpt = _fileExcerpt(
+          path,
+          content,
+          {
+            'startLine': (line - 25).clamp(1, 1 << 30),
+            'lineCount': 60,
+          },
+          focusLines: focusLinesByPath[path],
+          maxLines: 80,
+        );
+        _rememberFile(activeFiles, excerpt.key, excerpt.content, transcript);
+        runReadPaths.add(path);
+        runFingerprints[path] = ProjectMemory.fingerprintText(content);
+        onEvent(
+          AgentEvent(
+            'context',
+            'Seeded build-error context: ${excerpt.description}',
+          ),
+        );
+        _replaceNote(
+          transcript,
+          'Build error context:',
+          'Build error context: ${excerpt.description} is already in Active '
+              'file context. Prefer replace_in_file for the malformed tag/'
+              'syntax near that line — do not keep re-reading the same file.',
+        );
+      } catch (_) {
+        // Best-effort seed; the model can still read if this fails.
+      }
     }
   }
 
