@@ -64,28 +64,6 @@ void main() {
     );
   });
 
-  test('fetchAccountBalance reads STAR-style remain_balance', () async {
-    final client = MockClient((request) async {
-      expect(request.url.path, '/v1/balance');
-      expect(request.headers['authorization'], 'Bearer test-key');
-      return http.Response(
-        jsonEncode({
-          'remain_balance': 42.5,
-          'used_balance': 7.5,
-          'unlimited_quota': false,
-        }),
-        200,
-      );
-    });
-    final balance = await ModelClient.fetchAccountBalance(
-      profile('chat-completions', 'https://ai.starimg.ru/v1/chat/completions'),
-      apiKey: 'test-key',
-      client: client,
-    );
-    expect(balance.summary, contains('remaining: 42.5'));
-    expect(balance.summary, contains('used: 7.5'));
-  });
-
   test('chat-completions embeds image and file parts like STAR/OpenAI', () {
     final png = ModelAttachment(
       name: 'shot.png',

@@ -53,17 +53,6 @@ class ModelReply {
   final Map<String, dynamic> request;
 }
 
-class ModelAccountBalance {
-  const ModelAccountBalance({
-    required this.summary,
-    this.raw = const {},
-    this.endpoint = '',
-  });
-  final String summary;
-  final Map<String, dynamic> raw;
-  final String endpoint;
-}
-
 /// One request per instance. Owns and closes its transport on completion/cancel.
 class ModelClient {
   ModelClient({http.Client? client, this.timeout = const Duration(minutes: 2)})
@@ -75,114 +64,6 @@ class ModelClient {
   void cancel() {
     if (!_cancelled.isCompleted) _cancelled.complete();
     _client.close();
-  }
-
-  /// Best-effort remaining quota/balance for providers that expose it
-  /// (AI STAR / NewAPI-style gateways).
-  static Future<ModelAccountBalance> fetchAccountBalance(
-    ModelProfile profile, {
-    String apiKey = '',
-    http.Client? client,
-    Duration timeout = const Duration(seconds: 12),
-  }) async {
-    profile.validate();
-    var key = apiKey.trim();
-    if (key.toLowerCase().startsWith('bearer ')) {
-      key = key.substring(7).trim();
-    }
-    if (key.isEmpty) {
-      throw const ModelApiException('Enter an API token to check balance.');
-    }
-    final base = profile.requestUri().replace(query: '', fragment: '');
-    final roots = <Uri>{
-      base.replace(path: '/v1/balance'),
-      base.replace(path: '/balance'),
-      base.replace(path: '/v1/dashboard/billing/subscription'),
-    };
-    final httpClient = client ?? http.Client();
-    Object? lastError;
-    try {
-      for (final uri in roots) {
-        try {
-          final response = await httpClient
-              .get(
-                uri,
-                headers: {
-                  'authorization': 'Bearer $key',
-                  'accept': 'application/json',
-                },
-              )
-              .timeout(timeout);
-          if (response.statusCode == 404) continue;
-          if (response.statusCode < 200 || response.statusCode >= 300) {
-            lastError = ModelApiException(
-              'Balance check failed (HTTP ${response.statusCode}).',
-            );
-            continue;
-          }
-          final decoded = jsonDecode(response.body);
-          final map = decoded is Map<String, dynamic>
-              ? decoded
-              : decoded is Map
-              ? Map<String, dynamic>.from(decoded)
-              : <String, dynamic>{'value': decoded};
-          final summary = _balanceSummary(map);
-          if (summary == null) {
-            lastError = const ModelApiException(
-              'Balance endpoint replied, but the format is unknown.',
-            );
-            continue;
-          }
-          return ModelAccountBalance(
-            summary: summary,
-            raw: map,
-            endpoint: uri.toString(),
-          );
-        } on ModelApiException catch (e) {
-          lastError = e;
-        } catch (e) {
-          lastError = e;
-        }
-      }
-    } finally {
-      if (client == null) httpClient.close();
-    }
-    throw ModelApiException(
-      lastError is ModelApiException
-          ? lastError.message
-          : 'No balance endpoint answered for this provider.',
-    );
-  }
-
-  static String? _balanceSummary(Map<String, dynamic> map) {
-    num? number(dynamic value) => value is num ? value : null;
-    final data = map['data'] is Map
-        ? Map<String, dynamic>.from(map['data'] as Map)
-        : map;
-    final remain =
-        number(data['remain_balance']) ??
-        number(data['remain_quota']) ??
-        number(data['quota_remaining']) ??
-        number(data['remaining']) ??
-        number(data['balance']) ??
-        number(data['hard_limit_usd']) ??
-        number(map['remain_balance']) ??
-        number(map['remain_quota']);
-    final used =
-        number(data['used_balance']) ??
-        number(data['used_quota']) ??
-        number(data['quota_used']) ??
-        number(data['total_usage']) ??
-        number(map['used_balance']);
-    final unlimited =
-        data['unlimited_quota'] == true || map['unlimited_quota'] == true;
-    if (unlimited) return 'Unlimited quota';
-    if (remain == null && used == null) return null;
-    final parts = <String>[
-      if (remain != null) 'remaining: $remain',
-      if (used != null) 'used: $used',
-    ];
-    return parts.join(' · ');
   }
 
   Future<ModelReply> send(
