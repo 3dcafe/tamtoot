@@ -1992,17 +1992,29 @@ Reuse retained excerpts — do not re-read unchanged files.
   ) {
     final end = endExclusive.clamp(0, lines.length).toInt();
     final safeStart = start.clamp(0, end).toInt();
-    var excerpt = lines.sublist(safeStart, end).join('\n');
-    if (excerpt.length > maxExcerptCharacters) {
-      excerpt =
-          '${excerpt.substring(0, maxExcerptCharacters)}\n… excerpt character limit';
+    final kept = <String>[];
+    var total = 0;
+    var actualEnd = safeStart;
+    for (var i = safeStart; i < end; i++) {
+      final line = lines[i];
+      final add = line.length + (kept.isEmpty ? 0 : 1);
+      if (total + add > maxExcerptCharacters) break;
+      kept.add(line);
+      total += add;
+      actualEnd = i + 1;
     }
+    final truncated = actualEnd < end;
+    final excerpt = truncated
+        ? '${kept.join('\n')}\n… excerpt truncated after line $actualEnd of ${lines.length}'
+        : kept.join('\n');
     final from = safeStart + 1;
-    final to = end;
+    final to = actualEnd == safeStart ? safeStart : actualEnd;
     return _AgentFileExcerpt(
       '$path [lines $from-$to]',
       excerpt,
-      '$path lines $from-$to of ${lines.length}',
+      truncated
+          ? '$path lines $from-$to of ${lines.length} (truncated)'
+          : '$path lines $from-$to of ${lines.length}',
     );
   }
 
@@ -2026,9 +2038,15 @@ Reuse retained excerpts — do not re-read unchanged files.
     } else if (samePath.length >= 2) {
       activeFiles.remove(samePath.first);
     }
-    activeFiles[key] = content.length <= maxExcerptCharacters
-        ? content
-        : '${content.substring(0, maxExcerptCharacters)}\n… excerpt character limit';
+    // Prefer whole-line truncation so replace_in_file never sees a fake file end.
+    if (content.length <= maxExcerptCharacters) {
+      activeFiles[key] = content;
+    } else {
+      final cut = content.lastIndexOf('\n', maxExcerptCharacters);
+      final keepTo = cut > 0 ? cut : maxExcerptCharacters;
+      activeFiles[key] =
+          '${content.substring(0, keepTo)}\n… excerpt truncated';
+    }
     final evicted = <String>[];
     int characters() =>
         activeFiles.values.fold(0, (total, value) => total + value.length);

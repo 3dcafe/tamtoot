@@ -645,7 +645,7 @@ class _AgentPanelState extends State<AgentPanel> {
                       key: const ValueKey('agent-clear-log'),
                       onPressed: () => unawaited(_clearConversation()),
                       icon: const Icon(Icons.delete_sweep_outlined, size: 16),
-                      label: const Text('Clear log'),
+                      label: const Text('Clear log & history'),
                       style: TextButton.styleFrom(
                         visualDensity: VisualDensity.compact,
                         padding: const EdgeInsets.symmetric(horizontal: 8),
