@@ -4,6 +4,7 @@ import 'dart:convert';
 import '../git/git_service.dart';
 import '../git/git_store.dart';
 import '../git/multi_root_store.dart';
+import 'agent_context_compactor.dart';
 import 'model_attachment.dart';
 import 'model_client.dart';
 import 'model_profile.dart';
@@ -139,6 +140,7 @@ Implementation rules:
 
 Memory rules:
 - Retained project memory is pinned at the top of the context. Read it first.
+- Compacted run context is a navigation summary, not exact source. Re-read the current excerpt before editing.
 - When memory already names the relevant file, read that file instead of searching for it.
 - Use retained project knowledge before searching.
 - Do not rediscover known file locations unless the information appears stale or insufficient.
@@ -265,6 +267,8 @@ Reuse retained excerpts — do not re-read unchanged files.
       'Phase: implementation. Start with the most useful tool action. Prefer tools over say.',
       if (promptHook.context.isNotEmpty) 'Hook context:\n${promptHook.context}',
     ];
+    final compactedContext = <String>[];
+    const contextCompactor = AgentContextCompactor();
     final activeFiles = <String, String>{};
     final observations = <String, String>{};
     _rememberObservation(observations, 'Project index', await _projectIndex());
@@ -329,6 +333,12 @@ Reuse retained excerpts — do not re-read unchanged files.
     var filesReadBeforeEdit = 0;
     var hasEdited = false;
     var finalReadUsed = false;
+    final systemPrompt = [
+      profile.systemPrompt,
+      protocol,
+      if (mcp != null && mcp!.tools.isNotEmpty)
+        'Available MCP tools:\n${mcp!.describe()}',
+    ].join('\n\n');
     for (var iteration = 1; iteration <= options.maxIterations; iteration++) {
       if (_stopped) {
         throw const ModelApiException('Agent stopped.');
@@ -353,23 +363,38 @@ Reuse retained excerpts — do not re-read unchanged files.
       }
       final implementationPhase =
           hasEdited || budgetReached || activeFiles.isNotEmpty;
+      final compaction = contextCompactor.compact(
+        transcript: transcript,
+        observations: observations,
+        activeFiles: activeFiles,
+        summary: compactedContext,
+        pinnedCharacters: systemPrompt.length + memoryPrompt.length,
+      );
+      if (compaction.changed) {
+        onEvent(
+          AgentEvent(
+            'context',
+            'Compressed context: ${compaction.beforeCharacters} → '
+                '${compaction.afterCharacters} characters '
+                '(${compaction.fileExcerpts} file excerpts, '
+                '${compaction.observations} observations, '
+                '${compaction.transcriptItems} messages)',
+          ),
+        );
+      }
       late final ModelReply reply;
       try {
         reply = await _requestAction(
           options: options,
           maxTokens: implementationPhase ? agentEditTokens : agentActionTokens,
           jsonMode: jsonMode,
-          systemPrompt: [
-            profile.systemPrompt,
-            protocol,
-            if (mcp != null && mcp!.tools.isNotEmpty)
-              'Available MCP tools:\n${mcp!.describe()}',
-          ].join('\n\n'),
+          systemPrompt: systemPrompt,
           userPrompt: _buildPrompt(
             transcript,
             activeFiles,
             observations,
             memoryPrompt,
+            compactedContext,
           ),
           attachments: iteration == 1 ? attachments : const [],
           // Empty content is answered by a tiny request instead of a full
@@ -950,7 +975,6 @@ Reuse retained excerpts — do not re-read unchanged files.
           );
         }
       }
-      _trim(transcript);
     }
     throw ModelApiException(
       'Agent reached the ${options.maxIterations}-iteration limit.',
@@ -1338,12 +1362,19 @@ Reuse retained excerpts — do not re-read unchanged files.
     Map<String, String> activeFiles,
     Map<String, String> observations,
     String memoryPrompt,
+    List<String> compactedContext,
   ) {
     final out = StringBuffer(transcript.join('\n\n'));
     // Pinned: persistent memory must never be evicted by fresh observations.
     if (memoryPrompt.isNotEmpty) {
       out.write('\n\n--- Retained project memory (persistent) ---\n');
       out.write(memoryPrompt);
+    }
+    if (compactedContext.isNotEmpty) {
+      out.write('\n\n--- Compacted run context ---\n');
+      for (final item in compactedContext) {
+        out.writeln('- $item');
+      }
     }
     if (observations.isNotEmpty) {
       out.write('\n\nRetained investigation context:');
@@ -1966,23 +1997,6 @@ Reuse retained excerpts — do not re-read unchanged files.
       value.length <= maxCharacters
       ? value
       : '${value.substring(0, maxCharacters)}\n… result truncated';
-
-  void _trim(List<String> transcript) {
-    var characters = transcript.fold(0, (sum, item) => sum + item.length);
-    while (characters > 24000 && transcript.length > 3) {
-      final removable = transcript.indexWhere(
-        (item) =>
-            !item.startsWith('Task:') &&
-            !item.startsWith('Phase:') &&
-            !item.startsWith('Assistant analysis:') &&
-            !item.startsWith('Memory note:') &&
-            !item.startsWith('Host note:'),
-      );
-      if (removable < 0) break;
-      characters -= transcript[removable].length;
-      transcript.removeAt(removable);
-    }
-  }
 
   String _preview(String text, {int max = 240}) {
     final trimmed = text.trim();

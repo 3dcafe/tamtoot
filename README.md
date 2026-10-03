@@ -240,6 +240,10 @@ uses path/text search plus ranged file reads to choose relevant code. Listings
 and search results remain in a bounded investigation history, while up to eight
 recent file excerpts remain available across model requests. Small changes use
 exact fragment replacement so the model does not need to rewrite a large file.
+When the combined prompt grows, Tamtoot compacts old tool messages, searches and
+source excerpts locally. Recent exact excerpts stay available for safe edits;
+older context becomes a short navigation summary. Compaction requires no extra
+model call and therefore consumes no additional API tokens.
 
 **YOLO Mode** auto-approves these actions after a visible first-use warning and a
 clean-Git check. It has a 600-second default timeout, a configurable consecutive
