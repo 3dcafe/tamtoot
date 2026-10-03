@@ -201,6 +201,14 @@ excludes these agent settings, so they remain local when committing through
 Tamtoot. Existing browser folder stores support profile files;
 actual browser permission behavior requires a writable folder grant.
 
+## .NET run and project detection (desktop)
+
+On Windows, Linux and macOS, **Tools → Settings → .NET SDK** accepts the absolute `dotnet` executable or installation folder. Leave it empty to search environment variables, PATH and standard installation folders. **Test .NET** lists installed SDKs without building a project.
+
+The launch toolbar detects Flutter (`pubspec.yaml` with a Flutter SDK dependency) and C# / .NET (`.csproj`) projects, displays their type and path, and lets you select a target when several are found. Unknown types are explicitly labelled. **Run** starts the selected runnable project; **Run → Run .NET** allows a manual attempt when the executable type cannot be inferred. **Watch .NET** uses SDK hot reload and **Stop .NET** stops the process; logs appear in Output. Dirty documents are saved before launch.
+
+.NET commands use the installed SDK without an editor plugin. Debug configuration does not attach a debugger: C# breakpoints, stepping and variable inspection require a separate debug adapter, which is not bundled or automatically installed. These controls are desktop only. [Detailed .NET setup and limitations in Russian](docs/ru/dotnet-run.md).
+
 ## Flutter run and debug (desktop)
 
 On Windows, Linux and macOS, **Tools → Settings → Flutter SDK** accepts the absolute SDK folder path. **Test Flutter** runs `flutter --version --machine`, displays SDK versions and discovers devices with `flutter devices --machine`. It verifies CLI communication, not the complete build toolchain. The **Device** dropdown shows friendly device names; **Refresh** discovers connected devices and running emulators. IDs are saved internally. Settings are saved for the user; the default entry point is `lib/main.dart` and the default target is the current desktop. Initialize a Windows SDK with `flutter --version` once before using it here.

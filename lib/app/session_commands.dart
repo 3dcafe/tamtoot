@@ -1,5 +1,6 @@
 import '../core/commands/commands.dart';
 import '../core/flutter/flutter_runner.dart';
+import '../core/projects/project_detection.dart';
 import '../core/filesystem/filesystem.dart';
 import '../workspace/layout/dock_layout.dart';
 import 'ide_session.dart';
@@ -47,6 +48,8 @@ void registerSessionCommands(IdeSession s, PresentationActions ui) {
   bool flutterReady() =>
       supportsFlutterTools &&
       !s.flutter.active &&
+      !s.dotnet.active &&
+      !s.dotnet.checking &&
       !s.flutter.checking &&
       (s.settings.get('flutterSdkPath') as String).trim().isNotEmpty &&
       s.workspaceRoot?.scheme == 'file';
@@ -64,12 +67,84 @@ void registerSessionCommands(IdeSession s, PresentationActions ui) {
     s.changed();
     await s.flutter.start(
       sdk: s.settings.get('flutterSdkPath') as String,
-      root: s.workspaceRoot!,
+      root: s.launchTarget?.kind == ProjectKind.flutter
+          ? s.launchTarget!.root
+          : s.workspaceRoot!,
       entryPoint: s.settings.get('flutterEntryPoint') as String,
       device: s.settings.get('flutterDeviceId') as String,
       debug: debug,
     );
   }
+
+  bool dotnetReady() =>
+      supportsFlutterTools &&
+      !s.dotnet.active &&
+      !s.dotnet.checking &&
+      !s.flutter.active &&
+      !s.flutter.checking &&
+      s.launchTarget?.kind == ProjectKind.dotnet;
+  Future<void> launchDotnet(bool watch) async {
+    final target = s.launchTarget;
+    if (target == null || target.kind != ProjectKind.dotnet) return;
+    for (final doc in s.documents.documents.where((doc) => doc.dirty)) {
+      if (!await s.documents.save(doc)) return;
+    }
+    if (s.layout.hidden.contains('output'))
+      s.layout = s.layout.toggle('output');
+    s.layout = s.layout.map(
+      (node) => node is TabNode && node.panels.contains('output')
+          ? TabNode(node.id, node.panels, 'output')
+          : node,
+    );
+    s.changed();
+    await s.dotnet.start(
+      s.settings.get('dotnetPath') as String,
+      target,
+      watch: watch,
+    );
+  }
+
+  add(
+    'dotnet.run',
+    'Run .NET',
+    (_) => launchDotnet(false),
+    enabled: dotnetReady,
+    visible: () => supportsFlutterTools,
+  );
+  add(
+    'dotnet.watch',
+    'Watch .NET (hot reload)',
+    (_) => launchDotnet(true),
+    enabled: dotnetReady,
+    visible: () => supportsFlutterTools,
+  );
+  add(
+    'dotnet.stop',
+    'Stop .NET',
+    (_) => s.dotnet.stop(),
+    enabled: () => s.dotnet.active,
+    visible: () => supportsFlutterTools,
+  );
+  add(
+    'project.detect',
+    'Detect project type',
+    (_) => s.detectProject(),
+    visible: () => supportsFlutterTools,
+  );
+  add(
+    'project.run',
+    'Run selected project',
+    (_) => s.launchTarget?.kind == ProjectKind.flutter
+        ? launchFlutter(false)
+        : launchDotnet(false),
+    enabled: () =>
+        s.launchTarget != null &&
+        s.launchTarget!.runnable &&
+        (s.launchTarget!.kind == ProjectKind.flutter
+            ? flutterReady()
+            : dotnetReady()),
+    visible: () => supportsFlutterTools,
+  );
 
   add(
     'flutter.run',

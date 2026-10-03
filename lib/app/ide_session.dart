@@ -3,6 +3,8 @@ import 'dart:convert';
 import 'package:crypto/crypto.dart';
 import '../core/commands/commands.dart';
 import '../core/flutter/flutter_runner.dart';
+import '../core/dotnet/dotnet_runner.dart';
+import '../core/projects/project_detection.dart';
 import '../core/completion/project_completion.dart';
 import '../core/filesystem/filesystem.dart';
 import '../core/git/git_service.dart';
@@ -30,6 +32,33 @@ class IdeSession {
     log: (text) => log(text),
     changed: () => changed(persist: false),
   );
+  late final dotnet = DotnetRunner(
+    log: (text) => log(text),
+    changed: () => changed(persist: false),
+  );
+  List<LaunchTarget> launchTargets = [];
+  String? selectedLaunchTarget;
+  LaunchTarget? get launchTarget => launchTargets
+      .where((target) => target.id == selectedLaunchTarget)
+      .firstOrNull;
+  int _projectScan = 0;
+  Future<void> detectProject() async {
+    if (!supportsFlutterTools) return;
+    final root = workspaceRoot;
+    final revision = ++_projectScan;
+    final targets = root == null
+        ? <LaunchTarget>[]
+        : await detectProjects(documents.files, root);
+    if (_disposed || revision != _projectScan || workspaceRoot != root) return;
+    launchTargets = targets;
+    if (!targets.any((target) => target.id == selectedLaunchTarget)) {
+      selectedLaunchTarget =
+          targets.where((target) => target.runnable).firstOrNull?.id ??
+          targets.firstOrNull?.id;
+    }
+    changed(persist: false);
+  }
+
   KeybindingRegistry keys = KeybindingRegistry();
   final settings = SettingsService();
   final languages = LanguageRegistry();
@@ -43,10 +72,7 @@ class IdeSession {
   final List<String> recentWorkspaces = [];
   Uri? workspaceRoot;
   final List<Uri> additionalWorkspaceRoots = [];
-  List<Uri> get workspaceRoots => [
-    ?workspaceRoot,
-    ...additionalWorkspaceRoots,
-  ];
+  List<Uri> get workspaceRoots => [?workspaceRoot, ...additionalWorkspaceRoots];
 
   Map<Uri, String> get workspaceRootAliases {
     final used = <String>{};
@@ -203,6 +229,7 @@ class IdeSession {
 
   Future<void> refreshExplorer() async {
     await explorer.refresh();
+    await detectProject();
     await refreshGitIndicators();
   }
 
@@ -319,6 +346,8 @@ class IdeSession {
       await SecurityScopedRoots.release(previous);
     }
     workspaceRoot = root;
+    launchTargets = [];
+    selectedLaunchTarget = null;
     additionalWorkspaceRoots.clear();
     completionIndex = null;
     _gitEntries = {};
@@ -335,6 +364,7 @@ class IdeSession {
       }
       throw StateError(detail);
     }
+    await detectProject();
     recentWorkspaces
       ..remove(root.toString())
       ..insert(0, root.toString());
@@ -689,6 +719,7 @@ class IdeSession {
     _saveTimer?.cancel();
     await persistNow();
     await flutter.dispose();
+    await dotnet.dispose();
     for (final root in workspaceRoots) {
       await SecurityScopedRoots.release(root);
     }

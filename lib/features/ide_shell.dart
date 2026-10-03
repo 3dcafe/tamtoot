@@ -19,6 +19,7 @@ import 'dock_view.dart';
 import 'media_document_view.dart';
 import 'flutter_debug_panel.dart';
 import '../core/flutter/flutter_runner.dart';
+import 'project_launch_bar.dart';
 
 class IdeShell extends ConsumerStatefulWidget {
   const IdeShell({super.key});
@@ -155,6 +156,12 @@ class _IdeShellState extends ConsumerState<IdeShell> {
       'view.commands',
     ],
     'Run': [
+      'project.run',
+      'project.detect',
+      'dotnet.run',
+      'dotnet.watch',
+      'dotnet.stop',
+      '—',
       'flutter.run',
       'flutter.debug',
       'flutter.stop',
@@ -426,13 +433,8 @@ class _IdeShellState extends ConsumerState<IdeShell> {
         action(Icons.undo, 'Undo', 'editor.undo'),
         action(Icons.redo, 'Redo', 'editor.redo'),
         const VerticalDivider(indent: 10, endIndent: 10),
-        if (supportsFlutterTools) ...[
-          action(Icons.play_arrow, 'Run Flutter', 'flutter.run'),
-          action(Icons.bug_report_outlined, 'Debug Flutter', 'flutter.debug'),
-          action(Icons.stop, 'Stop Flutter', 'flutter.stop'),
-          action(Icons.bolt, 'Hot reload', 'flutter.hotReload'),
-          action(Icons.restart_alt, 'Hot restart', 'flutter.hotRestart'),
-        ],
+        if (supportsFlutterTools)
+          Flexible(child: ProjectLaunchBar(session: session)),
         Expanded(child: _pathBar()),
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 14),
