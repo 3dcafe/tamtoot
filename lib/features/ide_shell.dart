@@ -13,7 +13,6 @@ import '../platform/reveal_path.dart';
 import 'dialogs.dart';
 import 'agent_dialog.dart';
 import 'git_changes_dialog.dart';
-import 'git_diff.dart';
 import 'http_requests_dialog.dart';
 import 'publish_project_dialog.dart';
 import 'dock_view.dart';
@@ -22,6 +21,7 @@ import 'flutter_debug_panel.dart';
 import '../core/flutter/flutter_runner.dart';
 import 'project_launch_bar.dart';
 import 'new_file_dialog.dart';
+import 'explorer_context_menu.dart';
 
 class IdeShell extends ConsumerStatefulWidget {
   const IdeShell({super.key});
@@ -1002,6 +1002,7 @@ class _IdeShellState extends ConsumerState<IdeShell> {
                           : Icons.folder_outlined,
                       () => session.run('workspace.toggleFolder', root),
                       entryKey: ValueKey('explorer-root-$root'),
+                      fileUri: root,
                       directory: true,
                       expanded: session.explorer.expanded.contains(root),
                       loading: session.explorer.loading.contains(root),
@@ -1042,7 +1043,7 @@ class _IdeShellState extends ConsumerState<IdeShell> {
           row.entry.directory ? row.entry.uri : row.entry,
         ),
         entryKey: ValueKey('explorer-${row.entry.uri}'),
-        fileUri: row.entry.directory ? null : row.entry.uri,
+        fileUri: row.entry.uri,
         depth: row.depth + depthOffset,
         directory: row.entry.directory,
         expanded: session.explorer.expanded.contains(row.entry.uri),
@@ -1114,12 +1115,22 @@ class _IdeShellState extends ConsumerState<IdeShell> {
   }) => GestureDetector(
     onSecondaryTapDown: fileUri == null
         ? null
-        : (event) =>
-              showFileGitMenu(context, session, fileUri, event.globalPosition),
+        : (event) => showExplorerContextMenu(
+            context,
+            session,
+            fileUri,
+            directory,
+            event.globalPosition,
+          ),
     onLongPressStart: fileUri == null
         ? null
-        : (event) =>
-              showFileGitMenu(context, session, fileUri, event.globalPosition),
+        : (event) => showExplorerContextMenu(
+            context,
+            session,
+            fileUri,
+            directory,
+            event.globalPosition,
+          ),
     child: Tooltip(
       message: indicators.any ? '$name · ${indicators.description}' : name,
       child: Semantics(

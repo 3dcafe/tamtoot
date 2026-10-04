@@ -7,9 +7,15 @@ import '../languages/language_registry.dart';
 import '../platform/project_storage.dart';
 
 class NewFileDialog extends StatefulWidget {
-  const NewFileDialog({super.key, required this.session, this.folder = false});
+  const NewFileDialog({
+    super.key,
+    required this.session,
+    this.folder = false,
+    this.initialDirectory,
+  });
   final IdeSession session;
   final bool folder;
+  final Uri? initialDirectory;
   @override
   State<NewFileDialog> createState() => _NewFileDialogState();
 }
@@ -50,6 +56,19 @@ class _NewFileDialogState extends State<NewFileDialog> {
       if (target.root.toString().startsWith(root.toString())) {
         directory.text = Uri.decodeComponent(
           target.root.path.substring(root.path.length),
+        ).replaceAll(RegExp(r'/+$'), '');
+      }
+    }
+    final destination = widget.initialDirectory;
+    if (destination != null) {
+      root =
+          widget.session.workspaceRoots
+              .where((r) => destination.toString().startsWith(r.toString()))
+              .firstOrNull ??
+          root;
+      if (destination.path.startsWith(root.path)) {
+        directory.text = Uri.decodeComponent(
+          destination.path.substring(root.path.length),
         ).replaceAll(RegExp(r'/+$'), '');
       }
     }
