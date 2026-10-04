@@ -215,6 +215,8 @@ void main() {
         buttons: kSecondaryMouseButton,
       );
       await tester.pumpAndSettle();
+      await tester.tap(find.text('Git…'));
+      await tester.pumpAndSettle();
       await tester.tap(find.text('Compare with HEAD'));
       await tester.pumpAndSettle();
       expect(find.text('HEAD → Editor (unsaved)'), findsOneWidget);
