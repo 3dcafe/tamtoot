@@ -104,8 +104,20 @@ Future<GitRefDiscovery> discoverRefs(
     },
   );
   if (response.statusCode != 200) {
+    final hint = switch (response.statusCode) {
+      401 =>
+        ' Authentication failed. Check the GitHub username and access token.',
+      403 =>
+        ' Push forbidden. Use a token with repository write access '
+            '(classic: repo scope; fine-grained: Contents Read and write on this repo), '
+            'and confirm the HTTPS username matches the token owner.',
+      404 =>
+        ' Repository not found (or private without access). '
+            'Create it on GitHub first, or turn on “Create repository via GitHub API”.',
+      _ => '',
+    };
     throw GitException(
-      'Ref discovery failed (${response.statusCode}) for $url',
+      'Ref discovery failed (${response.statusCode}) for $url.$hint',
     );
   }
   return parseRefAdvertisement(response.body, service);

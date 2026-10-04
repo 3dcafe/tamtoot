@@ -82,6 +82,16 @@ class _PublishProjectDialogState extends State<PublishProjectDialog> {
   String safeError(Object error) {
     var text = '$error';
     if (token.text.isNotEmpty) text = text.replaceAll(token.text, '[redacted]');
+    if (text.contains('(403)')) {
+      return 'GitHub rejected the push (HTTP 403).\n'
+          '• Classic PAT needs the repo scope\n'
+          '• Fine-grained PAT needs Contents: Read and write for this repository\n'
+          '• HTTPS username must be the GitHub login that owns the token (e.g. 3dcafe)\n'
+          '• Repo must already exist unless “Create repository via GitHub API” is on';
+    }
+    if (text.contains('(401)')) {
+      return 'Authentication failed (HTTP 401). Check the access token and HTTPS username.';
+    }
     return text;
   }
 
@@ -300,7 +310,7 @@ class _PublishProjectDialogState extends State<PublishProjectDialog> {
                 autocorrect: false,
                 decoration: const InputDecoration(
                   labelText: 'HTTPS username (optional)',
-                  helperText: 'Defaults to git',
+                  helperText: 'GitHub login that owns the token (e.g. 3dcafe)',
                 ),
               ),
               TextField(
@@ -312,7 +322,7 @@ class _PublishProjectDialogState extends State<PublishProjectDialog> {
                 decoration: InputDecoration(
                   labelText: 'GitHub access token',
                   helperText:
-                      'Saved locally for this remote; never added to the project or Git.',
+                      'Classic: repo scope. Fine-grained: Contents Read/write. Saved locally only.',
                   suffixIcon: IconButton(
                     tooltip: obscure ? 'Show token' : 'Hide token',
                     onPressed: busy

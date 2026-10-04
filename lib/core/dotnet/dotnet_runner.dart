@@ -129,15 +129,25 @@ class DotnetRunner {
   }
 
   Future<void> stop() async {
+    ++_generation;
     final process = _process;
-    if (process == null) {
-      ++_generation;
-      active = false;
-      _notify();
-      return;
-    }
-    process.kill();
+    _process = null;
+    active = false;
+    _notify();
+    if (process == null) return;
     if (!_disposed) log('Stopping .NET…');
+    process.kill();
+    try {
+      await process.exitCode.timeout(const Duration(seconds: 6));
+    } catch (_) {
+      process.kill();
+    }
+    for (final subscription in List<StreamSubscription<String>>.from(
+      _output,
+    )) {
+      await subscription.cancel();
+    }
+    _output.clear();
   }
 
   Future<void> dispose() async {

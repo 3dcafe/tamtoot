@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 import 'flutter_process_types.dart';
+import 'process_tree_io.dart';
 
 Future<String> resolveDotnet(String configured) async {
   final name = Platform.isWindows ? 'dotnet.exe' : 'dotnet';
@@ -65,6 +66,7 @@ Future<FlutterToolProcess> startDotnetProcess(
 class _DotnetProcess implements FlutterToolProcess {
   _DotnetProcess(this.process);
   final Process process;
+  Future<void>? _terminating;
   @override
   Stream<List<int>> get stdout => process.stdout;
   @override
@@ -73,27 +75,8 @@ class _DotnetProcess implements FlutterToolProcess {
   Future<int> get exitCode => process.exitCode;
   @override
   void write(List<int> bytes) => process.stdin.add(bytes);
-  Future<void> _killWindowsTree() async {
-    try {
-      final result = await Process.run(
-        '${Platform.environment['SystemRoot'] ?? r'C:\Windows'}\\System32\\taskkill.exe',
-        ['/PID', '${process.pid}', '/T', '/F'],
-        runInShell: false,
-      );
-      if (result.exitCode != 0) process.kill();
-    } catch (_) {
-      process.kill();
-    }
-  }
-
   @override
   void kill() {
-    if (Platform.isWindows) {
-      // Kill the owned CLI process and its application children.
-      unawaited(_killWindowsTree());
-    } else {
-      // The CLI handles SIGINT and shuts down its running application.
-      process.kill(ProcessSignal.sigint);
-    }
+    _terminating ??= terminateProcessTree(process, interruptFirst: true);
   }
 }

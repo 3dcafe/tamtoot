@@ -1,5 +1,7 @@
+import 'dart:async';
 import 'dart:io';
 import 'flutter_process_types.dart';
+import 'process_tree_io.dart';
 
 Future<FlutterToolProcess> startFlutterProcess(
   String sdkPath,
@@ -90,6 +92,7 @@ Future<String> flutterProjectPath(Uri root, String entryPoint) async {
 class _ToolProcess implements FlutterToolProcess {
   _ToolProcess(this.process);
   final Process process;
+  Future<void>? _terminating;
   @override
   Stream<List<int>> get stdout => process.stdout;
   @override
@@ -100,6 +103,8 @@ class _ToolProcess implements FlutterToolProcess {
   void write(List<int> bytes) => process.stdin.add(bytes);
   @override
   void kill() {
-    process.kill();
+    // Flutter debug-adapter / `flutter run` leave app + dart children alive
+    // if only the parent receives a default SIGTERM.
+    _terminating ??= terminateProcessTree(process, interruptFirst: true);
   }
 }

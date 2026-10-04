@@ -380,19 +380,26 @@ class FlutterRunner {
     if (state == FlutterRunState.stopping) return;
     _generation++;
     final process = _process;
+    final client = _client;
     state = FlutterRunState.stopping;
     _changed();
     try {
-      if (_client != null) {
-        await _client!.request('disconnect', {
+      if (client != null) {
+        await client.request('disconnect', {
           'terminateDebuggee': true,
-        }, const Duration(seconds: 5));
+        }, const Duration(seconds: 3));
       }
       if (process != null) {
-        await process.exitCode.timeout(const Duration(seconds: 5));
+        await process.exitCode.timeout(const Duration(seconds: 3));
       }
     } catch (_) {
+      // DAP disconnect often leaves flutter/dart children; kill the tree.
       process?.kill();
+      try {
+        await process?.exitCode.timeout(const Duration(seconds: 5));
+      } catch (_) {
+        process?.kill();
+      }
     } finally {
       _reset();
     }
