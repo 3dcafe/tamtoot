@@ -27,7 +27,7 @@ String? scopeAt(LanguageDefinition language, String source, String needle) {
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
-  test('all four packages are bundled in application assets', () async {
+  test('all language packages are bundled in application assets', () async {
     for (final id in bundledLanguageIds) {
       final base = 'assets/languages/$id';
       final language = LanguagePackageLoader().load(
@@ -42,7 +42,7 @@ void main() {
     final registry = LanguageRegistry();
     for (final id in bundledLanguageIds) {
       final language = loadLanguage(id);
-      expect(language.snippets, isNotEmpty);
+      expect(language.rules, isNotEmpty);
       registry.register(language);
     }
     for (final path in ['page.html', 'PAGE.HTM']) {
@@ -59,6 +59,10 @@ void main() {
     expect(registry.forPath('main.DART')?.id, 'dart');
     expect(registry.forPath('Program.CS')?.id, 'csharp');
     expect(registry.forPath('script.js.txt'), isNull);
+    expect(registry.forPath(r'C:\project\Index.CSHTML')?.id, 'razor');
+    expect(registry.forPath('Component.razor')?.id, 'razor');
+    expect(registry.forPath('site.CSS')?.id, 'css');
+    expect(registry.forPath('App.CSPROJ')?.id, 'xml');
   });
   test('Dart recognizes modern declarations, annotations, numbers and calls', () {
     final language = loadLanguage('dart');

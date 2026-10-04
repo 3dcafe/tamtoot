@@ -844,7 +844,7 @@ class _AgentPanelState extends State<AgentPanel> {
                     },
                     onChanged: (_) => setState(() {}),
                     decoration: InputDecoration(
-                      hintText: 'Поручите что угодно…',
+                      hintText: 'Ask anything…',
                       border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(12),
                       ),

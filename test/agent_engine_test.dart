@@ -1140,7 +1140,7 @@ void main() {
 
   test('investigation budget narrows read_files instead of denying it', () async {
     final store = RepositoryMemory();
-    for (final name in ['a', 'b', 'c']) {
+    for (final name in ['a', 'b', 'c', 'd']) {
       await store.writeText(
         'lib/$name.dart',
         List.generate(200, (i) => 'const ${name}_$i = $i;').join('\n'),
@@ -1153,7 +1153,7 @@ void main() {
       '{"action":"search_files","query":"b_0","path":"lib"}',
       '{"action":"read_file","path":"lib/b.dart","startLine":1,"lineCount":200}',
       '{"action":"read_file","path":"lib/c.dart","startLine":1,"lineCount":200}',
-      '{"action":"read_files","paths":["lib/a.dart","lib/b.dart","lib/c.dart"],'
+      '{"action":"read_files","paths":["lib/a.dart","lib/b.dart","lib/c.dart","lib/d.dart"],'
           '"startLine":1,"lineCount":200}',
       '{"action":"replace_in_file","path":"lib/c.dart",'
           '"oldText":"const c_0 = 0;","newText":"const c_0 = 1;"}',
@@ -1173,7 +1173,11 @@ void main() {
     );
     final result = await engine.run(
       'Fix c',
-      const AgentRunOptions(yolo: false, maxConsecutiveMistakes: 1),
+      const AgentRunOptions(
+        yolo: false,
+        maxConsecutiveMistakes: 1,
+        maxReadsBeforeFirstEdit: 3,
+      ),
     );
     expect(result.success, isTrue);
     expect(actions, isEmpty, reason: 'no action may be denied and repeated');
@@ -1184,9 +1188,16 @@ void main() {
     );
     expect(
       events.map((e) => e.text),
-      contains(contains('Final targeted read: max 2 files')),
+      contains(
+        contains(
+          'Final targeted read: max ${AgentTaskEngine.maxFinalReadFiles} files',
+        ),
+      ),
     );
-    expect(events.map((e) => e.text), contains(contains('Read 2 files')));
+    expect(
+      events.map((e) => e.text),
+      contains(contains('Read ${AgentTaskEngine.maxFinalReadFiles} files')),
+    );
   });
 
   test(
@@ -1306,7 +1317,11 @@ void main() {
         events.where((e) => e.type == 'denied').length,
         greaterThanOrEqualTo(2),
       );
-      expect(actions, isNot(contains(contains('should not reach'))));
+      expect(
+        actions,
+        contains(contains('should not reach')),
+        reason: 'The finish action must remain unconsumed after the loop stops',
+      );
     },
   );
 

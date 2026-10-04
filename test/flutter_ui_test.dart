@@ -6,6 +6,7 @@ import 'package:tamtoot/app/app.dart';
 import 'package:tamtoot/app/providers.dart';
 import 'package:tamtoot/features/dialogs.dart';
 import 'support.dart';
+import 'package:tamtoot/core/projects/project_detection.dart';
 import 'package:tamtoot/features/flutter_settings.dart';
 
 void main() {
@@ -80,24 +81,44 @@ void main() {
           );
           await tester.pumpAndSettle();
           expect(
-            find.byTooltip('Run Flutter'),
+            find.byTooltip('Run selected project'),
             desktop ? findsOneWidget : findsNothing,
           );
-          expect(
-            find.byTooltip('Debug Flutter'),
-            desktop ? findsOneWidget : findsNothing,
-          );
+          expect(find.byTooltip('Debug Flutter'), findsNothing);
           expect(session.commands.isVisible('flutter.run'), desktop);
           expect(session.commands.isEnabled('flutter.run'), false);
           if (desktop) {
             session.settings.set('flutterSdkPath', '/sdk');
             session.workspaceRoot = Uri.directory('/tmp/project');
+            session.explorer.children[session.workspaceRoot!] = [];
             expect(session.commands.isEnabled('flutter.run'), true);
+            final target = LaunchTarget(
+              ProjectKind.flutter,
+              session.workspaceRoot!,
+              'pubspec.yaml',
+              'Flutter project',
+            );
+            session.launchTargets = [target];
+            session.selectedLaunchTarget = target.id;
+            session.changed(persist: false);
+            // Unrelated project panels may keep loading this synthetic root.
+            await tester.pump();
+            await tester.pump(const Duration(milliseconds: 100));
+            expect(find.byTooltip('Debug Flutter'), findsOneWidget);
           }
           await tester.pumpWidget(
             MaterialApp(home: SettingsDialog(session: session)),
           );
           await tester.pumpAndSettle();
+          expect(find.byKey(const ValueKey('flutter-sdk-path')), findsNothing);
+          if (desktop) {
+            await tester.tap(find.text('SDK'));
+            await tester.pumpAndSettle();
+            await tester.tap(
+              find.byKey(const ValueKey('settings-section-flutter')),
+            );
+            await tester.pumpAndSettle();
+          }
           expect(
             find.byKey(const ValueKey('flutter-sdk-path')),
             desktop ? findsOneWidget : findsNothing,
