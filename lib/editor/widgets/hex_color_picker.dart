@@ -95,18 +95,164 @@ class _HexColorPickerState extends State<HexColorPicker> {
                 });
               },
             ),
-            control('Hue', hsv.hue, 360, (v) => update(hsv.withHue(v))),
-            control(
-              'Saturation',
-              hsv.saturation,
-              1,
-              (v) => update(hsv.withSaturation(v)),
+            const SizedBox(height: 16),
+            LayoutBuilder(
+              builder: (context, constraints) {
+                const height = 190.0;
+                final width = constraints.maxWidth;
+                void pick(Offset point) => update(
+                  hsv
+                      .withSaturation((point.dx / width).clamp(0.0, 1.0))
+                      .withValue((1 - point.dy / height).clamp(0.0, 1.0)),
+                );
+                return Semantics(
+                  label: 'Color palette: saturation and brightness',
+                  child: GestureDetector(
+                    onTapDown: (event) => pick(event.localPosition),
+                    onPanStart: (event) => pick(event.localPosition),
+                    onPanUpdate: (event) => pick(event.localPosition),
+                    child: SizedBox(
+                      height: height,
+                      width: width,
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(6),
+                        child: Stack(
+                          children: [
+                            Positioned.fill(
+                              child: DecoratedBox(
+                                decoration: BoxDecoration(
+                                  gradient: LinearGradient(
+                                    colors: [
+                                      Colors.white,
+                                      HSVColor.fromAHSV(
+                                        1,
+                                        hsv.hue,
+                                        1,
+                                        1,
+                                      ).toColor(),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ),
+                            const Positioned.fill(
+                              child: DecoratedBox(
+                                decoration: BoxDecoration(
+                                  gradient: LinearGradient(
+                                    begin: Alignment.topCenter,
+                                    end: Alignment.bottomCenter,
+                                    colors: [Colors.transparent, Colors.black],
+                                  ),
+                                ),
+                              ),
+                            ),
+                            Positioned(
+                              left: (hsv.saturation * width - 7).clamp(
+                                0.0,
+                                width - 14,
+                              ),
+                              top: ((1 - hsv.value) * height - 7).clamp(
+                                0.0,
+                                height - 14,
+                              ),
+                              child: IgnorePointer(
+                                child: Container(
+                                  width: 14,
+                                  height: 14,
+                                  decoration: BoxDecoration(
+                                    shape: BoxShape.circle,
+                                    border: Border.all(
+                                      color: Colors.white,
+                                      width: 2,
+                                    ),
+                                    boxShadow: const [
+                                      BoxShadow(
+                                        color: Colors.black54,
+                                        blurRadius: 2,
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                );
+              },
             ),
-            control(
-              'Brightness',
-              hsv.value,
-              1,
-              (v) => update(hsv.withValue(v)),
+            const SizedBox(height: 12),
+            LayoutBuilder(
+              builder: (context, constraints) {
+                final width = constraints.maxWidth;
+                void pick(Offset point) => update(
+                  hsv.withHue((point.dx / width).clamp(0.0, 1.0) * 360),
+                );
+                return Semantics(
+                  label: 'Hue spectrum',
+                  child: GestureDetector(
+                    onTapDown: (event) => pick(event.localPosition),
+                    onPanStart: (event) => pick(event.localPosition),
+                    onPanUpdate: (event) => pick(event.localPosition),
+                    child: SizedBox(
+                      height: 24,
+                      child: Stack(
+                        children: [
+                          Positioned.fill(
+                            child: DecoratedBox(
+                              decoration: BoxDecoration(
+                                borderRadius: BorderRadius.circular(4),
+                                gradient: LinearGradient(
+                                  colors: [
+                                    for (final hue in [
+                                      0.0,
+                                      60.0,
+                                      120.0,
+                                      180.0,
+                                      240.0,
+                                      300.0,
+                                      360.0,
+                                    ])
+                                      HSVColor.fromAHSV(1, hue, 1, 1).toColor(),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+                          Positioned(
+                            left: (hsv.hue / 360 * width - 3).clamp(
+                              0.0,
+                              width - 6,
+                            ),
+                            top: 0,
+                            bottom: 0,
+                            child: IgnorePointer(
+                              child: Container(
+                                width: 6,
+                                decoration: BoxDecoration(
+                                  border: Border.all(
+                                    color: Colors.white,
+                                    width: 2,
+                                  ),
+                                  borderRadius: BorderRadius.circular(3),
+                                  boxShadow: const [
+                                    BoxShadow(
+                                      color: Colors.black45,
+                                      blurRadius: 2,
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                );
+              },
             ),
             control('Opacity', hsv.alpha, 1, (v) {
               alpha = true;

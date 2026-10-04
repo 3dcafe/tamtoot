@@ -918,38 +918,75 @@ class _HttpRequestsDialogState extends State<HttpRequestsDialog> {
     return ListView(
       padding: const EdgeInsets.all(12),
       children: [
-        Row(
-          children: [
-            SizedBox(
-              width: 115,
+        LayoutBuilder(
+          builder: (context, constraints) {
+            final methodField = SizedBox(
+              width: 140,
               child: DropdownButtonFormField<String>(
                 key: ValueKey('method-$activePath-$method'),
                 initialValue: method,
+                isExpanded: true,
+                decoration: const InputDecoration(
+                  contentPadding: EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 12,
+                  ),
+                ),
                 items: [
                   for (final value in httpMethods)
-                    DropdownMenuItem(value: value, child: Text(value)),
+                    DropdownMenuItem(
+                      value: value,
+                      child: Text(
+                        value,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
                 ],
-                onChanged: (v) => setState(() {
-                  method = v!;
-                  dirty = true;
-                }),
+                onChanged: (value) {
+                  if (value == null) return;
+                  setState(() {
+                    method = value;
+                    dirty = true;
+                  });
+                },
               ),
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: TextField(
-                controller: url,
-                onChanged: (_) => _changed(),
-                decoration: const InputDecoration(labelText: 'URL'),
-              ),
-            ),
-            const SizedBox(width: 8),
-            FilledButton.icon(
+            );
+            final urlField = TextField(
+              controller: url,
+              onChanged: (_) => _changed(),
+              decoration: const InputDecoration(labelText: 'URL'),
+            );
+            final send = FilledButton.icon(
               onPressed: busy ? null : () => _run([activePath!]),
               icon: const Icon(Icons.send),
               label: const Text('Send'),
-            ),
-          ],
+            );
+            if (constraints.maxWidth < 480) {
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: [methodField, send],
+                  ),
+                  const SizedBox(height: 10),
+                  urlField,
+                ],
+              );
+            }
+            return Row(
+              children: [
+                methodField,
+                const SizedBox(width: 8),
+                Expanded(child: urlField),
+                const SizedBox(width: 8),
+                send,
+              ],
+            );
+          },
         ),
         const SizedBox(height: 10),
         TextField(
