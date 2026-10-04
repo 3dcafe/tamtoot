@@ -42,7 +42,7 @@ class _IdeShellState extends ConsumerState<IdeShell> {
         r'^version:[ \t]*([^\r\n#]+)',
         multiLine: true,
       ).firstMatch(manifest);
-      final version = match?.group(1)?.trim().replaceAll(RegExp('[\"\']'), '');
+      final version = match?.group(1)?.trim().replaceAll(RegExp('["\']'), '');
       return version == null || version.isEmpty
           ? 'Version unavailable'
           : version;

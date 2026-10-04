@@ -89,8 +89,9 @@ void registerSessionCommands(IdeSession s, PresentationActions ui) {
     for (final doc in s.documents.documents.where((doc) => doc.dirty)) {
       if (!await s.documents.save(doc)) return;
     }
-    if (s.layout.hidden.contains('output'))
+    if (s.layout.hidden.contains('output')) {
       s.layout = s.layout.toggle('output');
+    }
     s.layout = s.layout.map(
       (node) => node is TabNode && node.panels.contains('output')
           ? TabNode(node.id, node.panels, 'output')

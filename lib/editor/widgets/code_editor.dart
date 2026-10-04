@@ -286,8 +286,9 @@ class _CodeEditorState extends State<CodeEditor> implements TextInputClient {
         if (rect.left < 64 ||
             rect.right > viewportWidth ||
             rect.top < 0 ||
-            rect.bottom > _height)
+            rect.bottom > _height) {
           continue;
+        }
         _colorRects.add(rect);
         final offset = _editor.buffer.offsetAt(TextPoint(line, match.start));
         widgets.add(
@@ -310,11 +311,14 @@ class _CodeEditorState extends State<CodeEditor> implements TextInputClient {
                   if (!mounted ||
                       chosen == null ||
                       editor != _editor ||
-                      editor.readOnly)
+                      editor.readOnly) {
                     return;
+                  }
                   if (offset + hex.length > editor.text.length ||
-                      editor.text.substring(offset, offset + hex.length) != hex)
+                      editor.text.substring(offset, offset + hex.length) !=
+                          hex) {
                     return;
+                  }
                   editor.select(offset, offset + hex.length);
                   editor.replaceSelection(chosen);
                   _focus.requestFocus();

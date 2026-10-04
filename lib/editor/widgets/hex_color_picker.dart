@@ -4,8 +4,9 @@ Color? parseHexColor(String value) {
   var hex = value.trim().replaceFirst('#', '');
   if (!RegExp(
     r'^(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$',
-  ).hasMatch(hex))
+  ).hasMatch(hex)) {
     return null;
+  }
   if (hex.length <= 4) hex = hex.split('').map((c) => '$c$c').join();
   final rgb = int.parse(hex.substring(0, 6), radix: 16);
   final alpha = hex.length == 8 ? int.parse(hex.substring(6), radix: 16) : 255;

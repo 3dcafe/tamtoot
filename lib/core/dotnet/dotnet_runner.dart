@@ -39,8 +39,9 @@ class DotnetRunner {
       final code = await process.exitCode.timeout(const Duration(seconds: 30));
       final out = await stdout;
       final err = await stderr;
-      if (code != 0 || out.trim().isEmpty)
+      if (code != 0 || out.trim().isEmpty) {
         throw StateError('No usable SDK found (exit $code). $err');
+      }
       sdkResult = '.NET SDK ready: $executable\n${out.trim()}';
     } catch (e) {
       process?.kill();
@@ -58,8 +59,9 @@ class DotnetRunner {
     bool watch = false,
   }) async {
     if (active || checking || !supportsFlutterTools) return;
-    if (target.kind != ProjectKind.dotnet || target.root.scheme != 'file')
+    if (target.kind != ProjectKind.dotnet || target.root.scheme != 'file') {
       return;
+    }
     active = true;
     final generation = ++_generation;
     _notify();
@@ -142,9 +144,7 @@ class DotnetRunner {
     } catch (_) {
       process.kill();
     }
-    for (final subscription in List<StreamSubscription<String>>.from(
-      _output,
-    )) {
+    for (final subscription in List<StreamSubscription<String>>.from(_output)) {
       await subscription.cancel();
     }
     _output.clear();

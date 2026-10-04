@@ -292,12 +292,14 @@ class LanguagePackageLoader {
     }
     final templates = object('fileTemplates');
     for (final template in templates.values) {
-      if (template is! Map<String, dynamic>)
+      if (template is! Map<String, dynamic>) {
         throw const SchemaException('Invalid file template');
+      }
       requiredString(template, 'name');
       requiredString(template, 'extension');
-      if (template['body'] is! String)
+      if (template['body'] is! String) {
         throw const SchemaException('Invalid template body');
+      }
     }
     return LanguageDefinition(
       id: requiredString(m, 'id'),

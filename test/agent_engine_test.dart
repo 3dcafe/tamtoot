@@ -1314,8 +1314,7 @@ void main() {
     final store = RepositoryMemory();
     await store.writeText(
       'Pages/Index.cshtml',
-      List.generate(110, (i) => '<!-- line ${i + 1} -->').join('\n') +
-          '\n</body>\n</html>\n',
+      '${List.generate(110, (i) => '<!-- line ${i + 1} -->').join('\n')}\n</body>\n</html>\n',
     );
     final events = <AgentEvent>[];
     final bodies = <Map<String, dynamic>>[];

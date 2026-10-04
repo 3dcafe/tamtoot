@@ -47,8 +47,9 @@ Future<List<LaunchTarget>> detectProjects(
     for (final entry in entries) {
       if (entry.directory) continue;
       if (entry.name != 'pubspec.yaml' &&
-          !entry.name.toLowerCase().endsWith('.csproj'))
+          !entry.name.toLowerCase().endsWith('.csproj')) {
         continue;
+      }
       try {
         final text = await files.read(entry.uri);
         final relative = entry.uri.path.substring(root.path.length);

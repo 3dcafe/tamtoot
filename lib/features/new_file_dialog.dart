@@ -64,10 +64,11 @@ class _NewFileDialogState extends State<NewFileDialog> {
     final targets = await detectProjects(widget.session.documents.files, root);
     if (!mounted || revision != _inference || busy) return;
     final kind = targets.firstOrNull?.kind;
-    if (kind != null)
+    if (kind != null) {
       setState(
         () => _selectLanguage(kind == ProjectKind.dotnet ? 'csharp' : 'dart'),
       );
+    }
   }
 
   void _selectLanguage(String id) {
@@ -117,20 +118,24 @@ class _NewFileDialogState extends State<NewFileDialog> {
           'Use a relative project folder path without .. or protected directories',
         );
       }
-      if (filename == '.git' || filename == '.tamtoot')
+      if (filename == '.git' || filename == '.tamtoot') {
         throw ArgumentError('This name is reserved');
+      }
       final path = [...components, filename].join('/');
       final git = widget.session.git;
-      if (git is! HttpGitService)
+      if (git is! HttpGitService) {
         throw UnsupportedError(
           'This filesystem does not support project creation',
         );
+      }
       final store = git.openStore(root);
       await store.validateRegularFilePath(path);
-      if (await store.exists(path))
+      if (await store.exists(path)) {
         throw StateError('A file or folder with this name already exists');
-      if (parent.isNotEmpty && !await store.exists(parent))
+      }
+      if (parent.isNotEmpty && !await store.exists(parent)) {
         throw StateError('Choose an existing destination folder');
+      }
       if (widget.folder) {
         await store.createDirectory(path);
       } else {
@@ -143,15 +148,17 @@ class _NewFileDialogState extends State<NewFileDialog> {
       widget.session.changed();
       if (mounted) Navigator.pop(context);
     } catch (e) {
-      if (mounted)
+      if (mounted) {
         setState(() {
           error = '$e';
         });
+      }
     } finally {
-      if (mounted)
+      if (mounted) {
         setState(() {
           busy = false;
         });
+      }
     }
   }
 
@@ -189,12 +196,13 @@ class _NewFileDialogState extends State<NewFileDialog> {
               onChanged: busy
                   ? null
                   : (value) {
-                      if (value != null)
+                      if (value != null) {
                         setState(() {
                           root = value;
                           directory.clear();
                           _inferLanguage();
                         });
+                      }
                     },
             ),
             const SizedBox(height: 12),
@@ -241,9 +249,10 @@ class _NewFileDialogState extends State<NewFileDialog> {
                     ? null
                     : (value) => setState(() {
                         template = value ?? '';
-                        if (template.isNotEmpty)
+                        if (template.isNotEmpty) {
                           extension.text =
                               templates[template]['extension'] as String;
+                        }
                       }),
               ),
               const SizedBox(height: 12),

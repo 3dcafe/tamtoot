@@ -423,8 +423,9 @@ class _SettingsDialogState extends State<SettingsDialog> {
                               labelText: 'Font family',
                             ),
                             onSubmitted: (v) {
-                              if (v.trim().isNotEmpty)
+                              if (v.trim().isNotEmpty) {
                                 set('fontFamily', v.trim());
+                              }
                             },
                           ),
                           SwitchListTile(
