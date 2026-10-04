@@ -28,38 +28,43 @@ Future<void> showExplorerContextMenu(
   final git = session.git;
   final editable =
       git is HttpGitService && !session.gitBusy && relative.isNotEmpty;
+  PopupMenuItem<String> item(
+    String value,
+    String label, {
+    bool enabled = true,
+  }) => PopupMenuItem<String>(
+    value: value,
+    enabled: enabled,
+    height: supportsFlutterTools ? 30 : 38,
+    padding: const EdgeInsets.symmetric(horizontal: 12),
+    child: Text(
+      label,
+      style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w400),
+    ),
+  );
   final action = await showMenu<String>(
     context: context,
+    constraints: const BoxConstraints(minWidth: 170, maxWidth: 240),
+    menuPadding: const EdgeInsets.symmetric(vertical: 4),
     position: RelativeRect.fromRect(
       Rect.fromLTWH(position.dx, position.dy, 0, 0),
       Offset.zero & MediaQuery.sizeOf(context),
     ),
     items: [
-      if (!directory) const PopupMenuItem(value: 'open', child: Text('Open')),
-      const PopupMenuItem(value: 'newFile', child: Text('New file…')),
-      const PopupMenuItem(value: 'newFolder', child: Text('New folder…')),
-      const PopupMenuDivider(),
-      const PopupMenuItem(value: 'path', child: Text('Copy path')),
-      const PopupMenuItem(value: 'relative', child: Text('Copy relative path')),
+      if (!directory) item('open', 'Open'),
+      item('newFile', 'New file…'),
+      item('newFolder', 'New folder…'),
+      const PopupMenuDivider(height: 8),
+      item('path', 'Copy path'),
+      item('relative', 'Copy relative path'),
       if (supportsFlutterTools && uri.scheme == 'file')
-        const PopupMenuItem(
-          value: 'reveal',
-          child: Text('Show in file manager'),
-        ),
+        item('reveal', 'Show in file manager'),
       if (!directory) ...[
-        const PopupMenuDivider(),
-        PopupMenuItem(
-          value: 'rename',
-          enabled: editable,
-          child: const Text('Rename…'),
-        ),
-        PopupMenuItem(
-          value: 'delete',
-          enabled: editable,
-          child: const Text('Delete…'),
-        ),
+        const PopupMenuDivider(height: 8),
+        item('rename', 'Rename…', enabled: editable),
+        item('delete', 'Delete…', enabled: editable),
         if (session.gitPath(uri) != null && session.workspaceHasGit)
-          const PopupMenuItem(value: 'git', child: Text('Git…')),
+          item('git', 'Git…'),
       ],
     ],
   );
