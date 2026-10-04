@@ -51,5 +51,17 @@
   "icons": {
     "symbol": "code"
   },
-  "adapters": []
+  "adapters": [],
+  "fileTemplates": {
+    "class": {
+      "name": "Class",
+      "extension": ".cs",
+      "body": "public class {{name}}\n{\n}\n"
+    },
+    "interface": {
+      "name": "Interface",
+      "extension": ".cs",
+      "body": "public interface {{name}}\n{\n}\n"
+    }
+  }
 }

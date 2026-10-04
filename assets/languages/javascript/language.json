@@ -57,5 +57,12 @@
   "icons": {
     "symbol": "code"
   },
-  "adapters": []
+  "adapters": [],
+  "fileTemplates": {
+    "module": {
+      "name": "JavaScript module",
+      "extension": ".js",
+      "body": "// {{name}}\n"
+    }
+  }
 }

@@ -104,6 +104,8 @@ flutter:
     - assets/languages/dart/
     - assets/languages/csharp/
     - assets/languages/xml/
+    - assets/languages/razor/
+    - assets/languages/css/
     - assets/languages/html/
     - assets/languages/javascript/
     - assets/themes/

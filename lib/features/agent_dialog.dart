@@ -229,7 +229,7 @@ class _AgentPanelState extends State<AgentPanel> {
       builder: (ctx) => AlertDialog(
         title: const Text('Enable YOLO Mode?'),
         content: const Text(
-          'The agent may replace project files without asking for each action. A clean Git working tree is required. Use Stop to interrupt it.',
+          'The agent may replace project files without asking for each action. Use Stop to interrupt it.',
         ),
         actions: [
           TextButton(

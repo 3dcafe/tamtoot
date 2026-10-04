@@ -51,5 +51,17 @@
   "icons": {
     "symbol": "code"
   },
-  "adapters": []
+  "adapters": [],
+  "fileTemplates": {
+    "class": {
+      "name": "Dart class",
+      "extension": ".dart",
+      "body": "class {{name}} {\n}\n"
+    },
+    "widget": {
+      "name": "Flutter StatelessWidget",
+      "extension": ".dart",
+      "body": "import 'package:flutter/material.dart';\n\nclass {{name}} extends StatelessWidget {\n  const {{name}}({super.key});\n\n  @override\n  Widget build(BuildContext context) {\n    return const SizedBox.shrink();\n  }\n}\n"
+    }
+  }
 }

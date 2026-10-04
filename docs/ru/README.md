@@ -34,3 +34,7 @@ Tamtoot остаётся развивающейся основой IDE. Полн
 Авторство оригинальной работы принадлежит **Latin Nikolay**.
 
 См. также [CONTRIBUTING](../../CONTRIBUTING.md), [CODE_OF_CONDUCT](../../CODE_OF_CONDUCT.md) и [SECURITY](../../SECURITY.md).
+
+## История обновлений
+
+[TamToot 0.1.2 — патч-ноты на русском](../releases/0.1.2.ru.md) · [English release notes](../releases/0.1.2.en.md)

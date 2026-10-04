@@ -562,15 +562,18 @@ class _GitChangesDialogState extends State<GitChangesDialog> {
     final someSelected = selectedCount > 0 && !allSelected;
     final countLabel = group.length == 1 ? '1 file' : '${group.length} files';
     return Material(
+      borderRadius: BorderRadius.circular(5),
+      clipBehavior: Clip.antiAlias,
       color: expanded
           ? Color(theme.color('selection')).withValues(alpha: 0.55)
           : Colors.transparent,
       child: InkWell(
         onTap: () => onExpanded(!expanded),
         child: SizedBox(
-          height: 32,
+          height: 34,
           child: Row(
             children: [
+              const SizedBox(width: 6),
               Icon(
                 expanded ? Icons.expand_more : Icons.chevron_right,
                 size: 18,
@@ -579,19 +582,29 @@ class _GitChangesDialogState extends State<GitChangesDialog> {
               SizedBox(
                 width: 28,
                 height: 28,
-                child: Checkbox(
-                  tristate: true,
-                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  visualDensity: VisualDensity.compact,
-                  value: allSelected
-                      ? true
-                      : someSelected
-                      ? null
-                      : false,
-                  onChanged: busy
-                      ? null
-                      : (value) =>
-                            _setGroupSelected(group, value ?? !allSelected),
+                child: Transform.scale(
+                  scale: 0.78,
+                  child: Checkbox(
+                    side: BorderSide(
+                      width: 1,
+                      color: Color(widget.session.theme.color('muted')),
+                    ),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                    tristate: true,
+                    materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    visualDensity: VisualDensity.compact,
+                    value: allSelected
+                        ? true
+                        : someSelected
+                        ? null
+                        : false,
+                    onChanged: busy
+                        ? null
+                        : (value) =>
+                              _setGroupSelected(group, value ?? !allSelected),
+                  ),
                 ),
               ),
               const SizedBox(width: 2),
@@ -606,14 +619,8 @@ class _GitChangesDialogState extends State<GitChangesDialog> {
                   ),
                 ),
               ),
-              Text(
-                countLabel,
-                style: TextStyle(
-                  fontSize: 11.5,
-                  color: accent,
-                ),
-              ),
-              const SizedBox(width: 4),
+              Text(countLabel, style: TextStyle(fontSize: 11.5, color: accent)),
+              const SizedBox(width: 10),
             ],
           ),
         ),
@@ -661,24 +668,34 @@ class _GitChangesDialogState extends State<GitChangesDialog> {
                 await _load();
               },
         child: SizedBox(
-          height: 28,
+          height: 32,
           child: Row(
             children: [
-              const SizedBox(width: 18),
+              const SizedBox(width: 34),
               SizedBox(
                 width: 28,
                 height: 28,
-                child: Checkbox(
-                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  visualDensity: VisualDensity.compact,
-                  value: selected.contains(entry.path),
-                  onChanged: busy
-                      ? null
-                      : (checked) => setState(() {
-                          checked == true
-                              ? selected.add(entry.path)
-                              : selected.remove(entry.path);
-                        }),
+                child: Transform.scale(
+                  scale: 0.78,
+                  child: Checkbox(
+                    side: BorderSide(
+                      width: 1,
+                      color: Color(widget.session.theme.color('muted')),
+                    ),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                    materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    visualDensity: VisualDensity.compact,
+                    value: selected.contains(entry.path),
+                    onChanged: busy
+                        ? null
+                        : (checked) => setState(() {
+                            checked == true
+                                ? selected.add(entry.path)
+                                : selected.remove(entry.path);
+                          }),
+                  ),
                 ),
               ),
               Icon(
@@ -753,22 +770,22 @@ class _GitChangesDialogState extends State<GitChangesDialog> {
             onExpanded: (value) => setState(() => _changesExpanded = value),
             accent: modifiedColor,
           ),
+          if (_changesExpanded) const SizedBox(height: 4),
           if (_changesExpanded)
             for (final entry in changed) _fileRow(entry, unversioned: false),
         ],
         if (unversioned.isNotEmpty) ...[
-          if (changed.isNotEmpty) const SizedBox(height: 4),
+          if (changed.isNotEmpty) const SizedBox(height: 10),
           _groupHeader(
             title: 'Unversioned Files',
             group: unversioned,
             expanded: _unversionedExpanded,
-            onExpanded: (value) =>
-                setState(() => _unversionedExpanded = value),
+            onExpanded: (value) => setState(() => _unversionedExpanded = value),
             accent: untrackedColor,
           ),
+          if (_unversionedExpanded) const SizedBox(height: 4),
           if (_unversionedExpanded)
-            for (final entry in unversioned)
-              _fileRow(entry, unversioned: true),
+            for (final entry in unversioned) _fileRow(entry, unversioned: true),
         ],
       ],
     );
@@ -857,7 +874,19 @@ class _GitChangesDialogState extends State<GitChangesDialog> {
               enabled: !busy,
               minLines: 2,
               maxLines: 4,
-              decoration: const InputDecoration(labelText: 'Commit message'),
+              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w400),
+              decoration: InputDecoration(
+                hintText: 'Commit message',
+                hintStyle: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w400,
+                  color: Color(widget.session.theme.color('muted')),
+                ),
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 10,
+                ),
+              ),
             ),
             const SizedBox(height: 8),
             Row(

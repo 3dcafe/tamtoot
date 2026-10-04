@@ -14,6 +14,7 @@ import '../viewport/editor_viewport.dart';
 import '../input/keyboard_mapping.dart';
 import '../rendering/code_painter.dart';
 import '../rendering/expanded_line.dart';
+import 'hex_color_picker.dart';
 
 bool _foldableDeclaration(String line) {
   final trimmed = line.trim();
@@ -89,12 +90,14 @@ class _CodeEditorState extends State<CodeEditor> implements TextInputClient {
   StreamSubscription<void>? _subscription;
   TextInputConnection? _connection;
   bool _attachScheduled = false;
+  bool _revealScheduled = false;
   TextEditingValue _ime = TextEditingValue.empty;
   bool _receiving = false;
   double _height = 400;
   int? _dragAnchor;
   Timer? _completionTimer;
   final Set<int> _collapsedFolds = {};
+  final List<Rect> _colorRects = [];
   List<CompletionSymbol> _completions = const [];
   int _completionSelection = 0;
   double get _fontSize => widget.session.settings.fontSize;
@@ -117,6 +120,7 @@ class _CodeEditorState extends State<CodeEditor> implements TextInputClient {
     _focus.addListener(_focusChanged);
     _scroll.addListener(_repaint);
     _horizontal.addListener(_repaint);
+    _scheduleReveal();
   }
 
   void _repaint() {
@@ -129,7 +133,8 @@ class _CodeEditorState extends State<CodeEditor> implements TextInputClient {
     if (oldWidget.controller != _editor) {
       _subscription?.cancel();
       _subscription = _editor.changes.listen((_) => _onChange());
-      if (_scroll.hasClients) _scroll.jumpTo(0);
+      _collapsedFolds.clear();
+      _scheduleReveal();
       _completions = const [];
       if (_focus.hasFocus) _attach();
     }
@@ -192,8 +197,14 @@ class _CodeEditorState extends State<CodeEditor> implements TextInputClient {
 
   void _onChange() {
     _syncIme();
-    _ensureVisible();
+    final line = _editor.buffer.positionAt(_editor.selection.extent).line;
+    for (final region in _foldRegions()) {
+      if (region.startLine < line && line <= region.endLine) {
+        _collapsedFolds.remove(region.startLine);
+      }
+    }
     _repaint();
+    _scheduleReveal();
     _completionTimer?.cancel();
     _completionTimer = Timer(
       const Duration(milliseconds: 35),
@@ -239,6 +250,101 @@ class _CodeEditorState extends State<CodeEditor> implements TextInputClient {
       _editor.select(inside, inside);
     }
     setState(() => _completions = const []);
+  }
+
+  // Search selection can arrive before a newly opened editor is laid out.
+  List<Widget> _colorSwatches(List<int> lines, double viewportWidth) {
+    _colorRects.clear();
+    final widgets = <Widget>[];
+    final scrollY = _scroll.hasClients ? _scroll.offset : 0.0;
+    final scrollX = _horizontal.hasClients ? _horizontal.offset : 0.0;
+    final hexPattern = RegExp(
+      r'(?<![\w#])#(?:[0-9a-fA-F]{8}|[0-9a-fA-F]{6}|[0-9a-fA-F]{4}|[0-9a-fA-F]{3})(?![\w-])',
+    );
+    final start = (scrollY / _lineHeight).floor().clamp(0, lines.length);
+    final end = ((scrollY + _height) / _lineHeight).ceil().clamp(
+      0,
+      lines.length,
+    );
+    for (var display = start; display < end; display++) {
+      final line = lines[display];
+      final raw = _editor.buffer.getLine(line);
+      final matches = hexPattern.allMatches(raw).toList();
+      if (matches.isEmpty) continue;
+      final expanded = ExpandedLine(raw, _editor.tabSize);
+      final painter = TextPainter(
+        text: TextSpan(text: expanded.text, style: _style),
+        textDirection: TextDirection.ltr,
+      )..layout();
+      var x = 64 + painter.width + 8 - scrollX;
+      painter.dispose();
+      final y = display * _lineHeight - scrollY + (_lineHeight - 16) / 2;
+      for (final match in matches) {
+        final hex = match.group(0)!;
+        final rect = Rect.fromLTWH(x, y, 16, 16);
+        x += 22;
+        if (rect.left < 64 ||
+            rect.right > viewportWidth ||
+            rect.top < 0 ||
+            rect.bottom > _height)
+          continue;
+        _colorRects.add(rect);
+        final offset = _editor.buffer.offsetAt(TextPoint(line, match.start));
+        widgets.add(
+          Positioned(
+            left: rect.left,
+            top: rect.top,
+            width: rect.width,
+            height: rect.height,
+            child: Tooltip(
+              message:
+                  '$hex · ${_editor.readOnly ? 'Color preview' : 'Change color'}',
+              child: GestureDetector(
+                onTap: () async {
+                  if (_editor.readOnly) return;
+                  final editor = _editor;
+                  final chosen = await showDialog<String>(
+                    context: context,
+                    builder: (_) => HexColorPicker(hex: hex),
+                  );
+                  if (!mounted ||
+                      chosen == null ||
+                      editor != _editor ||
+                      editor.readOnly)
+                    return;
+                  if (offset + hex.length > editor.text.length ||
+                      editor.text.substring(offset, offset + hex.length) != hex)
+                    return;
+                  editor.select(offset, offset + hex.length);
+                  editor.replaceSelection(chosen);
+                  _focus.requestFocus();
+                },
+                child: Container(
+                  decoration: BoxDecoration(
+                    color: parseHexColor(hex),
+                    borderRadius: BorderRadius.circular(3),
+                    border: Border.all(
+                      color: Color(widget.session.theme.color('muted')),
+                      width: 1,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+      }
+    }
+    return widgets;
+  }
+
+  void _scheduleReveal() {
+    if (_revealScheduled) return;
+    _revealScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _revealScheduled = false;
+      if (mounted) _ensureVisible();
+    });
   }
 
   void _ensureVisible() {
@@ -578,6 +684,12 @@ class _CodeEditorState extends State<CodeEditor> implements TextInputClient {
                 onPointerDown: (e) {
                   if (e.kind == PointerDeviceKind.mouse &&
                       e.buttons == kPrimaryMouseButton) {
+                    if (_colorRects.any(
+                      (rect) => rect.contains(e.localPosition),
+                    )) {
+                      _dragAnchor = null;
+                      return;
+                    }
                     _focus.requestFocus();
                     if (e.localPosition.dx < 60) {
                       _dragAnchor = null;
@@ -667,6 +779,7 @@ class _CodeEditorState extends State<CodeEditor> implements TextInputClient {
                           ),
                         ),
                       ),
+                      ..._colorSwatches(visibleLines, constraints.maxWidth),
                       if (_completions.isNotEmpty)
                         _completionPopup(constraints.maxWidth),
                     ],

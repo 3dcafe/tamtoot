@@ -1,0 +1,60 @@
+{
+  "schemaVersion": 1,
+  "packageVersion": "0.1.0",
+  "id": "razor",
+  "name": "Razor",
+  "extensions": [
+    ".cshtml",
+    ".razor"
+  ],
+  "comments": {
+    "block": {
+      "open": "@*",
+      "close": "*@"
+    }
+  },
+  "brackets": [
+    {
+      "open": "{",
+      "close": "}"
+    },
+    {
+      "open": "(",
+      "close": ")"
+    },
+    {
+      "open": "[",
+      "close": "]"
+    }
+  ],
+  "autoClosingPairs": [
+    {
+      "open": "{",
+      "close": "}"
+    },
+    {
+      "open": "(",
+      "close": ")"
+    },
+    {
+      "open": "\"",
+      "close": "\""
+    }
+  ],
+  "icons": {
+    "symbol": "code"
+  },
+  "adapters": [],
+  "fileTemplates": {
+    "page": {
+      "name": "Razor page",
+      "extension": ".cshtml",
+      "body": "@page\n\n<h1>{{name}}</h1>\n"
+    },
+    "component": {
+      "name": "Razor component",
+      "extension": ".razor",
+      "body": "<h1>{{name}}</h1>\n\n@code {\n}\n"
+    }
+  }
+}

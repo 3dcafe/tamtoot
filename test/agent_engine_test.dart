@@ -383,38 +383,16 @@ void main() {
     );
   });
 
-  test('YOLO requires clean Git and then writes without approval', () async {
-    final dirty = AgentTaskEngine(
-      profile: agentProfile(),
-      store: RepositoryMemory(),
-      git: AgentGit(dirty: true),
-      root: root,
-      apiKey: '',
-      onEvent: (_) {},
-      approve: (_, _) async => false,
-      hooks: NoHooks(),
-      commands: FakeCommands(),
-    );
-    await expectLater(
-      dirty.run('Task', const AgentRunOptions(yolo: true)),
-      throwsA(
-        isA<ModelApiException>().having(
-          (e) => e.message,
-          'message',
-          contains('clean Git'),
-        ),
-      ),
-    );
-
+  test('YOLO writes with uncommitted Git changes without approval', () async {
     final store = RepositoryMemory();
     final actions = [
       '{"action":"write_file","path":"new.txt","content":"created"}',
       '{"action":"finish","summary":"done"}',
     ];
-    final clean = AgentTaskEngine(
+    final engine = AgentTaskEngine(
       profile: agentProfile(),
       store: store,
-      git: AgentGit(),
+      git: AgentGit(dirty: true),
       root: root,
       apiKey: '',
       onEvent: (_) {},
@@ -423,7 +401,7 @@ void main() {
       hooks: NoHooks(),
       commands: FakeCommands(),
     );
-    await clean.run('Create', const AgentRunOptions(yolo: true));
+    await engine.run('Create', const AgentRunOptions(yolo: true));
     expect(await store.readText('new.txt'), 'created');
   });
 

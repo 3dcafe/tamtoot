@@ -1,0 +1,372 @@
+{
+  "schemaVersion": 1,
+  "packageVersion": "0.1.0",
+  "rules": [
+    {
+      "begin": "@\\*",
+      "end": "\\*@",
+      "scope": "comment"
+    },
+    {
+      "pattern": "@@",
+      "scope": "constant"
+    },
+    {
+      "pattern": "@(?:page|model|using|inject|namespace|inherits|implements|attribute|layout|rendermode|addTagHelper|removeTagHelper|tagHelperPrefix|preservewhitespace)\\b",
+      "scope": "directive"
+    },
+    {
+      "begin": "@(?:code|functions)\\s*\\{|@\\{",
+      "end": "\\}",
+      "scope": "foreground",
+      "contentRules": [
+        {
+          "pattern": "//.*$",
+          "scope": "comment"
+        },
+        {
+          "begin": "/\\*",
+          "end": "\\*/",
+          "scope": "comment"
+        },
+        {
+          "begin": "\\$*(\"{3,})",
+          "endCapture": 1,
+          "scope": "string"
+        },
+        {
+          "begin": "\\$?@\"|@\\$\"",
+          "end": "\"",
+          "scope": "string",
+          "escape": "\"\""
+        },
+        {
+          "pattern": "\\$\"(?:\\\\.|[^\"\\\\])*\"",
+          "scope": "string"
+        },
+        {
+          "pattern": "\"(?:\\\\.|[^\"\\\\])*\"|\\x27(?:\\\\.|[^\\x27\\\\])*\\x27",
+          "scope": "string"
+        },
+        {
+          "pattern": "^\\s*#\\s*(?:if|elif|else|endif|define|undef|region|endregion|error|warning|line|pragma|nullable)\\b.*",
+          "scope": "directive"
+        },
+        {
+          "pattern": "@[A-Za-z_]\\w*",
+          "scope": "foreground"
+        },
+        {
+          "pattern": "\\[(?:assembly\\s*:\\s*|module\\s*:\\s*)?[A-Za-z_]\\w*(?:\\.\\w+)*(?=\\s*[\\](,])",
+          "scope": "annotation"
+        },
+        {
+          "pattern": "\\b(?:abstract|add|alias|and|ascending|by|descending|equals|field|file|from|get|global|group|init|into|join|let|managed|nameof|nint|not|notnull|nuint|on|or|orderby|partial|remove|required|scoped|select|set|unmanaged|value|when|where|with|yield|as|async|await|base|bool|break|byte|case|catch|char|checked|class|const|continue|decimal|default|delegate|do|double|else|enum|event|explicit|extern|false|finally|fixed|float|for|foreach|goto|if|implicit|in|int|interface|internal|is|lock|long|namespace|new|null|object|operator|out|override|params|private|protected|public|readonly|record|ref|return|sbyte|sealed|short|sizeof|stackalloc|static|string|struct|switch|this|throw|true|try|typeof|uint|ulong|unchecked|unsafe|ushort|using|var|virtual|void|volatile|while)\\b",
+          "scope": "keyword"
+        },
+        {
+          "pattern": "\\b(?:0[xX][0-9a-fA-F_]+|0[bB][01_]+|\\d[\\d_]*(?:\\.\\d[\\d_]*)?(?:[eE][+-]?\\d[\\d_]*)?)(?:[uU][lL]?|[lL][uU]?|[fFdDmM])?\\b|(?<!\\w)\\.\\d+(?:[eE][+-]?\\d+)?[fFdDmM]?",
+          "scope": "number"
+        },
+        {
+          "pattern": "\\b[A-Za-z_$][\\w$]*(?=\\s*\\()",
+          "scope": "function"
+        },
+        {
+          "pattern": "\\b[A-Z][A-Za-z0-9_]*\\b",
+          "scope": "type"
+        },
+        {
+          "pattern": "\\?\\?=?|\\?\\.|=>|===?|!==?|\\*\\*=?|&&=?|\\|\\|=?|\\+\\+|--|<<=?|>>>=?|>>=?|[+*/%~^!<>=&|?:-]=?",
+          "scope": "operator"
+        },
+        {
+          "pattern": "[A-Za-z_$][\\w$]*",
+          "scope": "foreground"
+        }
+      ]
+    },
+    {
+      "begin": "@\\(",
+      "end": "\\)",
+      "scope": "foreground",
+      "contentRules": [
+        {
+          "pattern": "//.*$",
+          "scope": "comment"
+        },
+        {
+          "begin": "/\\*",
+          "end": "\\*/",
+          "scope": "comment"
+        },
+        {
+          "begin": "\\$*(\"{3,})",
+          "endCapture": 1,
+          "scope": "string"
+        },
+        {
+          "begin": "\\$?@\"|@\\$\"",
+          "end": "\"",
+          "scope": "string",
+          "escape": "\"\""
+        },
+        {
+          "pattern": "\\$\"(?:\\\\.|[^\"\\\\])*\"",
+          "scope": "string"
+        },
+        {
+          "pattern": "\"(?:\\\\.|[^\"\\\\])*\"|\\x27(?:\\\\.|[^\\x27\\\\])*\\x27",
+          "scope": "string"
+        },
+        {
+          "pattern": "^\\s*#\\s*(?:if|elif|else|endif|define|undef|region|endregion|error|warning|line|pragma|nullable)\\b.*",
+          "scope": "directive"
+        },
+        {
+          "pattern": "@[A-Za-z_]\\w*",
+          "scope": "foreground"
+        },
+        {
+          "pattern": "\\[(?:assembly\\s*:\\s*|module\\s*:\\s*)?[A-Za-z_]\\w*(?:\\.\\w+)*(?=\\s*[\\](,])",
+          "scope": "annotation"
+        },
+        {
+          "pattern": "\\b(?:abstract|add|alias|and|ascending|by|descending|equals|field|file|from|get|global|group|init|into|join|let|managed|nameof|nint|not|notnull|nuint|on|or|orderby|partial|remove|required|scoped|select|set|unmanaged|value|when|where|with|yield|as|async|await|base|bool|break|byte|case|catch|char|checked|class|const|continue|decimal|default|delegate|do|double|else|enum|event|explicit|extern|false|finally|fixed|float|for|foreach|goto|if|implicit|in|int|interface|internal|is|lock|long|namespace|new|null|object|operator|out|override|params|private|protected|public|readonly|record|ref|return|sbyte|sealed|short|sizeof|stackalloc|static|string|struct|switch|this|throw|true|try|typeof|uint|ulong|unchecked|unsafe|ushort|using|var|virtual|void|volatile|while)\\b",
+          "scope": "keyword"
+        },
+        {
+          "pattern": "\\b(?:0[xX][0-9a-fA-F_]+|0[bB][01_]+|\\d[\\d_]*(?:\\.\\d[\\d_]*)?(?:[eE][+-]?\\d[\\d_]*)?)(?:[uU][lL]?|[lL][uU]?|[fFdDmM])?\\b|(?<!\\w)\\.\\d+(?:[eE][+-]?\\d+)?[fFdDmM]?",
+          "scope": "number"
+        },
+        {
+          "pattern": "\\b[A-Za-z_$][\\w$]*(?=\\s*\\()",
+          "scope": "function"
+        },
+        {
+          "pattern": "\\b[A-Z][A-Za-z0-9_]*\\b",
+          "scope": "type"
+        },
+        {
+          "pattern": "\\?\\?=?|\\?\\.|=>|===?|!==?|\\*\\*=?|&&=?|\\|\\|=?|\\+\\+|--|<<=?|>>>=?|>>=?|[+*/%~^!<>=&|?:-]=?",
+          "scope": "operator"
+        },
+        {
+          "pattern": "[A-Za-z_$][\\w$]*",
+          "scope": "foreground"
+        }
+      ]
+    },
+    {
+      "pattern": "@(?:if|else|for|foreach|while|switch|case|try|catch|finally|lock|section|await)\\b",
+      "scope": "keyword"
+    },
+    {
+      "pattern": "@[A-Za-z_]\\w*(?:\\.[A-Za-z_]\\w*)*",
+      "scope": "annotation"
+    },
+    {
+      "begin": "<!--",
+      "end": "-->",
+      "scope": "comment"
+    },
+    {
+      "begin": "<!\\[CDATA\\[",
+      "end": "\\]\\]>",
+      "scope": "string"
+    },
+    {
+      "begin": "<![Dd][Oo][Cc][Tt][Yy][Pp][Ee]\\b",
+      "end": ">",
+      "scope": "directive"
+    },
+    {
+      "begin": "</?[A-Za-z][A-Za-z0-9:-]*",
+      "end": "/?>",
+      "scope": "tag",
+      "contentRules": [
+        {
+          "begin": "@\\*",
+          "end": "\\*@",
+          "scope": "comment"
+        },
+        {
+          "pattern": "@(?:page|model|using|inject|namespace|inherits|implements|attribute|layout|rendermode|addTagHelper|removeTagHelper|tagHelperPrefix|preservewhitespace)\\b",
+          "scope": "directive"
+        },
+        {
+          "begin": "@(?:code|functions)\\s*\\{|@\\{",
+          "end": "\\}",
+          "scope": "foreground",
+          "contentRules": [
+            {
+              "pattern": "//.*$",
+              "scope": "comment"
+            },
+            {
+              "begin": "/\\*",
+              "end": "\\*/",
+              "scope": "comment"
+            },
+            {
+              "begin": "\\$*(\"{3,})",
+              "endCapture": 1,
+              "scope": "string"
+            },
+            {
+              "begin": "\\$?@\"|@\\$\"",
+              "end": "\"",
+              "scope": "string",
+              "escape": "\"\""
+            },
+            {
+              "pattern": "\\$\"(?:\\\\.|[^\"\\\\])*\"",
+              "scope": "string"
+            },
+            {
+              "pattern": "\"(?:\\\\.|[^\"\\\\])*\"|\\x27(?:\\\\.|[^\\x27\\\\])*\\x27",
+              "scope": "string"
+            },
+            {
+              "pattern": "^\\s*#\\s*(?:if|elif|else|endif|define|undef|region|endregion|error|warning|line|pragma|nullable)\\b.*",
+              "scope": "directive"
+            },
+            {
+              "pattern": "@[A-Za-z_]\\w*",
+              "scope": "foreground"
+            },
+            {
+              "pattern": "\\[(?:assembly\\s*:\\s*|module\\s*:\\s*)?[A-Za-z_]\\w*(?:\\.\\w+)*(?=\\s*[\\](,])",
+              "scope": "annotation"
+            },
+            {
+              "pattern": "\\b(?:abstract|add|alias|and|ascending|by|descending|equals|field|file|from|get|global|group|init|into|join|let|managed|nameof|nint|not|notnull|nuint|on|or|orderby|partial|remove|required|scoped|select|set|unmanaged|value|when|where|with|yield|as|async|await|base|bool|break|byte|case|catch|char|checked|class|const|continue|decimal|default|delegate|do|double|else|enum|event|explicit|extern|false|finally|fixed|float|for|foreach|goto|if|implicit|in|int|interface|internal|is|lock|long|namespace|new|null|object|operator|out|override|params|private|protected|public|readonly|record|ref|return|sbyte|sealed|short|sizeof|stackalloc|static|string|struct|switch|this|throw|true|try|typeof|uint|ulong|unchecked|unsafe|ushort|using|var|virtual|void|volatile|while)\\b",
+              "scope": "keyword"
+            },
+            {
+              "pattern": "\\b(?:0[xX][0-9a-fA-F_]+|0[bB][01_]+|\\d[\\d_]*(?:\\.\\d[\\d_]*)?(?:[eE][+-]?\\d[\\d_]*)?)(?:[uU][lL]?|[lL][uU]?|[fFdDmM])?\\b|(?<!\\w)\\.\\d+(?:[eE][+-]?\\d+)?[fFdDmM]?",
+              "scope": "number"
+            },
+            {
+              "pattern": "\\b[A-Za-z_$][\\w$]*(?=\\s*\\()",
+              "scope": "function"
+            },
+            {
+              "pattern": "\\b[A-Z][A-Za-z0-9_]*\\b",
+              "scope": "type"
+            },
+            {
+              "pattern": "\\?\\?=?|\\?\\.|=>|===?|!==?|\\*\\*=?|&&=?|\\|\\|=?|\\+\\+|--|<<=?|>>>=?|>>=?|[+*/%~^!<>=&|?:-]=?",
+              "scope": "operator"
+            },
+            {
+              "pattern": "[A-Za-z_$][\\w$]*",
+              "scope": "foreground"
+            }
+          ]
+        },
+        {
+          "begin": "@\\(",
+          "end": "\\)",
+          "scope": "foreground",
+          "contentRules": [
+            {
+              "pattern": "//.*$",
+              "scope": "comment"
+            },
+            {
+              "begin": "/\\*",
+              "end": "\\*/",
+              "scope": "comment"
+            },
+            {
+              "begin": "\\$*(\"{3,})",
+              "endCapture": 1,
+              "scope": "string"
+            },
+            {
+              "begin": "\\$?@\"|@\\$\"",
+              "end": "\"",
+              "scope": "string",
+              "escape": "\"\""
+            },
+            {
+              "pattern": "\\$\"(?:\\\\.|[^\"\\\\])*\"",
+              "scope": "string"
+            },
+            {
+              "pattern": "\"(?:\\\\.|[^\"\\\\])*\"|\\x27(?:\\\\.|[^\\x27\\\\])*\\x27",
+              "scope": "string"
+            },
+            {
+              "pattern": "^\\s*#\\s*(?:if|elif|else|endif|define|undef|region|endregion|error|warning|line|pragma|nullable)\\b.*",
+              "scope": "directive"
+            },
+            {
+              "pattern": "@[A-Za-z_]\\w*",
+              "scope": "foreground"
+            },
+            {
+              "pattern": "\\[(?:assembly\\s*:\\s*|module\\s*:\\s*)?[A-Za-z_]\\w*(?:\\.\\w+)*(?=\\s*[\\](,])",
+              "scope": "annotation"
+            },
+            {
+              "pattern": "\\b(?:abstract|add|alias|and|ascending|by|descending|equals|field|file|from|get|global|group|init|into|join|let|managed|nameof|nint|not|notnull|nuint|on|or|orderby|partial|remove|required|scoped|select|set|unmanaged|value|when|where|with|yield|as|async|await|base|bool|break|byte|case|catch|char|checked|class|const|continue|decimal|default|delegate|do|double|else|enum|event|explicit|extern|false|finally|fixed|float|for|foreach|goto|if|implicit|in|int|interface|internal|is|lock|long|namespace|new|null|object|operator|out|override|params|private|protected|public|readonly|record|ref|return|sbyte|sealed|short|sizeof|stackalloc|static|string|struct|switch|this|throw|true|try|typeof|uint|ulong|unchecked|unsafe|ushort|using|var|virtual|void|volatile|while)\\b",
+              "scope": "keyword"
+            },
+            {
+              "pattern": "\\b(?:0[xX][0-9a-fA-F_]+|0[bB][01_]+|\\d[\\d_]*(?:\\.\\d[\\d_]*)?(?:[eE][+-]?\\d[\\d_]*)?)(?:[uU][lL]?|[lL][uU]?|[fFdDmM])?\\b|(?<!\\w)\\.\\d+(?:[eE][+-]?\\d+)?[fFdDmM]?",
+              "scope": "number"
+            },
+            {
+              "pattern": "\\b[A-Za-z_$][\\w$]*(?=\\s*\\()",
+              "scope": "function"
+            },
+            {
+              "pattern": "\\b[A-Z][A-Za-z0-9_]*\\b",
+              "scope": "type"
+            },
+            {
+              "pattern": "\\?\\?=?|\\?\\.|=>|===?|!==?|\\*\\*=?|&&=?|\\|\\|=?|\\+\\+|--|<<=?|>>>=?|>>=?|[+*/%~^!<>=&|?:-]=?",
+              "scope": "operator"
+            },
+            {
+              "pattern": "[A-Za-z_$][\\w$]*",
+              "scope": "foreground"
+            }
+          ]
+        },
+        {
+          "pattern": "@(?:if|else|for|foreach|while|switch|case|try|catch|finally|lock|section|await)\\b",
+          "scope": "keyword"
+        },
+        {
+          "pattern": "@[A-Za-z_]\\w*(?:\\.[A-Za-z_]\\w*)*",
+          "scope": "annotation"
+        },
+        {
+          "begin": "\"",
+          "end": "\"",
+          "scope": "string"
+        },
+        {
+          "begin": "'",
+          "end": "'",
+          "scope": "string"
+        },
+        {
+          "pattern": "[A-Za-z_:][A-Za-z0-9_.:-]*",
+          "scope": "attribute"
+        },
+        {
+          "pattern": "=",
+          "scope": "operator"
+        }
+      ]
+    },
+    {
+      "pattern": "&(?:#[0-9]+|#[xX][0-9a-fA-F]+|[A-Za-z][A-Za-z0-9]+);",
+      "scope": "constant"
+    }
+  ]
+}

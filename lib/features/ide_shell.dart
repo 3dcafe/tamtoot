@@ -21,6 +21,7 @@ import 'media_document_view.dart';
 import 'flutter_debug_panel.dart';
 import '../core/flutter/flutter_runner.dart';
 import 'project_launch_bar.dart';
+import 'new_file_dialog.dart';
 
 class IdeShell extends ConsumerStatefulWidget {
   const IdeShell({super.key});
@@ -816,10 +817,42 @@ class _IdeShellState extends ConsumerState<IdeShell> {
                 ),
               ),
               if (_sidebar == 0)
-                action(
-                  Icons.create_new_folder_outlined,
-                  'Add folder to workspace',
-                  'workspace.addFolder',
+                PopupMenuButton<String>(
+                  tooltip: 'New file or folder',
+                  icon: const Icon(Icons.add, size: 20),
+                  itemBuilder: (context) => [
+                    PopupMenuItem(
+                      value: 'file',
+                      enabled: session.workspaceRoot != null,
+                      child: const Text('New file…'),
+                    ),
+                    PopupMenuItem(
+                      value: 'folder',
+                      enabled: session.workspaceRoot != null,
+                      child: const Text('New folder…'),
+                    ),
+                    if (session.commands.isVisible('workspace.addFolder'))
+                      PopupMenuItem(
+                        value: 'workspace',
+                        enabled: session.commands.isEnabled(
+                          'workspace.addFolder',
+                        ),
+                        child: const Text('Add folder to workspace…'),
+                      ),
+                  ],
+                  onSelected: (value) async {
+                    if (value == 'workspace') {
+                      await session.run('workspace.addFolder');
+                    } else if (session.workspaceRoot != null) {
+                      await showDialog<void>(
+                        context: context,
+                        builder: (_) => NewFileDialog(
+                          session: session,
+                          folder: value == 'folder',
+                        ),
+                      );
+                    }
+                  },
                 ),
               if (_sidebar == 0)
                 action(

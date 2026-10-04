@@ -234,8 +234,7 @@ capped (~8k characters) with automatic compaction.
 
 YOLO Mode automatically approves agent writes, commands and MCP tool calls. The
 IDE displays a warning the first time it is enabled in the current application
-run. Starting YOLO requires a clean Git working tree so the resulting changes
-remain reviewable and reversible.
+run. YOLO can start with uncommitted changes in the working tree.
 
 YOLO still enforces project path checks, command restrictions, response limits,
 the total timeout, the iteration and mistake limits, and the successful-check

@@ -1,0 +1,136 @@
+name: Publish Google Play production
+
+on:
+  workflow_dispatch:
+    inputs:
+      version_code:
+        description: 'Version code greater than all previous Play uploads; empty uses pubspec +number'
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: google-play-production
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Build and publish production AAB
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate publishing secrets
+        shell: bash
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          PLAY_JSON: ${{ secrets.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON }}
+        run: |
+          set -euo pipefail
+          for name in KEYSTORE_BASE64 STORE_PASSWORD KEY_ALIAS KEY_PASSWORD PLAY_JSON; do
+            if [ -z "${!name}" ]; then
+              echo "::error::Missing publishing secret: $name"
+              exit 1
+            fi
+          done
+          python3 - <<'PY'
+          import json, os
+          key = json.loads(os.environ['PLAY_JSON'])
+          if key.get('type') != 'service_account' or not key.get('client_email') or not key.get('private_key'):
+              raise SystemExit('GOOGLE_PLAY_SERVICE_ACCOUNT_JSON must contain a service account JSON key')
+          PY
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Restore release signing key
+        shell: bash
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          umask 077
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > android/app/upload-keystore.jks
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          def escape(value):
+              return value.replace('\\', '\\\\').replace('\n', '\\n').replace('\r', '\\r').replace('\t', '\\t').replace(' ', '\\ ').replace('=', '\\=').replace(':', '\\:').replace('#', '\\#').replace('!', '\\!')
+          values = {
+              'storeFile': 'app/upload-keystore.jks',
+              'storePassword': os.environ['STORE_PASSWORD'],
+              'keyAlias': os.environ['KEY_ALIAS'],
+              'keyPassword': os.environ['KEY_PASSWORD'],
+          }
+          Path('android/key.properties').write_text(''.join(f'{key}={escape(value)}\n' for key, value in values.items()))
+          PY
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Build signed release AAB
+        shell: bash
+        env:
+          VERSION_CODE: ${{ inputs.version_code }}
+        run: |
+          set -euo pipefail
+          args=()
+          if [ -n "$VERSION_CODE" ]; then
+            if ! [[ "$VERSION_CODE" =~ ^[1-9][0-9]*$ ]] || [ "${#VERSION_CODE}" -gt 10 ] || [ "$VERSION_CODE" -gt 2100000000 ]; then
+              echo '::error::Version code must be an integer from 1 to 2100000000'
+              exit 1
+            fi
+            args+=(--build-number "$VERSION_CODE")
+          fi
+          flutter build appbundle --release "${args[@]}"
+          bundle=build/app/outputs/bundle/release/app-release.aab
+          test -f "$bundle"
+          jarsigner -verify "$bundle"
+          keytool -printcert -jarfile "$bundle" > "$RUNNER_TEMP/aab-certificate.txt"
+          if grep -qi 'CN=Android Debug' "$RUNNER_TEMP/aab-certificate.txt"; then
+            echo '::error::AAB was signed with the Android debug key'
+            exit 1
+          fi
+
+      - name: Save signed AAB artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: tamtoot-google-play-aab
+          path: build/app/outputs/bundle/release/app-release.aab
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Publish to Google Play production
+        uses: r0adkll/upload-google-play@v1
+        with:
+          serviceAccountJsonPlainText: ${{ secrets.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON }}
+          packageName: dev.tamtoot.tamtoot
+          releaseFiles: build/app/outputs/bundle/release/app-release.aab
+          track: production
+          status: completed
+          changesNotSentForReview: false
+
+      - name: Remove signing material
+        if: always()
+        shell: bash
+        run: rm -f android/key.properties android/app/upload-keystore.jks

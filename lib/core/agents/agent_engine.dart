@@ -211,18 +211,6 @@ Reuse retained excerpts — do not re-read unchanged files.
     if (options.maxConsecutiveMistakes < 1 || options.maxIterations < 1) {
       throw const ModelApiException('Agent limits must be positive.');
     }
-    if (options.yolo) {
-      final roots = workspaceRoots.isEmpty ? [root] : workspaceRoots;
-      for (final workspace in roots) {
-        if (!await git.isRepository(workspace)) continue;
-        final changes = await git.statusEntries(workspace);
-      if (changes.isNotEmpty) {
-          throw ModelApiException(
-            'YOLO Mode requires a clean Git working tree. Commit or discard changes in $workspace first.',
-        );
-        }
-      }
-    }
     final startHook = await _hook('TaskStart', {
       'task': task,
       'yolo': options.yolo,

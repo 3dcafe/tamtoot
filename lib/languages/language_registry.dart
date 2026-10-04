@@ -1,6 +1,14 @@
 import '../core/persistence/schema.dart';
 
-const bundledLanguageIds = ['dart', 'csharp', 'html', 'javascript', 'xml'];
+const bundledLanguageIds = [
+  'dart',
+  'csharp',
+  'html',
+  'javascript',
+  'xml',
+  'razor',
+  'css',
+];
 
 class SyntaxToken {
   const SyntaxToken(this.start, this.end, this.scope);
@@ -51,6 +59,7 @@ class LanguageDefinition {
     required this.extensions,
     required this.rules,
     this.filenames = const [],
+    this.fileTemplates = const {},
     this.comments = const {},
     this.brackets = const [],
     this.autoClosingPairs = const [],
@@ -63,6 +72,7 @@ class LanguageDefinition {
   final List<String> extensions, filenames, adapters;
   final List<SyntaxRule> rules;
   final Map<String, dynamic> comments, snippets, indentation, icons;
+  final Map<String, dynamic> fileTemplates;
   final List<dynamic> brackets, autoClosingPairs;
   List<SyntaxToken> tokenize(String line) => tokenizeLine(line).tokens;
 
@@ -280,6 +290,15 @@ class LanguagePackageLoader {
         snippetData['snippets'] is! Map<String, dynamic>) {
       throw const SchemaException('Invalid snippets');
     }
+    final templates = object('fileTemplates');
+    for (final template in templates.values) {
+      if (template is! Map<String, dynamic>)
+        throw const SchemaException('Invalid file template');
+      requiredString(template, 'name');
+      requiredString(template, 'extension');
+      if (template['body'] is! String)
+        throw const SchemaException('Invalid template body');
+    }
     return LanguageDefinition(
       id: requiredString(m, 'id'),
       name: requiredString(m, 'name'),
@@ -287,6 +306,7 @@ class LanguagePackageLoader {
       extensions: stringList(m['extensions'], 'extensions'),
       filenames: stringList(m['filenames'] ?? [], 'filenames'),
       rules: rules,
+      fileTemplates: templates,
       comments: object('comments'),
       brackets: pairs('brackets'),
       autoClosingPairs: pairs('autoClosingPairs'),
@@ -300,6 +320,7 @@ class LanguagePackageLoader {
 
 class LanguageRegistry {
   final Map<String, LanguageDefinition> _languages = {};
+  Iterable<LanguageDefinition> get all => _languages.values;
   void register(LanguageDefinition language) =>
       _languages[language.id] = language;
   LanguageDefinition? forPath(String path) {

@@ -49,5 +49,12 @@
   "icons": {
     "symbol": "code"
   },
-  "adapters": []
+  "adapters": [],
+  "fileTemplates": {
+    "document": {
+      "name": "XML document",
+      "extension": ".xml",
+      "body": "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n<root>\n</root>\n"
+    }
+  }
 }

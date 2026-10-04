@@ -82,7 +82,7 @@ The expanded test suite passes **57 tests**, including folder collapse/reopen, s
 - Added project hooks with cancel/context injection, 10-second timeout and lifecycle logging.
 - Added Streamable HTTP/SSE and STDIO MCP configuration, discovery and tool calls, plus Settings UI.
 - Added persistent Kanban columns, dependency validation and isolated desktop Git worktree creation.
-- Targeted tests cover request shapes, response parsing, streaming, credential redaction, cancellation, Ollama discovery, approvals, YOLO clean-tree enforcement, command safety, premature-completion protection, hooks, HTTP/SSE/STDIO MCP, Kanban persistence and real temporary Git worktrees.
+- Targeted tests cover request shapes, response parsing, streaming, credential redaction, cancellation, Ollama discovery, approvals, YOLO execution with uncommitted changes, command safety, premature-completion protection, hooks, HTTP/SSE/STDIO MCP, Kanban persistence and real temporary Git worktrees.
 - `flutter analyze`: no issues. Full suite: **114 tests passed**. Debug Android APK, macOS app and web builds compile successfully.
 
 ## HTTP Requests — 2026-09-29

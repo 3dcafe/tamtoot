@@ -8,9 +8,14 @@ Tamtoot is a **free code and plain-text editor** and an extensible Flutter IDE f
 
 [Privacy Policy / Политика конфиденциальности](https://3dcafe.github.io/tamtoot/privacy/)
 
+## Release notes
+
+[TamToot 0.1.2 — English release notes](docs/releases/0.1.2.en.md) · [TamToot 0.1.2 — изменения на русском](docs/releases/0.1.2.ru.md)
+
 ## Features
 
 - A custom Canvas-based editor with syntax highlighting, selection, code folding, undo/redo, search and replace, keyboard shortcuts, mouse selection, and touch input.
+- Create project files and folders from the Solution **+** menu. Language packages provide file templates (C# classes/interfaces, Dart classes, Flutter widgets and other formats); filenames and extensions remain editable. [File template format](docs/file-templates.md).
 - Multiple document tabs and recovery of unsaved documents between sessions.
 - A project tree that expands directories **in place**. Opening a child folder keeps the project root and sibling folders visible. Directory contents load on demand.
 - Subtle Explorer indicators, also aggregated onto parent folders:

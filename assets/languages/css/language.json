@@ -1,0 +1,54 @@
+{
+  "schemaVersion": 1,
+  "packageVersion": "0.1.0",
+  "id": "css",
+  "name": "CSS",
+  "extensions": [
+    ".css"
+  ],
+  "comments": {
+    "block": {
+      "open": "/*",
+      "close": "*/"
+    }
+  },
+  "brackets": [
+    {
+      "open": "{",
+      "close": "}"
+    },
+    {
+      "open": "(",
+      "close": ")"
+    },
+    {
+      "open": "[",
+      "close": "]"
+    }
+  ],
+  "autoClosingPairs": [
+    {
+      "open": "{",
+      "close": "}"
+    },
+    {
+      "open": "(",
+      "close": ")"
+    },
+    {
+      "open": "\"",
+      "close": "\""
+    }
+  ],
+  "icons": {
+    "symbol": "code"
+  },
+  "adapters": [],
+  "fileTemplates": {
+    "stylesheet": {
+      "name": "Stylesheet",
+      "extension": ".css",
+      "body": "/* {{name}} */\n"
+    }
+  }
+}
