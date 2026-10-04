@@ -31,6 +31,8 @@ class _GitChangesDialogState extends State<GitChangesDialog> {
   bool busy = true, ready = false, _identityLoaded = false;
   bool _credentialsLoaded = false;
   bool _loading = false;
+  bool _changesExpanded = true;
+  bool _unversionedExpanded = true;
   StreamSubscription<int>? _changes;
   Timer? _refreshTimer;
   late String _observedState;
@@ -522,6 +524,256 @@ class _GitChangesDialogState extends State<GitChangesDialog> {
     );
   }
 
+  List<GitStatusEntry> get _changedEntries =>
+      entries.where((entry) => !entry.isUntracked).toList();
+
+  List<GitStatusEntry> get _unversionedEntries =>
+      entries.where((entry) => entry.isUntracked).toList();
+
+  (String name, String dir) _splitPath(String path) {
+    final slash = path.replaceAll('\\', '/').lastIndexOf('/');
+    if (slash < 0) return (path, '');
+    return (path.substring(slash + 1), path.substring(0, slash));
+  }
+
+  void _setGroupSelected(List<GitStatusEntry> group, bool checked) {
+    setState(() {
+      for (final entry in group) {
+        if (checked) {
+          selected.add(entry.path);
+        } else {
+          selected.remove(entry.path);
+        }
+      }
+    });
+  }
+
+  Widget _groupHeader({
+    required String title,
+    required List<GitStatusEntry> group,
+    required bool expanded,
+    required ValueChanged<bool> onExpanded,
+    required Color accent,
+  }) {
+    final theme = widget.session.theme;
+    final paths = group.map((entry) => entry.path).toSet();
+    final selectedCount = paths.where(selected.contains).length;
+    final allSelected = selectedCount == group.length;
+    final someSelected = selectedCount > 0 && !allSelected;
+    final countLabel = group.length == 1 ? '1 file' : '${group.length} files';
+    return Material(
+      color: expanded
+          ? Color(theme.color('selection')).withValues(alpha: 0.55)
+          : Colors.transparent,
+      child: InkWell(
+        onTap: () => onExpanded(!expanded),
+        child: SizedBox(
+          height: 32,
+          child: Row(
+            children: [
+              Icon(
+                expanded ? Icons.expand_more : Icons.chevron_right,
+                size: 18,
+                color: Color(theme.color('muted')),
+              ),
+              SizedBox(
+                width: 28,
+                height: 28,
+                child: Checkbox(
+                  tristate: true,
+                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  visualDensity: VisualDensity.compact,
+                  value: allSelected
+                      ? true
+                      : someSelected
+                      ? null
+                      : false,
+                  onChanged: busy
+                      ? null
+                      : (value) =>
+                            _setGroupSelected(group, value ?? !allSelected),
+                ),
+              ),
+              const SizedBox(width: 2),
+              Expanded(
+                child: Text(
+                  title,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w600,
+                    color: Color(theme.color('foreground')),
+                  ),
+                ),
+              ),
+              Text(
+                countLabel,
+                style: TextStyle(
+                  fontSize: 11.5,
+                  color: accent,
+                ),
+              ),
+              const SizedBox(width: 4),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _fileRow(GitStatusEntry entry, {required bool unversioned}) {
+    final theme = widget.session.theme;
+    final (name, dir) = _splitPath(entry.path);
+    final nameColor = Color(
+      theme.color(unversioned ? 'scm.untracked' : 'scm.modified'),
+    );
+    final muted = Color(theme.color('muted'));
+    final isUnsaved = unsaved.contains(entry.path);
+    return GestureDetector(
+      onSecondaryTapDown: (event) async {
+        await showFileGitMenu(
+          context,
+          widget.session,
+          root.resolve(Uri(path: entry.path).toString()),
+          event.globalPosition,
+        );
+        await _load();
+      },
+      onLongPressStart: (event) async {
+        await showFileGitMenu(
+          context,
+          widget.session,
+          root.resolve(Uri(path: entry.path).toString()),
+          event.globalPosition,
+        );
+        await _load();
+      },
+      child: InkWell(
+        key: ValueKey('git-change-${entry.path}'),
+        onTap: busy
+            ? null
+            : () async {
+                await showFileChanges(
+                  context,
+                  widget.session,
+                  root.resolve(Uri(path: entry.path).toString()),
+                );
+                await _load();
+              },
+        child: SizedBox(
+          height: 28,
+          child: Row(
+            children: [
+              const SizedBox(width: 18),
+              SizedBox(
+                width: 28,
+                height: 28,
+                child: Checkbox(
+                  materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  visualDensity: VisualDensity.compact,
+                  value: selected.contains(entry.path),
+                  onChanged: busy
+                      ? null
+                      : (checked) => setState(() {
+                          checked == true
+                              ? selected.add(entry.path)
+                              : selected.remove(entry.path);
+                        }),
+                ),
+              ),
+              Icon(
+                unversioned
+                    ? Icons.insert_drive_file_outlined
+                    : Icons.description_outlined,
+                size: 15,
+                color: nameColor,
+              ),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Row(
+                  children: [
+                    Flexible(
+                      child: Text(
+                        name,
+                        overflow: TextOverflow.ellipsis,
+                        maxLines: 1,
+                        softWrap: false,
+                        style: TextStyle(
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w500,
+                          color: nameColor,
+                        ),
+                      ),
+                    ),
+                    if (dir.isNotEmpty) ...[
+                      const SizedBox(width: 6),
+                      Flexible(
+                        flex: 2,
+                        child: Text(
+                          dir,
+                          overflow: TextOverflow.ellipsis,
+                          maxLines: 1,
+                          softWrap: false,
+                          style: TextStyle(fontSize: 11.5, color: muted),
+                        ),
+                      ),
+                    ],
+                    if (isUnsaved) ...[
+                      const SizedBox(width: 6),
+                      Text(
+                        'Unsaved —',
+                        style: TextStyle(fontSize: 10.5, color: muted),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              const SizedBox(width: 4),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _changeGroups() {
+    final changed = _changedEntries;
+    final unversioned = _unversionedEntries;
+    final theme = widget.session.theme;
+    final modifiedColor = Color(theme.color('scm.modified'));
+    final untrackedColor = Color(theme.color('scm.untracked'));
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (changed.isNotEmpty) ...[
+          _groupHeader(
+            title: 'Changes',
+            group: changed,
+            expanded: _changesExpanded,
+            onExpanded: (value) => setState(() => _changesExpanded = value),
+            accent: modifiedColor,
+          ),
+          if (_changesExpanded)
+            for (final entry in changed) _fileRow(entry, unversioned: false),
+        ],
+        if (unversioned.isNotEmpty) ...[
+          if (changed.isNotEmpty) const SizedBox(height: 4),
+          _groupHeader(
+            title: 'Unversioned Files',
+            group: unversioned,
+            expanded: _unversionedExpanded,
+            onExpanded: (value) =>
+                setState(() => _unversionedExpanded = value),
+            accent: untrackedColor,
+          ),
+          if (_unversionedExpanded)
+            for (final entry in unversioned)
+              _fileRow(entry, unversioned: true),
+        ],
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final content = SizedBox(
@@ -598,63 +850,7 @@ class _GitChangesDialogState extends State<GitChangesDialog> {
                 padding: EdgeInsets.symmetric(vertical: 12),
                 child: Text('No changes to commit.'),
               ),
-            for (final entry in entries)
-              GestureDetector(
-                onSecondaryTapDown: (event) async {
-                  await showFileGitMenu(
-                    context,
-                    widget.session,
-                    root.resolve(Uri(path: entry.path).toString()),
-                    event.globalPosition,
-                  );
-                  await _load();
-                },
-                onLongPressStart: (event) async {
-                  await showFileGitMenu(
-                    context,
-                    widget.session,
-                    root.resolve(Uri(path: entry.path).toString()),
-                    event.globalPosition,
-                  );
-                  await _load();
-                },
-                child: CheckboxListTile(
-                  dense: true,
-                  contentPadding: EdgeInsets.zero,
-                  title: InkWell(
-                    key: ValueKey('git-change-${entry.path}'),
-                    onTap: busy
-                        ? null
-                        : () async {
-                            await showFileChanges(
-                              context,
-                              widget.session,
-                              root.resolve(Uri(path: entry.path).toString()),
-                            );
-                            await _load();
-                          },
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 6),
-                      child: Text(entry.path),
-                    ),
-                  ),
-                  subtitle: Text(
-                    unsaved.contains(entry.path)
-                        ? 'Unsaved — will save before commit'
-                        : entry.isUntracked
-                        ? 'New file'
-                        : '${entry.index}${entry.workTree}',
-                  ),
-                  value: selected.contains(entry.path),
-                  onChanged: busy
-                      ? null
-                      : (checked) => setState(() {
-                          checked == true
-                              ? selected.add(entry.path)
-                              : selected.remove(entry.path);
-                        }),
-                ),
-              ),
+            if (ready && entries.isNotEmpty) _changeGroups(),
             const Divider(height: 20),
             TextField(
               controller: message,

@@ -293,6 +293,46 @@ class _SettingsDialogState extends State<SettingsDialog> {
   late final TextEditingController font = TextEditingController(
     text: widget.session.settings.get('fontFamily') as String,
   );
+  String section = 'appearance';
+  Map<String, String> get sections => {
+    'appearance': 'Appearance',
+    'editor': 'Editor',
+    'keymap': 'Keymap',
+    'agents': 'Agents',
+    'mcp': 'MCP servers',
+    if (supportsFlutterTools) 'flutter': 'Flutter',
+    if (supportsFlutterTools) 'dotnet': '.NET',
+  };
+
+  Widget sectionItem(MapEntry<String, String> entry, {bool nested = false}) =>
+      ListTile(
+        key: ValueKey('settings-section-${entry.key}'),
+        contentPadding: EdgeInsets.only(left: nested ? 32 : 16, right: 16),
+        selected: section == entry.key,
+        selectedTileColor: Theme.of(context).colorScheme.secondaryContainer,
+        title: Text(entry.value),
+        onTap: () => setState(() => section = entry.key),
+      );
+
+  Widget navigation() => ListView(
+    children: [
+      for (final entry in sections.entries.where(
+        (entry) => entry.key != 'flutter' && entry.key != 'dotnet',
+      ))
+        sectionItem(entry),
+      if (supportsFlutterTools)
+        ExpansionTile(
+          key: const PageStorageKey('settings-sdk-group'),
+          title: const Text('SDK'),
+          initiallyExpanded: section == 'flutter' || section == 'dotnet',
+          children: [
+            sectionItem(const MapEntry('flutter', 'Flutter'), nested: true),
+            sectionItem(const MapEntry('dotnet', '.NET'), nested: true),
+          ],
+        ),
+    ],
+  );
+
   @override
   void dispose() {
     keys.dispose();
@@ -311,119 +351,199 @@ class _SettingsDialogState extends State<SettingsDialog> {
     return AlertDialog(
       title: const Text('Settings'),
       content: SizedBox(
-        width: 580,
-        child: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              if (supportsFlutterTools)
-                FlutterSettings(session: widget.session),
-              if (supportsFlutterTools) DotnetSettings(session: widget.session),
-              Row(
+        width: 1000,
+        height: (MediaQuery.sizeOf(context).height - 180)
+            .clamp(0.0, 680.0)
+            .toDouble(),
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final compact = constraints.maxWidth < 600;
+            final content = Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 16),
+                  child: Text(
+                    sections[section]!,
+                    style: Theme.of(context).textTheme.titleLarge,
+                  ),
+                ),
+                Expanded(
+                  child: SingleChildScrollView(
+                    key: ValueKey('settings-content-$section'),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        if (section == 'flutter')
+                          FlutterSettings(session: widget.session),
+                        if (section == 'dotnet')
+                          DotnetSettings(session: widget.session),
+                        if (section == 'appearance') ...[
+                          Row(
+                            children: [
+                              const Text('IDE theme'),
+                              const SizedBox(width: 16),
+                              DropdownButton<String>(
+                                value: widget.session.theme.id,
+                                items: [
+                                  for (final theme
+                                      in widget.session.themes.values)
+                                    DropdownMenuItem(
+                                      value: theme.id,
+                                      child: Text(theme.name),
+                                    ),
+                                ],
+                                onChanged: (value) {
+                                  if (value != null) set('theme', value);
+                                },
+                              ),
+                            ],
+                          ),
+                        ],
+                        if (section == 'editor') ...[
+                          Row(
+                            children: [
+                              const Text('Font size'),
+                              Expanded(
+                                child: Slider(
+                                  value: settings.fontSize,
+                                  min: 8,
+                                  max: 32,
+                                  divisions: 24,
+                                  label: '${settings.fontSize.round()}',
+                                  onChanged: (v) => set('fontSize', v),
+                                ),
+                              ),
+                              Text('${settings.fontSize.round()}'),
+                            ],
+                          ),
+                          TextField(
+                            controller: font,
+                            decoration: const InputDecoration(
+                              labelText: 'Font family',
+                            ),
+                            onSubmitted: (v) {
+                              if (v.trim().isNotEmpty)
+                                set('fontFamily', v.trim());
+                            },
+                          ),
+                          SwitchListTile(
+                            title: const Text('Insert spaces'),
+                            value: settings.get('insertSpaces') as bool,
+                            onChanged: (v) => set('insertSpaces', v),
+                          ),
+                          Row(
+                            children: [
+                              const Text('Tab size'),
+                              const SizedBox(width: 16),
+                              DropdownButton<int>(
+                                value: settings.get('tabSize') as int,
+                                items: [
+                                  for (final n in [1, 2, 3, 4, 5, 6, 7, 8])
+                                    DropdownMenuItem(
+                                      value: n,
+                                      child: Text('$n'),
+                                    ),
+                                ],
+                                onChanged: (v) {
+                                  if (v != null) set('tabSize', v);
+                                },
+                              ),
+                            ],
+                          ),
+                        ],
+                        if (section == 'agents')
+                          ListTile(
+                            contentPadding: EdgeInsets.zero,
+                            leading: const Icon(Icons.smart_toy_outlined),
+                            title: const Text('Model profiles and prompts'),
+                            subtitle: const Text(
+                              'Per-model prompts and project instructions',
+                            ),
+                            trailing: const Icon(Icons.chevron_right),
+                            onTap: () => showDialog<void>(
+                              context: context,
+                              barrierDismissible: false,
+                              builder: (_) =>
+                                  ModelProfilesDialog(session: widget.session),
+                            ),
+                          ),
+                        if (section == 'mcp')
+                          ListTile(
+                            contentPadding: EdgeInsets.zero,
+                            leading: const Icon(Icons.extension_outlined),
+                            title: const Text('MCP servers'),
+                            subtitle: const Text(
+                              'External tools for project agents',
+                            ),
+                            trailing: const Icon(Icons.chevron_right),
+                            onTap: () => showDialog<void>(
+                              context: context,
+                              barrierDismissible: false,
+                              builder: (_) =>
+                                  McpDialog(session: widget.session),
+                            ),
+                          ),
+                        if (section == 'keymap') ...[
+                          const Align(
+                            alignment: Alignment.centerLeft,
+                            child: Text('Keybindings · schema v1'),
+                          ),
+                          const SizedBox(height: 8),
+                          TextField(
+                            controller: keys,
+                            maxLines: 8,
+                            style: const TextStyle(
+                              fontFamily: 'monospace',
+                              fontSize: 12,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          const Text(
+                            'Modifiers: ctrl, meta, alt, shift (in that order). Omitted bindings use defaults.',
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            );
+            if (compact) {
+              return Column(
                 children: [
-                  const Text('IDE theme'),
-                  const SizedBox(width: 16),
                   DropdownButton<String>(
-                    value: widget.session.theme.id,
+                    isExpanded: true,
+                    value: section,
                     items: [
-                      for (final theme in widget.session.themes.values)
+                      for (final entry in sections.entries)
                         DropdownMenuItem(
-                          value: theme.id,
-                          child: Text(theme.name),
+                          value: entry.key,
+                          child: Text(
+                            entry.key == 'flutter' || entry.key == 'dotnet'
+                                ? 'SDK › ${entry.value}'
+                                : entry.value,
+                          ),
                         ),
                     ],
                     onChanged: (value) {
-                      if (value != null) set('theme', value);
+                      if (value != null) setState(() => section = value);
                     },
                   ),
+                  const SizedBox(height: 12),
+                  Expanded(child: content),
                 ],
-              ),
-              Row(
-                children: [
-                  const Text('Font size'),
-                  Expanded(
-                    child: Slider(
-                      value: settings.fontSize,
-                      min: 8,
-                      max: 32,
-                      divisions: 24,
-                      label: '${settings.fontSize.round()}',
-                      onChanged: (v) => set('fontSize', v),
-                    ),
-                  ),
-                  Text('${settings.fontSize.round()}'),
-                ],
-              ),
-              TextField(
-                controller: font,
-                decoration: const InputDecoration(labelText: 'Font family'),
-                onSubmitted: (v) {
-                  if (v.trim().isNotEmpty) set('fontFamily', v.trim());
-                },
-              ),
-              SwitchListTile(
-                title: const Text('Insert spaces'),
-                value: settings.get('insertSpaces') as bool,
-                onChanged: (v) => set('insertSpaces', v),
-              ),
-              Row(
-                children: [
-                  const Text('Tab size'),
-                  const SizedBox(width: 16),
-                  DropdownButton<int>(
-                    value: settings.get('tabSize') as int,
-                    items: [
-                      for (final n in [1, 2, 3, 4, 5, 6, 7, 8])
-                        DropdownMenuItem(value: n, child: Text('$n')),
-                    ],
-                    onChanged: (v) {
-                      if (v != null) set('tabSize', v);
-                    },
-                  ),
-                ],
-              ),
-              ListTile(
-                contentPadding: EdgeInsets.zero,
-                leading: const Icon(Icons.smart_toy_outlined),
-                title: const Text('Model profiles and prompts'),
-                subtitle: const Text(
-                  'Per-model prompts and project instructions',
-                ),
-                trailing: const Icon(Icons.chevron_right),
-                onTap: () => showDialog<void>(
-                  context: context,
-                  barrierDismissible: false,
-                  builder: (_) => ModelProfilesDialog(session: widget.session),
-                ),
-              ),
-              ListTile(
-                contentPadding: EdgeInsets.zero,
-                leading: const Icon(Icons.extension_outlined),
-                title: const Text('MCP servers'),
-                subtitle: const Text('External tools for project agents'),
-                trailing: const Icon(Icons.chevron_right),
-                onTap: () => showDialog<void>(
-                  context: context,
-                  barrierDismissible: false,
-                  builder: (_) => McpDialog(session: widget.session),
-                ),
-              ),
-              const Align(
-                alignment: Alignment.centerLeft,
-                child: Text('Keybindings · schema v1'),
-              ),
-              const SizedBox(height: 8),
-              TextField(
-                controller: keys,
-                maxLines: 8,
-                style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
-              ),
-              const SizedBox(height: 8),
-              const Text(
-                'Modifiers: ctrl, meta, alt, shift (in that order). Omitted bindings use defaults.',
-              ),
-            ],
-          ),
+              );
+            }
+            return Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                SizedBox(width: 210, child: navigation()),
+                const VerticalDivider(width: 32),
+                Expanded(child: content),
+              ],
+            );
+          },
         ),
       ),
       actions: [

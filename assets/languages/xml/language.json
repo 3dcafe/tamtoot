@@ -1,0 +1,53 @@
+{
+  "schemaVersion": 1,
+  "packageVersion": "0.1.0",
+  "id": "xml",
+  "name": "XML / MSBuild",
+  "extensions": [
+    ".xml",
+    ".csproj",
+    ".fsproj",
+    ".vbproj",
+    ".props",
+    ".targets",
+    ".resx",
+    ".config",
+    ".slnx",
+    ".xaml",
+    ".axaml",
+    ".svg"
+  ],
+  "comments": {
+    "block": {
+      "open": "<!--",
+      "close": "-->"
+    }
+  },
+  "brackets": [
+    {
+      "open": "<",
+      "close": ">"
+    }
+  ],
+  "autoClosingPairs": [
+    {
+      "open": "<",
+      "close": ">"
+    },
+    {
+      "open": "\"",
+      "close": "\""
+    },
+    {
+      "open": "'",
+      "close": "'"
+    }
+  ],
+  "indentation": {
+    "increaseAfter": ">"
+  },
+  "icons": {
+    "symbol": "code"
+  },
+  "adapters": []
+}

@@ -298,7 +298,7 @@ void main() {
     expect(find.text('Initial'), findsOneWidget);
     await tester.tap(find.text('Close'));
     await tester.pumpAndSettle();
-    await tester.tap(find.byType(Checkbox));
+    await tester.tap(find.byType(Checkbox).first);
     await tester.ensureVisible(
       find.widgetWithText(TextField, 'Commit message'),
     );

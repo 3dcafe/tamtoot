@@ -1,6 +1,6 @@
 import '../core/persistence/schema.dart';
 
-const bundledLanguageIds = ['dart', 'csharp', 'html', 'javascript'];
+const bundledLanguageIds = ['dart', 'csharp', 'html', 'javascript', 'xml'];
 
 class SyntaxToken {
   const SyntaxToken(this.start, this.end, this.scope);

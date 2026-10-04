@@ -32,6 +32,24 @@ class _IdeShellState extends ConsumerState<IdeShell> {
   final _find = TextEditingController(), _replace = TextEditingController();
   late IdeSession session;
   int _sidebar = 0;
+  late final Future<String> _appVersion = _loadAppVersion();
+
+  Future<String> _loadAppVersion() async {
+    try {
+      final manifest = await rootBundle.loadString('pubspec.yaml');
+      final match = RegExp(
+        r'^version:[ \t]*([^\r\n#]+)',
+        multiLine: true,
+      ).firstMatch(manifest);
+      final version = match?.group(1)?.trim().replaceAll(RegExp('[\"\']'), '');
+      return version == null || version.isEmpty
+          ? 'Version unavailable'
+          : version;
+    } catch (_) {
+      return 'Version unavailable';
+    }
+  }
+
   @override
   void initState() {
     super.initState();
@@ -437,14 +455,24 @@ class _IdeShellState extends ConsumerState<IdeShell> {
         if (supportsFlutterTools)
           Flexible(child: ProjectLaunchBar(session: session)),
         Expanded(child: _pathBar()),
+        action(
+          session.theme.dark
+              ? Icons.light_mode_outlined
+              : Icons.dark_mode_outlined,
+          session.theme.dark ? 'Switch to light theme' : 'Switch to dark theme',
+          'view.theme',
+        ),
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 14),
-          child: Text(
-            'FOUNDATION  0.1',
-            style: TextStyle(
-              fontSize: 10,
-              letterSpacing: 1,
-              color: color('accent'),
+          child: FutureBuilder<String>(
+            future: _appVersion,
+            builder: (context, snapshot) => Text(
+              'FOUNDATION  ${snapshot.data ?? '…'}',
+              style: TextStyle(
+                fontSize: 10,
+                letterSpacing: 1,
+                color: color('accent'),
+              ),
             ),
           ),
         ),
@@ -727,6 +755,42 @@ class _IdeShellState extends ConsumerState<IdeShell> {
     );
   }
 
+  Widget _sidebarTab(int index, String label, String id) {
+    final selected = _sidebar == index;
+    final accent = color('accent');
+    return Semantics(
+      selected: selected,
+      child: Container(
+        height: 36,
+        decoration: BoxDecoration(
+          color: selected ? accent.withValues(alpha: 0.14) : Colors.transparent,
+          border: Border(
+            bottom: BorderSide(
+              color: selected ? accent : Colors.transparent,
+              width: 3,
+            ),
+          ),
+        ),
+        child: TextButton(
+          key: ValueKey('sidebar-$id'),
+          style: TextButton.styleFrom(
+            shape: const RoundedRectangleBorder(),
+            foregroundColor: selected ? accent : color('muted'),
+            padding: const EdgeInsets.symmetric(horizontal: 14),
+          ),
+          onPressed: () => setState(() => _sidebar = index),
+          child: Text(
+            label,
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: selected ? FontWeight.w700 : FontWeight.w400,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _explorer() => ColoredBox(
     color: color('panel'),
     child: Column(
@@ -743,50 +807,10 @@ class _IdeShellState extends ConsumerState<IdeShell> {
                   scrollDirection: Axis.horizontal,
                   child: Row(
                     children: [
-                      TextButton(
-                        key: const ValueKey('sidebar-solution'),
-                        onPressed: () => setState(() => _sidebar = 0),
-                        child: Text(
-                          'Solution',
-                          style: TextStyle(
-                            color: color(_sidebar == 0 ? 'accent' : 'muted'),
-                            fontSize: 12,
-                          ),
-                        ),
-                      ),
-                      TextButton(
-                        key: const ValueKey('sidebar-git'),
-                        onPressed: () => setState(() => _sidebar = 1),
-                        child: Text(
-                          'Git',
-                          style: TextStyle(
-                            color: color(_sidebar == 1 ? 'accent' : 'muted'),
-                            fontSize: 12,
-                          ),
-                        ),
-                      ),
-                      TextButton(
-                        key: const ValueKey('sidebar-agent'),
-                        onPressed: () => setState(() => _sidebar = 2),
-                        child: Text(
-                          'Agent',
-                          style: TextStyle(
-                            color: color(_sidebar == 2 ? 'accent' : 'muted'),
-                            fontSize: 12,
-                          ),
-                        ),
-                      ),
-                      TextButton(
-                        key: const ValueKey('sidebar-requests'),
-                        onPressed: () => setState(() => _sidebar = 3),
-                        child: Text(
-                          'Requests',
-                          style: TextStyle(
-                            color: color(_sidebar == 3 ? 'accent' : 'muted'),
-                            fontSize: 12,
-                          ),
-                        ),
-                      ),
+                      _sidebarTab(0, 'Solution', 'solution'),
+                      _sidebarTab(1, 'Git', 'git'),
+                      _sidebarTab(2, 'Agent', 'agent'),
+                      _sidebarTab(3, 'Requests', 'requests'),
                     ],
                   ),
                 ),

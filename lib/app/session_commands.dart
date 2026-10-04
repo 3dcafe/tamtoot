@@ -400,7 +400,7 @@ void registerSessionCommands(IdeSession s, PresentationActions ui) {
     (_) => s.selectTheme(s.theme.dark ? 'day' : 'night'),
   );
   add('view.commands', 'Command palette', (_) => ui.showCommands());
-  add('settings.open', 'Settings & keybindings', (_) => ui.showSettings());
+  add('settings.open', 'Settings', (_) => ui.showSettings());
   add('help.privacy', 'Privacy Policy', (_) => ui.showPrivacyPolicy());
   add(
     'extensions.manage',

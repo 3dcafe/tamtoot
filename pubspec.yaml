@@ -100,8 +100,10 @@ flutter:
   # see https://flutter.dev/to/font-from-package
 
   assets:
+    - pubspec.yaml
     - assets/languages/dart/
     - assets/languages/csharp/
+    - assets/languages/xml/
     - assets/languages/html/
     - assets/languages/javascript/
     - assets/themes/
