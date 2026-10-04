@@ -37,6 +37,7 @@ class _NewFileDialogState extends State<NewFileDialog> {
     final target = widget.session.launchTarget;
     if (target?.kind == ProjectKind.dotnet) return 'csharp';
     if (target?.kind == ProjectKind.flutter) return 'dart';
+    if (target?.kind == ProjectKind.angular) return 'typescript';
     final active = widget.session.documents.active;
     return active == null
         ? ''
@@ -85,7 +86,13 @@ class _NewFileDialogState extends State<NewFileDialog> {
     final kind = targets.firstOrNull?.kind;
     if (kind != null) {
       setState(
-        () => _selectLanguage(kind == ProjectKind.dotnet ? 'csharp' : 'dart'),
+        () => _selectLanguage(
+          kind == ProjectKind.dotnet
+              ? 'csharp'
+              : kind == ProjectKind.angular
+              ? 'typescript'
+              : 'dart',
+        ),
       );
     }
   }

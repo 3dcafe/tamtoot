@@ -1,6 +1,7 @@
 import Flutter
 import MobileCoreServices
 import UIKit
+import WebKit
 
 @main
 @objc class AppDelegate: FlutterAppDelegate, FlutterImplicitEngineDelegate, UIDropInteractionDelegate {
@@ -19,6 +20,8 @@ import UIKit
 
   func didInitializeImplicitFlutterEngine(_ engineBridge: FlutterImplicitEngineBridge) {
     GeneratedPluginRegistrant.register(with: engineBridge.pluginRegistry)
+    engineBridge.applicationRegistrar.register(
+      SitePreviewFactory(), withId: "dev.tamtoot/local_preview")
     fileDropChannel = FlutterMethodChannel(
       name: "dev.tamtoot/file_drop",
       binaryMessenger: engineBridge.applicationRegistrar.messenger()
@@ -111,4 +114,28 @@ import UIKit
       }
     }
   }
+}
+
+private class SitePreviewFactory: NSObject, FlutterPlatformViewFactory {
+  func createArgsCodec() -> (FlutterMessageCodec & NSObjectProtocol)? {
+    FlutterStandardMessageCodec.sharedInstance()
+  }
+  func create(withFrame frame: CGRect, viewIdentifier viewId: Int64, arguments args: Any?) -> FlutterPlatformView {
+    SitePreview(frame: frame, arguments: args)
+  }
+}
+
+private class SitePreview: NSObject, FlutterPlatformView {
+  private let webView: WKWebView
+  init(frame: CGRect, arguments: Any?) {
+    let configuration = WKWebViewConfiguration()
+    configuration.websiteDataStore = .nonPersistent()
+    webView = WKWebView(frame: frame, configuration: configuration)
+    super.init()
+    if let params = arguments as? [String: Any], let text = params["url"] as? String,
+       let url = URL(string: text), ["http", "https"].contains(url.scheme ?? "") {
+      webView.load(URLRequest(url: url))
+    }
+  }
+  func view() -> UIView { webView }
 }

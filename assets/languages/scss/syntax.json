@@ -1,0 +1,91 @@
+{
+  "schemaVersion": 1,
+  "packageVersion": "0.1.0",
+  "rules": [
+    {
+      "pattern": "(?<![:\\\\])//.*$",
+      "scope": "comment"
+    },
+    {
+      "begin": "/\\*",
+      "end": "\\*/",
+      "scope": "comment"
+    },
+    {
+      "begin": "\"",
+      "end": "\"",
+      "escape": "\\\\.",
+      "scope": "string"
+    },
+    {
+      "begin": "'",
+      "end": "'",
+      "escape": "\\\\.",
+      "scope": "string"
+    },
+    {
+      "pattern": "\\$[A-Za-z_][\\w-]*",
+      "scope": "attribute"
+    },
+    {
+      "pattern": "!\\b(?:default|global|optional|important)\\b",
+      "scope": "keyword"
+    },
+    {
+      "pattern": "%[A-Za-z_][\\w-]*",
+      "scope": "type"
+    },
+    {
+      "pattern": "\\b(?:true|false|null|and|or|not|from|through|to|in)\\b",
+      "scope": "keyword"
+    },
+    {
+      "pattern": "#\\{|&|[*/=]",
+      "scope": "operator"
+    },
+    {
+      "pattern": "@[A-Za-z-]+",
+      "scope": "directive"
+    },
+    {
+      "pattern": "--[A-Za-z_][\\w-]*",
+      "scope": "attribute"
+    },
+    {
+      "pattern": "\\b[A-Za-z-]+(?=\\s*:)",
+      "scope": "attribute"
+    },
+    {
+      "pattern": "#[0-9A-Fa-f]{3,8}\\b(?=[\\s;,})]|$)",
+      "scope": "number"
+    },
+    {
+      "pattern": "(?<![\\w-])-?(?:\\d*\\.\\d+|\\d+)(?:%|[A-Za-z]+)?\\b",
+      "scope": "number"
+    },
+    {
+      "pattern": "!important\\b",
+      "scope": "keyword"
+    },
+    {
+      "pattern": "\\b[A-Za-z-]+(?=\\()",
+      "scope": "function"
+    },
+    {
+      "pattern": "::?[A-Za-z-]+",
+      "scope": "annotation"
+    },
+    {
+      "pattern": "[.#][A-Za-z_][\\w-]*",
+      "scope": "type"
+    },
+    {
+      "pattern": "\\b(?:inherit|initial|unset|revert|none|auto|transparent)\\b",
+      "scope": "keyword"
+    },
+    {
+      "pattern": "[{}:;,>+~=\\[\\]()]",
+      "scope": "operator"
+    }
+  ]
+}

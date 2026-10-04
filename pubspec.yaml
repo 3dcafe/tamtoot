@@ -109,6 +109,7 @@ flutter:
     - assets/languages/markdown/
     - assets/languages/conf/
     - assets/languages/css/
+    - assets/languages/scss/
     - assets/languages/html/
     - assets/languages/typescript/
     - assets/languages/javascript/

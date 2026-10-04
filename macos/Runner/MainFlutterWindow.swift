@@ -1,5 +1,6 @@
 import Cocoa
 import FlutterMacOS
+import WebKit
 
 class MainFlutterWindow: NSWindow {
   private var windowChannel: FlutterMethodChannel?
@@ -14,6 +15,8 @@ class MainFlutterWindow: NSWindow {
     self.setFrame(windowFrame, display: true)
 
     RegisterGeneratedPlugins(registry: flutterViewController)
+    flutterViewController.registrar(forPlugin: "TamTootNativePreview")
+      .register(SitePreviewFactory(), withId: "dev.tamtoot/local_preview")
 
     super.awakeFromNib()
     self.title = "TamToot"
@@ -171,5 +174,22 @@ class MainFlutterWindow: NSWindow {
     default:
       result(FlutterMethodNotImplemented)
     }
+  }
+}
+
+private class SitePreviewFactory: NSObject, FlutterPlatformViewFactory {
+  func createArgsCodec() -> (FlutterMessageCodec & NSObjectProtocol)? {
+    FlutterStandardMessageCodec.sharedInstance()
+  }
+  func create(withViewIdentifier viewId: Int64, arguments args: Any?) -> NSView {
+    let configuration = WKWebViewConfiguration()
+    configuration.websiteDataStore = .nonPersistent()
+    let view = WKWebView(frame: .zero, configuration: configuration)
+    view.autoresizingMask = [.width, .height]
+    if let params = args as? [String: Any], let text = params["url"] as? String,
+       let url = URL(string: text), ["http", "https"].contains(url.scheme ?? "") {
+      view.load(URLRequest(url: url))
+    }
+    return view
   }
 }

@@ -9,6 +9,7 @@ project(runner LANGUAGES CXX)
 add_executable(${BINARY_NAME}
   "main.cc"
   "my_application.cc"
+  "site_preview.cc"
   "${FLUTTER_MANAGED_DIR}/generated_plugin_registrant.cc"
 )
 
@@ -22,5 +23,12 @@ add_definitions(-DAPPLICATION_ID="${APPLICATION_ID}")
 # Add dependency libraries. Add any application-specific dependencies here.
 target_link_libraries(${BINARY_NAME} PRIVATE flutter)
 target_link_libraries(${BINARY_NAME} PRIVATE PkgConfig::GTK)
+pkg_check_modules(TAMTOOT_WEBKIT QUIET IMPORTED_TARGET webkit2gtk-4.1)
+if(TAMTOOT_WEBKIT_FOUND)
+  target_compile_definitions(${BINARY_NAME} PRIVATE TAMTOOT_WEBKIT)
+  target_link_libraries(${BINARY_NAME} PRIVATE PkgConfig::TAMTOOT_WEBKIT)
+else()
+  message(STATUS "Angular preview disabled: install WebKitGTK 4.1 development libraries to enable it")
+endif()
 
 target_include_directories(${BINARY_NAME} PRIVATE "${CMAKE_SOURCE_DIR}")

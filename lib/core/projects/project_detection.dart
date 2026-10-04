@@ -1,6 +1,7 @@
+import 'dart:convert';
 import '../filesystem/filesystem.dart';
 
-enum ProjectKind { flutter, dotnet }
+enum ProjectKind { flutter, dotnet, angular }
 
 class LaunchTarget {
   const LaunchTarget(
@@ -9,13 +10,16 @@ class LaunchTarget {
     this.file,
     this.label, {
     this.runnable = true,
+    this.previewPort = 4200,
   });
   final ProjectKind kind;
   final Uri root;
   final String file;
   final String label;
   final bool runnable;
-  String get id => '${kind.name}:${root.resolve(file)}';
+  final int previewPort;
+  String get id =>
+      '${kind.name}:${root.resolve(file)}${kind == ProjectKind.angular ? ':$label' : ''}';
 }
 
 /// File hints only; detection never executes project code or SDK commands.
@@ -47,13 +51,50 @@ Future<List<LaunchTarget>> detectProjects(
     for (final entry in entries) {
       if (entry.directory) continue;
       if (entry.name != 'pubspec.yaml' &&
+          entry.name != 'angular.json' &&
           !entry.name.toLowerCase().endsWith('.csproj')) {
         continue;
       }
       try {
         final text = await files.read(entry.uri);
-        final relative = entry.uri.path.substring(root.path.length);
-        if (entry.name == 'pubspec.yaml') {
+        final relative = entry.uri.path.startsWith(root.path)
+            ? entry.uri.path.substring(root.path.length)
+            : entry.name;
+        if (entry.name == 'angular.json') {
+          final config = jsonDecode(text) as Map<String, dynamic>;
+          final projects = config['projects'];
+          if (projects is Map) {
+            for (final item in projects.entries) {
+              final project = item.value;
+              if (project is! Map) continue;
+              final targets = project['architect'] ?? project['targets'];
+              final serve = targets is Map ? targets['serve'] : null;
+              if (serve is! Map) continue;
+              final options = serve['options'];
+              final configurations = serve['configurations'];
+              final selected = configurations is Map
+                  ? configurations[serve['defaultConfiguration']]
+                  : null;
+              final port = selected is Map && selected['port'] != null
+                  ? selected['port']
+                  : options is Map
+                  ? options['port']
+                  : null;
+              result.add(
+                LaunchTarget(
+                  ProjectKind.angular,
+                  folder,
+                  'angular.json',
+                  'Angular · ${item.key}',
+                  runnable: false,
+                  previewPort: port is int && port > 0 && port <= 65535
+                      ? port
+                      : 4200,
+                ),
+              );
+            }
+          }
+        } else if (entry.name == 'pubspec.yaml') {
           if (RegExp(
             r'^[ \t]+flutter:[ \t]*(?:#[^\n]*)?\r?\n[ \t]+sdk:[ \t]*flutter[ \t]*(?:#[^\n]*)?\r?$',
             multiLine: true,

@@ -1,0 +1,62 @@
+{
+  "schemaVersion": 1,
+  "packageVersion": "0.1.0",
+  "id": "scss",
+  "name": "SCSS",
+  "extensions": [
+    ".scss"
+  ],
+  "comments": {
+    "block": {
+      "open": "/*",
+      "close": "*/"
+    },
+    "line": "//"
+  },
+  "brackets": [
+    {
+      "open": "{",
+      "close": "}"
+    },
+    {
+      "open": "(",
+      "close": ")"
+    },
+    {
+      "open": "[",
+      "close": "]"
+    }
+  ],
+  "autoClosingPairs": [
+    {
+      "open": "{",
+      "close": "}"
+    },
+    {
+      "open": "(",
+      "close": ")"
+    },
+    {
+      "open": "\"",
+      "close": "\""
+    },
+    {
+      "open": "'",
+      "close": "'"
+    }
+  ],
+  "icons": {
+    "symbol": "code"
+  },
+  "adapters": [],
+  "fileTemplates": {
+    "stylesheet": {
+      "name": "SCSS stylesheet",
+      "extension": ".scss",
+      "body": "/* {{name}} */\n"
+    }
+  },
+  "indentation": {
+    "increaseAfter": "{"
+  }
+}

@@ -23,6 +23,7 @@ import '../core/flutter/flutter_runner.dart';
 import 'project_launch_bar.dart';
 import 'new_file_dialog.dart';
 import 'explorer_context_menu.dart';
+import 'angular_preview.dart';
 
 class IdeShell extends ConsumerStatefulWidget {
   const IdeShell({super.key});
@@ -587,39 +588,42 @@ class _IdeShellState extends ConsumerState<IdeShell> {
           ),
           if (session.findVisible) _findBar(),
           Expanded(
-            child: active == null
-                ? Center(
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(Icons.code, size: 48, color: color('muted')),
-                        const SizedBox(height: 12),
-                        const Text('A place for your next idea'),
-                        TextButton(
-                          onPressed: () => session.run('file.open'),
-                          child: const Text('Open a file'),
-                        ),
-                      ],
+            child: AngularPreview(
+              target: session.launchTarget,
+              editor: active == null
+                  ? Center(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.code, size: 48, color: color('muted')),
+                          const SizedBox(height: 12),
+                          const Text('A place for your next idea'),
+                          TextButton(
+                            onPressed: () => session.run('file.open'),
+                            child: const Text('Open a file'),
+                          ),
+                        ],
+                      ),
+                    )
+                  : active.isMediaPreview
+                  ? MediaDocumentView(
+                      key: ValueKey('media-${active.id}'),
+                      document: active,
+                      session: session,
+                    )
+                  : session.languages.forPath(active.name)?.id == 'markdown'
+                  ? MarkdownDocumentView(
+                      key: ValueKey('markdown-${active.id}'),
+                      document: active,
+                      session: session,
+                    )
+                  : CodeEditor(
+                      key: const ValueKey('editor'),
+                      controller: active.editor,
+                      session: session,
+                      language: session.languages.forPath(active.name),
                     ),
-                  )
-                : active.isMediaPreview
-                ? MediaDocumentView(
-                    key: ValueKey('media-${active.id}'),
-                    document: active,
-                    session: session,
-                  )
-                : session.languages.forPath(active.name)?.id == 'markdown'
-                ? MarkdownDocumentView(
-                    key: ValueKey('markdown-${active.id}'),
-                    document: active,
-                    session: session,
-                  )
-                : CodeEditor(
-                    key: const ValueKey('editor'),
-                    controller: active.editor,
-                    session: session,
-                    language: session.languages.forPath(active.name),
-                  ),
+            ),
           ),
         ],
       ),

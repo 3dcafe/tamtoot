@@ -1,6 +1,6 @@
 # Tamtoot
 
-Tamtoot is a **free code and plain-text editor** and an extensible Flutter IDE for tablets and desktop windows. It includes an original editor engine, resizable tool panels, language packages, Git integration, and light and dark themes. Markdown (`.md`) files can be edited as plain text; a rendered Markdown preview is not implemented yet. Raster images open in a closable preview tab; SVG opens as a code + live preview split.
+Tamtoot is a **free code and plain-text editor** and an extensible Flutter IDE for tablets and desktop windows. It includes an original editor engine, resizable tool panels, language packages, Git integration, and light and dark themes. Markdown (`.md`) files open with source editing and a live rendered preview. Raster images open in a closable preview tab; SVG opens as a code + live preview split.
 
 ## [Download Tamtoot on Google Play](https://play.google.com/store/apps/details?id=dev.tamtoot.tamtoot)
 
@@ -9,6 +9,8 @@ Tamtoot is a **free code and plain-text editor** and an extensible Flutter IDE f
 [Privacy Policy / Политика конфиденциальности](https://3dcafe.github.io/tamtoot/privacy/)
 
 ## Release notes
+
+[TamToot 0.1.3 — English release notes](docs/releases/0.1.3.en.md) · [TamToot 0.1.3 — изменения на русском](docs/releases/0.1.3.ru.md)
 
 [TamToot 0.1.2 — English release notes](docs/releases/0.1.2.en.md) · [TamToot 0.1.2 — изменения на русском](docs/releases/0.1.2.ru.md)
 
@@ -24,7 +26,10 @@ Tamtoot is a **free code and plain-text editor** and an extensible Flutter IDE f
   - `?` — a new, untracked file;
   - `↑` — changes in commits not reachable from the locally known upstream.
 - Git clone/fetch/pull/push and local repository operations through the existing pure-Dart Smart HTTP client.
-- Versioned Dart, C#, HTML and JavaScript language packages and an interface for installing declarative language definitions.
+- Versioned Dart, C#, HTML, JavaScript, TypeScript, XML, Razor, CSS, SCSS, Markdown and configuration language packages, plus declarative language package installation.
+- Live Markdown preview and syntax-aware TypeScript folding.
+- Angular project detection and a resizable interactive website preview beside the editor, using native system WebViews. [Preview setup and platform requirements](docs/angular-preview.md).
+- Git file context actions, including **Add to .gitignore**; private saved credentials and a repository access test.
 - Midnight Ink and Porcelain themes. The active theme is saved immediately as an **IDE-wide preference**, including when selected in **Tools → Settings**.
 - A command registry, editable keybindings, font settings, and tab preferences.
 

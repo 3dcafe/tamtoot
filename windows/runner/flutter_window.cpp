@@ -35,6 +35,9 @@ bool FlutterWindow::OnCreate() {
           &flutter::StandardMethodCodec::GetInstance());
   DragAcceptFiles(GetHandle(), TRUE);
   SetChildContent(flutter_controller_->view()->GetNativeWindow());
+  site_preview_ = std::make_unique<SitePreview>(
+      flutter_controller_->engine()->messenger(),
+      flutter_controller_->view()->GetNativeWindow());
 
   flutter_controller_->engine()->SetNextFrameCallback([&]() {
     this->Show();
@@ -51,6 +54,7 @@ bool FlutterWindow::OnCreate() {
 void FlutterWindow::OnDestroy() {
   DragAcceptFiles(GetHandle(), FALSE);
   file_drop_channel_.reset();
+  site_preview_.reset();
   if (flutter_controller_) {
     flutter_controller_ = nullptr;
   }

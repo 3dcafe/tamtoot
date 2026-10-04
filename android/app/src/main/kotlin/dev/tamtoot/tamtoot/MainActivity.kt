@@ -20,6 +20,8 @@ class MainActivity : FlutterActivity() {
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        flutterEngine.platformViewsController.registry.registerViewFactory(
+            "dev.tamtoot/local_preview", SitePreviewFactory())
         fileDropChannel = MethodChannel(
             flutterEngine.dartExecutor.binaryMessenger,
             "dev.tamtoot/file_drop",

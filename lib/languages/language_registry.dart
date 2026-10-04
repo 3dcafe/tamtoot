@@ -9,6 +9,7 @@ const bundledLanguageIds = [
   'xml',
   'razor',
   'css',
+  'scss',
   'markdown',
   'conf',
 ];

@@ -8,6 +8,7 @@ project(runner LANGUAGES CXX)
 # Any new source files that you add to the application should be added here.
 add_executable(${BINARY_NAME} WIN32
   "flutter_window.cpp"
+  "site_preview.cpp"
   "main.cpp"
   "utils.cpp"
   "win32_window.cpp"
@@ -36,6 +37,29 @@ target_link_libraries(${BINARY_NAME} PRIVATE flutter flutter_wrapper_app)
 target_link_libraries(${BINARY_NAME} PRIVATE "dwmapi.lib")
 target_link_libraries(${BINARY_NAME} PRIVATE "shell32.lib")
 target_include_directories(${BINARY_NAME} PRIVATE "${CMAKE_SOURCE_DIR}")
+
+# Microsoft's native SDK only; no Flutter WebView package is used.
+include(FetchContent)
+FetchContent_Declare(tamtoot_webview2
+  URL https://www.nuget.org/api/v2/package/Microsoft.Web.WebView2/1.0.2792.45
+  DOWNLOAD_NAME webview2.zip
+)
+FetchContent_GetProperties(tamtoot_webview2)
+if(NOT tamtoot_webview2_POPULATED)
+  FetchContent_Populate(tamtoot_webview2)
+endif()
+if(CMAKE_GENERATOR_PLATFORM STREQUAL "ARM64")
+  set(TAMTOOT_WEBVIEW_ARCH arm64)
+elseif(CMAKE_SIZEOF_VOID_P EQUAL 8)
+  set(TAMTOOT_WEBVIEW_ARCH x64)
+else()
+  set(TAMTOOT_WEBVIEW_ARCH x86)
+endif()
+target_include_directories(${BINARY_NAME} PRIVATE "${tamtoot_webview2_SOURCE_DIR}/build/native/include")
+target_link_libraries(${BINARY_NAME} PRIVATE
+  "${tamtoot_webview2_SOURCE_DIR}/build/native/${TAMTOOT_WEBVIEW_ARCH}/WebView2LoaderStatic.lib"
+  ole32.lib shlwapi.lib version.lib
+)
 
 # Run the Flutter tool portions of the build. This must not be removed.
 add_dependencies(${BINARY_NAME} flutter_assemble)

@@ -43,7 +43,6 @@ class IdeSession {
       .firstOrNull;
   int _projectScan = 0;
   Future<void> detectProject() async {
-    if (!supportsFlutterTools) return;
     final root = workspaceRoot;
     final revision = ++_projectScan;
     final targets = root == null
