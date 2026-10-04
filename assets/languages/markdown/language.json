@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "packageVersion": "0.1.0",
+  "id": "markdown",
+  "name": "Markdown",
+  "extensions": [
+    ".md",
+    ".markdown",
+    ".mdown"
+  ],
+  "comments": {
+    "block": {
+      "open": "<!--",
+      "close": "-->"
+    }
+  },
+  "brackets": [],
+  "autoClosingPairs": [
+    {
+      "open": "[",
+      "close": "]"
+    },
+    {
+      "open": "(",
+      "close": ")"
+    }
+  ],
+  "icons": {
+    "symbol": "code"
+  },
+  "adapters": [],
+  "fileTemplates": {
+    "document": {
+      "name": "Markdown document",
+      "extension": ".md",
+      "body": "# {{name}}\n\n"
+    }
+  }
+}

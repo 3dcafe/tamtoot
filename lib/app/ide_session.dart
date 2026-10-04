@@ -333,13 +333,30 @@ class IdeSession {
   }
 
   /// Open [root] in Solution and remember it in recent workspaces.
-  Future<void> openWorkspaceFolder(Uri root) async {
+  Future<void> openWorkspaceFolder(
+    Uri root, {
+    bool restoreDocuments = false,
+  }) async {
     if (gitBusy) {
       throw StateError(
         'Wait for the current Git operation before switching projects',
       );
     }
     root = Uri.parse('${root.toString().replaceAll(RegExp(r'/+$'), '')}/');
+    final switchingProject = !restoreDocuments && workspaceRoot != root;
+    final previousDocuments = switchingProject
+        ? documents.documents.toList()
+        : <OpenDocument>[];
+    // Save before releasing the old workspace's filesystem access.
+    for (final document in previousDocuments.where(
+      (document) => document.dirty,
+    )) {
+      if (!await documents.save(document)) {
+        throw StateError(
+          'Project switch cancelled: unsaved document ${document.name}',
+        );
+      }
+    }
     final previousRoots = workspaceRoots;
     await SecurityScopedRoots.ensureAccess(root);
     for (final previous in previousRoots.where((item) => item != root)) {
@@ -363,6 +380,10 @@ class IdeSession {
         throw StateError(SecurityScopedRoots.reopenHint(root));
       }
       throw StateError(detail);
+    }
+    for (final document in previousDocuments) {
+      await _subscriptions.remove(document.id)?.cancel();
+      await documents.close(document);
     }
     await detectProject();
     recentWorkspaces
@@ -617,7 +638,7 @@ class IdeSession {
         if (root == null || !root.hasScheme) {
           throw const FormatException('Invalid project URI');
         }
-        await openWorkspaceFolder(root);
+        await openWorkspaceFolder(root, restoreDocuments: true);
         for (final folder in restoredWorkspaceFolders) {
           if (folder == root) continue;
           try {

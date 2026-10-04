@@ -1,0 +1,47 @@
+{
+  "schemaVersion": 1,
+  "packageVersion": "0.1.0",
+  "id": "conf",
+  "name": "Configuration / Nginx",
+  "extensions": [
+    ".conf"
+  ],
+  "filenames": [
+    "nginx.conf",
+    "mime.types"
+  ],
+  "comments": {
+    "line": "#"
+  },
+  "brackets": [
+    {
+      "open": "{",
+      "close": "}"
+    }
+  ],
+  "autoClosingPairs": [
+    {
+      "open": "{",
+      "close": "}"
+    },
+    {
+      "open": "\"",
+      "close": "\""
+    },
+    {
+      "open": "'",
+      "close": "'"
+    }
+  ],
+  "icons": {
+    "symbol": "code"
+  },
+  "adapters": [],
+  "fileTemplates": {
+    "config": {
+      "name": "Configuration file",
+      "extension": ".conf",
+      "body": "# {{name}}\n"
+    }
+  }
+}

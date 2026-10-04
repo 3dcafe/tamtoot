@@ -67,6 +67,74 @@ List<FoldingRegion> foldingRegionsForLines(List<String> lines) {
   return regions;
 }
 
+// Script folding ignores braces inside strings and comments. Multiline template
+// literals are folds themselves (e.g. Angular inline styles and templates).
+List<FoldingRegion> scriptFoldingRegions(List<String> lines) {
+  final stack = <({int line, int close})>[];
+  final ends = <int, int>{};
+  int? quote;
+  var quoteStart = 0;
+  var blockComment = false;
+  var commentStart = 0;
+  void region(int start, int end) {
+    if (end > start && end > (ends[start] ?? start)) ends[start] = end;
+  }
+
+  for (var line = 0; line < lines.length; line++) {
+    final text = lines[line];
+    for (var i = 0; i < text.length; i++) {
+      final c = text.codeUnitAt(i);
+      final next = i + 1 < text.length ? text.codeUnitAt(i + 1) : 0;
+      if (blockComment) {
+        if (c == 42 && next == 47) {
+          blockComment = false;
+          region(commentStart, line);
+          i++;
+        }
+        continue;
+      }
+      if (quote != null) {
+        if (c == 92) {
+          i++;
+          continue;
+        }
+        if (c == quote) {
+          if (quote == 96) region(quoteStart, line);
+          quote = null;
+        }
+        continue;
+      }
+      if (c == 47 && next == 47) break;
+      if (c == 47 && next == 42) {
+        blockComment = true;
+        commentStart = line;
+        i++;
+        continue;
+      }
+      if (c == 34 || c == 39 || c == 96) {
+        quote = c;
+        quoteStart = line;
+        continue;
+      }
+      if (c == 123 || c == 91 || (c == 40 && text.trimLeft().startsWith('@'))) {
+        stack.add((
+          line: line,
+          close: c == 123
+              ? 125
+              : c == 91
+              ? 93
+              : 41,
+        ));
+      } else if (stack.isNotEmpty && c == stack.last.close) {
+        final open = stack.removeLast();
+        region(open.line, line);
+      }
+    }
+  }
+  final starts = ends.keys.toList()..sort();
+  return [for (final start in starts) FoldingRegion(start, ends[start]!)];
+}
+
 /// Custom text surface; TextInputClient integrates platform IME without TextField.
 class CodeEditor extends StatefulWidget {
   const CodeEditor({
@@ -367,10 +435,15 @@ class _CodeEditorState extends State<CodeEditor> implements TextInputClient {
     }
   }
 
-  List<FoldingRegion> _foldRegions() => foldingRegionsForLines([
-    for (var line = 0; line < _editor.buffer.lineCount; line++)
-      _editor.buffer.getLine(line),
-  ]);
+  List<FoldingRegion> _foldRegions() {
+    final lines = [
+      for (var line = 0; line < _editor.buffer.lineCount; line++)
+        _editor.buffer.getLine(line),
+    ];
+    return {'typescript', 'javascript'}.contains(widget.language?.id)
+        ? scriptFoldingRegions(lines)
+        : foldingRegionsForLines(lines);
+  }
 
   List<int> _visibleLines(List<FoldingRegion> regions) {
     final collapsed = {

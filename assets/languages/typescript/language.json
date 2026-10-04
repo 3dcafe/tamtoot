@@ -1,0 +1,74 @@
+{
+  "schemaVersion": 1,
+  "packageVersion": "0.1.0",
+  "id": "typescript",
+  "name": "TypeScript",
+  "extensions": [
+    ".ts",
+    ".tsx",
+    ".mts",
+    ".cts"
+  ],
+  "comments": {
+    "line": "//",
+    "block": {
+      "open": "/*",
+      "close": "*/"
+    }
+  },
+  "brackets": [
+    {
+      "open": "(",
+      "close": ")"
+    },
+    {
+      "open": "[",
+      "close": "]"
+    },
+    {
+      "open": "{",
+      "close": "}"
+    }
+  ],
+  "autoClosingPairs": [
+    {
+      "open": "(",
+      "close": ")"
+    },
+    {
+      "open": "[",
+      "close": "]"
+    },
+    {
+      "open": "{",
+      "close": "}"
+    },
+    {
+      "open": "\"",
+      "close": "\""
+    },
+    {
+      "open": "'",
+      "close": "'"
+    }
+  ],
+  "indentation": {
+    "increaseAfter": "{"
+  },
+  "icons": {
+    "symbol": "code"
+  },
+  "adapters": [],
+  "fileTemplates": {
+    "class": {
+      "name": "TypeScript class",
+      "extension": ".ts",
+      "body": "export class {{name}} {\n}\n"
+    },
+    "interface": {
+      "name": "TypeScript interface",
+      "extension": ".ts",
+      "body": "export interface {{name}} {\n}\n"
+    }
+  }
+}

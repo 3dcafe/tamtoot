@@ -17,6 +17,7 @@ import 'http_requests_dialog.dart';
 import 'publish_project_dialog.dart';
 import 'dock_view.dart';
 import 'media_document_view.dart';
+import 'markdown_document_view.dart';
 import 'flutter_debug_panel.dart';
 import '../core/flutter/flutter_runner.dart';
 import 'project_launch_bar.dart';
@@ -604,6 +605,12 @@ class _IdeShellState extends ConsumerState<IdeShell> {
                 : active.isMediaPreview
                 ? MediaDocumentView(
                     key: ValueKey('media-${active.id}'),
+                    document: active,
+                    session: session,
+                  )
+                : session.languages.forPath(active.name)?.id == 'markdown'
+                ? MarkdownDocumentView(
+                    key: ValueKey('markdown-${active.id}'),
                     document: active,
                     session: session,
                   )

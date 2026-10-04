@@ -1,0 +1,56 @@
+{
+  "schemaVersion": 1,
+  "packageVersion": "0.1.0",
+  "rules": [
+    {
+      "begin": "<!--",
+      "end": "-->",
+      "scope": "comment"
+    },
+    {
+      "begin": "^\\s*(`{3,}|~{3,})",
+      "endCapture": 1,
+      "scope": "string"
+    },
+    {
+      "pattern": "^\\s{0,3}#{1,6}\\s+.*",
+      "scope": "keyword"
+    },
+    {
+      "pattern": "^\\s*(?:={3,}|-{3,}|\\*{3,}|_{3,})\\s*$",
+      "scope": "operator"
+    },
+    {
+      "pattern": "^\\s*>+",
+      "scope": "annotation"
+    },
+    {
+      "pattern": "^\\s*(?:[-+*]|\\d+[.)])\\s+",
+      "scope": "operator"
+    },
+    {
+      "pattern": "`[^`]+`",
+      "scope": "string"
+    },
+    {
+      "pattern": "!?\\[[^\\]]*\\]\\([^)]*\\)",
+      "scope": "function"
+    },
+    {
+      "pattern": "\\*\\*[^*]+\\*\\*|__[^_]+__",
+      "scope": "keyword"
+    },
+    {
+      "pattern": "(?<!\\*)\\*[^*]+\\*(?!\\*)|(?<!_)_[^_]+_(?!_)",
+      "scope": "annotation"
+    },
+    {
+      "pattern": "~~[^~]+~~",
+      "scope": "comment"
+    },
+    {
+      "pattern": "https?://[^\\s<>]+",
+      "scope": "type"
+    }
+  ]
+}

@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 1,
+  "packageVersion": "0.1.0",
+  "rules": [
+    {
+      "pattern": "(?<!\\\\)#.*$",
+      "scope": "comment"
+    },
+    {
+      "begin": "\"",
+      "end": "\"",
+      "escape": "\\\\.",
+      "scope": "string"
+    },
+    {
+      "begin": "'",
+      "end": "'",
+      "escape": "\\\\.",
+      "scope": "string"
+    },
+    {
+      "pattern": "(?<!\\\\)\\$(?:\\{[A-Za-z_][A-Za-z0-9_]*\\}|[A-Za-z_][A-Za-z0-9_]*|\\d+)",
+      "scope": "annotation"
+    },
+    {
+      "pattern": "(?:^|(?<=[;{}]))\\s*[A-Za-z_][A-Za-z0-9_]*",
+      "scope": "directive"
+    },
+    {
+      "pattern": "https?://[^\\s;{}]+|(?:/|\\./|\\.\\./)[^\\s;{}]+",
+      "scope": "string"
+    },
+    {
+      "pattern": "\\b(?:on|off|true|false|yes|no)\\b",
+      "scope": "keyword"
+    },
+    {
+      "pattern": "(?<![\\w.-])\\d+(?:\\.\\d+)*(?:[kKmMgG]|ms|[smhdwy])?(?![\\w.-])",
+      "scope": "number"
+    },
+    {
+      "pattern": "[{};=~^]",
+      "scope": "operator"
+    }
+  ]
+}

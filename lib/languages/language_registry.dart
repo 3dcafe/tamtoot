@@ -5,9 +5,12 @@ const bundledLanguageIds = [
   'csharp',
   'html',
   'javascript',
+  'typescript',
   'xml',
   'razor',
   'css',
+  'markdown',
+  'conf',
 ];
 
 class SyntaxToken {
