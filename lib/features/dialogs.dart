@@ -840,6 +840,16 @@ class _CloneRepositoryDialogState extends State<CloneRepositoryDialog> {
       );
     } else if (userValue.isNotEmpty || passValue.isNotEmpty) {
       credentials = GitCredentials(username: userValue, password: passValue);
+    } else {
+      final saved = widget.session.gitCredentials(
+        remote.replace(userInfo: '').toString(),
+      );
+      if (saved.token.isNotEmpty) {
+        credentials = GitCredentials(
+          username: saved.username,
+          token: saved.token,
+        );
+      }
     }
 
     setState(() {
@@ -916,6 +926,14 @@ class _CloneRepositoryDialogState extends State<CloneRepositoryDialog> {
         });
         widget.session.log('Clone failed: ${result.message}', error: true);
         return;
+      }
+      if (credentials != null) {
+        widget.session.rememberGitCredentials(
+          remote.replace(userInfo: '').toString(),
+          username: credentials.username ?? 'git',
+          token: credentials.token ?? credentials.password ?? '',
+        );
+        await widget.session.persistNow();
       }
       await widget.session.openWorkspaceFolder(targetUri);
       widget.session.log('Cloned and opened ${folder.text.trim()}');

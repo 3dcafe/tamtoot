@@ -77,12 +77,38 @@ Future<void> showFileGitMenu(
     items: [
       const PopupMenuItem(value: 'compare', child: Text('Compare with HEAD')),
       PopupMenuItem(
+        value: 'ignore',
+        enabled: !session.gitBusy && session.gitPath(uri) != '.gitignore',
+        child: const Text('Add to .gitignore'),
+      ),
+      PopupMenuItem(
         value: 'discard',
         enabled: !session.gitBusy,
         child: const Text('Discard changes…'),
       ),
     ],
   );
+  if (!context.mounted) return;
+  if (selected == 'ignore') {
+    try {
+      await session.addFileToGitignore(uri);
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Added to .gitignore. Already tracked files remain tracked.',
+            ),
+          ),
+        );
+      }
+    } catch (error) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('$error')));
+      }
+    }
+  }
   if (!context.mounted) return;
   if (selected == 'compare') await showFileChanges(context, session, uri);
   if (!context.mounted) return;

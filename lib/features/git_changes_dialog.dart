@@ -1,10 +1,13 @@
 import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'git_diff.dart';
 import 'git_history_dialog.dart';
 import 'publish_project_dialog.dart';
 import '../app/ide_session.dart';
 import '../core/git/git_service.dart';
+import '../core/git/http_git_service.dart';
+import '../core/git/git_http.dart';
 
 class GitChangesDialog extends StatefulWidget {
   const GitChangesDialog({
@@ -136,6 +139,12 @@ class _GitChangesDialogState extends State<GitChangesDialog> {
           final saved = widget.session.gitCredentials(remote);
           username.text = saved.username;
           token.text = saved.token;
+          final author = await widget.session.store.read('gitAuthor');
+          if (author != null) {
+            final data = jsonDecode(author) as Map<String, dynamic>;
+            if (name.text.isEmpty) name.text = data['name'] as String? ?? '';
+            if (email.text.isEmpty) email.text = data['email'] as String? ?? '';
+          }
           _credentialsLoaded = true;
         }
       }
@@ -368,6 +377,8 @@ class _GitChangesDialogState extends State<GitChangesDialog> {
     final usernameController = TextEditingController(text: username.text);
     final tokenController = TextEditingController(text: token.text);
     var obscure = true;
+    var checking = false;
+    String? checkResult;
     final saved = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => StatefulBuilder(
@@ -423,6 +434,64 @@ class _GitChangesDialogState extends State<GitChangesDialog> {
                       ),
                     ),
                   ),
+                  const SizedBox(height: 12),
+                  OutlinedButton.icon(
+                    icon: const Icon(Icons.wifi_find),
+                    label: Text(
+                      checking ? 'Checking…' : 'Test repository access',
+                    ),
+                    onPressed: checking
+                        ? null
+                        : () async {
+                            update(() {
+                              checking = true;
+                              checkResult = null;
+                            });
+                            String result;
+                            try {
+                              final remoteUri = Uri.parse(
+                                remoteController.text.trim(),
+                              );
+                              if (remoteUri.scheme != 'https' ||
+                                  remoteUri.host.isEmpty ||
+                                  remoteUri.userInfo.isNotEmpty) {
+                                throw const FormatException(
+                                  'Enter an HTTPS URL without embedded credentials.',
+                                );
+                              }
+                              final service = git;
+                              if (service is! HttpGitService) {
+                                throw UnsupportedError(
+                                  'Repository access test is unavailable.',
+                                );
+                              }
+                              await discoverRefs(
+                                service.transport,
+                                remoteUri,
+                                'git-upload-pack',
+                                credentials: GitCredentials(
+                                  username:
+                                      usernameController.text.trim().isEmpty
+                                      ? 'git'
+                                      : usernameController.text.trim(),
+                                  token: tokenController.text.trim(),
+                                ),
+                              ).timeout(const Duration(seconds: 20));
+                              result =
+                                  'Repository is accessible (read access).';
+                            } catch (error) {
+                              result =
+                                  'Repository access failed. Check the URL, credentials and network.';
+                            }
+                            if (dialogContext.mounted) {
+                              update(() {
+                                checking = false;
+                                checkResult = result;
+                              });
+                            }
+                          },
+                  ),
+                  if (checkResult != null) Text(checkResult!),
                 ],
               ),
             ),
@@ -473,6 +542,11 @@ class _GitChangesDialogState extends State<GitChangesDialog> {
           username: username.text,
           token: token.text,
         );
+        await widget.session.store.write(
+          'gitAuthor',
+          jsonEncode({'name': name.text.trim(), 'email': email.text.trim()}),
+        );
+        await widget.session.persistNow();
         await _load();
         widget.session.log('[Git] Settings updated for origin/$branch');
       } catch (error) {
