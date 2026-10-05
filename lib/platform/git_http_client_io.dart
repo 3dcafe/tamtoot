@@ -9,6 +9,15 @@ import 'package:http/io_client.dart';
 /// roots trusted by Windows, including certificates installed by an HTTPS proxy.
 Future<SecurityContext> windowsGitSecurityContext() async {
   final context = SecurityContext(withTrustedRoots: true);
+  // Portable Windows installations may have an incomplete or outdated ROOT
+  // store. Ship public Mozilla roots rather than relying on Windows updates.
+  final publicRoots = await rootBundle.load('assets/certificates/cacert.pem');
+  context.setTrustedCertificatesBytes(
+    publicRoots.buffer.asUint8List(
+      publicRoots.offsetInBytes,
+      publicRoots.lengthInBytes,
+    ),
+  );
   final roots = await const MethodChannel(
     'dev.tamtoot/tls_roots',
   ).invokeListMethod<Uint8List>('readRoots');
@@ -47,12 +56,13 @@ class GitIoClient extends http.BaseClient {
     if (_closed) throw http.ClientException('Git HTTP client is closed');
     try {
       return await (await (_client ??= _open())).send(request);
-    } on HandshakeException {
+    } on HandshakeException catch (error) {
       throw http.ClientException(
         'HTTPS certificate verification failed for ${request.url.host}. '
         'Check the system date and trusted root certificates. If an antivirus '
         'or proxy inspects HTTPS, its root certificate must be trusted by '
-        'the operating system. This failure occurs before token authentication.',
+        'the operating system. This failure occurs before token authentication. '
+        'TLS details: ${error.osError?.message ?? error.message}',
       );
     }
   }

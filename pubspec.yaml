@@ -102,6 +102,7 @@ flutter:
 
   assets:
     - pubspec.yaml
+    - assets/certificates/cacert.pem
     - assets/languages/dart/
     - assets/languages/csharp/
     - assets/languages/xml/

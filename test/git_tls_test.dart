@@ -89,4 +89,17 @@ void main() {
       );
     },
   );
+
+  test('Bundled public roots load even with an empty Windows store', () async {
+    messenger.setMockMethodCallHandler(channel, (_) async => <Uint8List>[]);
+    final context = await windowsGitSecurityContext();
+    final endpoint = await server();
+    final client = IOClient(HttpClient(context: context));
+    addTearDown(client.close);
+    // Public roots must not trust the private test CA.
+    await expectLater(
+      client.get(Uri.parse('https://localhost:${endpoint.port}')),
+      throwsA(isA<HandshakeException>()),
+    );
+  });
 }
