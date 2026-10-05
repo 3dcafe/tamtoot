@@ -1,0 +1,5 @@
+cmake_minimum_required(VERSION 3.18)
+project(tamtoot_ssh_crypto LANGUAGES CXX)
+add_library(tamtoot_ssh_crypto SHARED ssh_crypto.cpp)
+target_compile_features(tamtoot_ssh_crypto PRIVATE cxx_std_17)
+target_compile_options(tamtoot_ssh_crypto PRIVATE -Wall -Wextra)

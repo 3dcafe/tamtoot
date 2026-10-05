@@ -32,3 +32,8 @@ else()
 endif()
 
 target_include_directories(${BINARY_NAME} PRIVATE "${CMAKE_SOURCE_DIR}")
+
+# Own portable SSH primitives; only OS random APIs and the standard runtime.
+add_library(tamtoot_ssh_crypto SHARED "${CMAKE_CURRENT_SOURCE_DIR}/../../native/ssh/ssh_crypto.cpp")
+target_compile_features(tamtoot_ssh_crypto PRIVATE cxx_std_17)
+add_dependencies(${BINARY_NAME} tamtoot_ssh_crypto)

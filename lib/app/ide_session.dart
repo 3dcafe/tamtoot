@@ -1,4 +1,7 @@
 import 'dart:async';
+import '../core/ssh/ssh_profiles.dart';
+import '../core/ssh/host_keys/ssh_host_keys.dart';
+import '../platform/ssh_secrets/native_ssh_secrets.dart';
 import 'dart:convert';
 import 'package:crypto/crypto.dart';
 import '../core/commands/commands.dart';
@@ -24,6 +27,8 @@ import '../workspace/explorer/file_indicators.dart';
 /// Application orchestration. UI observes events through a Riverpod adapter.
 class IdeSession {
   IdeSession({required this.store, required this.documents, required this.git});
+  late final sshProfiles = SshProfiles(store, NativeSshSecrets());
+  late final sshHostKeys = SshHostKeys(store);
   final PersistenceStore store;
   final DocumentService documents;
   final GitService git;
@@ -735,6 +740,7 @@ class IdeSession {
   }
 
   Future<void> dispose() async {
+    sshProfiles.sessionSecrets.clear();
     _gitTimer?.cancel();
     _saveTimer?.cancel();
     await persistNow();

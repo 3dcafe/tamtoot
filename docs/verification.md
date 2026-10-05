@@ -155,3 +155,22 @@ The expanded test suite passes **57 tests**, including folder collapse/reopen, s
 - A headless Agent run using the saved `/v1/models` profile completed its structured action loop in one iteration with `TAMTOOT_AGENT_OK`.
 - Headless mode now cancels its SIGINT subscription after completion so the process exits instead of remaining open.
 - Automated coverage verifies URL normalization, discovery and the complete compatible request/response cycle.
+
+
+## SSH profiles and keys — 2026-10-05
+
+- Settings → SSH connections: global profile CRUD, bounded OpenSSH Ed25519 import,
+  explicit native-secret persistence and a session-only fallback; no new dependencies.
+- Secrets use own MethodChannel adapters: Apple Keychain, Android Keystore/AES-GCM,
+  Windows Credential Manager. Linux explicitly uses session storage only.
+- Added 14 domain/channel/widget tests covering malformed keys, secret isolation,
+  persistence rollback, interrupted imports, deferred deletion, unavailable storage,
+  profile CRUD and key import at phone width.
+- Final full suite: **238 passed, 1 skipped**. Dart analyzer: no issues.
+- Final macOS debug build and Android debug APK build: successful. Android build used
+  Gradle offline mode after cancelling an earlier stalled online build.
+- iOS Swift typecheck for arm64 simulator: successful; fixed the pre-existing preview
+  factory codec optionality. Full iOS build was interrupted and remains unverified.
+- Windows/Linux builds and real-device native secret CRUD were not verified.
+- Scope and platform details: [SSH stage 1](ssh-stage-1.ru.md). SSH connections,
+  cryptographic key validation, encrypted-key import and key generation are later work.

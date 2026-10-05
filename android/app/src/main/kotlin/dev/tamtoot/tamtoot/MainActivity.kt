@@ -20,6 +20,7 @@ class MainActivity : FlutterActivity() {
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        SshSecrets(this, flutterEngine.dartExecutor.binaryMessenger)
         flutterEngine.platformViewsController.registry.registerViewFactory(
             "dev.tamtoot/local_preview", SitePreviewFactory())
         fileDropChannel = MethodChannel(
@@ -43,7 +44,22 @@ class MainActivity : FlutterActivity() {
                     "readText" -> withDocument(call.argument<String>("uri"), result) { uri ->
                         val stream = contentResolver.openInputStream(uri)
                             ?: throw IllegalStateException("Provider did not return an input stream")
-                        stream.bufferedReader(Charsets.UTF_8).use { it.readText() }
+                        val maxBytes = call.argument<Int>("maxBytes")
+                        if (maxBytes == null) stream.bufferedReader(Charsets.UTF_8).use { it.readText() }
+                        else {
+                            require(maxBytes in 1..65536)
+                            stream.use {
+                                val output = java.io.ByteArrayOutputStream()
+                                val buffer = ByteArray(4096)
+                                while (true) {
+                                    val count = it.read(buffer)
+                                    if (count < 0) break
+                                    require(output.size() + count <= maxBytes) { "File exceeds import limit" }
+                                    output.write(buffer, 0, count)
+                                }
+                                output.toString("UTF-8")
+                            }
+                        }
                     }
                     "writeText" -> withDocument(call.argument<String>("uri"), result) { uri ->
                         val text = call.argument<String>("text")

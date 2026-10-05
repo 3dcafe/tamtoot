@@ -1,3 +1,4 @@
+import Security
 import Flutter
 import MobileCoreServices
 import UIKit
@@ -7,6 +8,54 @@ import WebKit
 @objc class AppDelegate: FlutterAppDelegate, FlutterImplicitEngineDelegate, UIDropInteractionDelegate {
   private var fileDropChannel: FlutterMethodChannel?
   private var fileDropInstalled = false
+
+
+  private var sshSecretsChannel: FlutterMethodChannel?
+  private func installSshSecrets(_ messenger: FlutterBinaryMessenger) {
+    let channel = FlutterMethodChannel(name: "dev.tamtoot/ssh_secrets", binaryMessenger: messenger)
+    sshSecretsChannel = channel
+    channel.setMethodCallHandler { call, result in
+      if call.method == "available" { result(true); return }
+      guard let args = call.arguments as? [String: Any],
+            let id = args["id"] as? String,
+            id.range(of: "^[a-f0-9]{32}$", options: .regularExpression) != nil else {
+        result(FlutterError(code: "invalid_reference", message: "Invalid secret reference", details: nil)); return
+      }
+      let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
+        kSecAttrService as String: "dev.tamtoot.ssh", kSecAttrAccount as String: id,
+        kSecAttrSynchronizable as String: false]
+      var status: OSStatus
+      switch call.method {
+      case "write":
+        guard let value = args["value"] as? FlutterStandardTypedData,
+              !value.data.isEmpty, value.data.count <= 65536 else {
+          result(FlutterError(code: "invalid_value", message: "Invalid secret size", details: nil)); return
+        }
+        let attributes: [String: Any] = [kSecValueData as String: value.data,
+          kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly]
+        status = SecItemUpdate(query as CFDictionary, attributes as CFDictionary)
+        if status == errSecItemNotFound {
+          status = SecItemAdd(query.merging(attributes) { _, new in new } as CFDictionary, nil)
+        }
+      case "read":
+        var readQuery = query
+        readQuery[kSecReturnData as String] = true
+        readQuery[kSecMatchLimit as String] = kSecMatchLimitOne
+        var item: CFTypeRef?
+        status = SecItemCopyMatching(readQuery as CFDictionary, &item)
+        if status == errSecItemNotFound { result(nil); return }
+        if status == errSecSuccess, let data = item as? Data {
+          result(FlutterStandardTypedData(bytes: data)); return
+        }
+      case "delete":
+        status = SecItemDelete(query as CFDictionary)
+        if status == errSecItemNotFound { status = errSecSuccess }
+      default: result(FlutterMethodNotImplemented); return
+      }
+      if status == errSecSuccess { result(nil) }
+      else { result(FlutterError(code: "secure_storage", message: "Keychain operation failed (\(status))", details: nil)) }
+    }
+  }
 
   override func application(
     _ application: UIApplication,
@@ -20,6 +69,7 @@ import WebKit
 
   func didInitializeImplicitFlutterEngine(_ engineBridge: FlutterImplicitEngineBridge) {
     GeneratedPluginRegistrant.register(with: engineBridge.pluginRegistry)
+    installSshSecrets(engineBridge.applicationRegistrar.messenger())
     engineBridge.applicationRegistrar.register(
       SitePreviewFactory(), withId: "dev.tamtoot/local_preview")
     fileDropChannel = FlutterMethodChannel(
@@ -117,7 +167,7 @@ import WebKit
 }
 
 private class SitePreviewFactory: NSObject, FlutterPlatformViewFactory {
-  func createArgsCodec() -> (FlutterMessageCodec & NSObjectProtocol)? {
+  func createArgsCodec() -> (FlutterMessageCodec & NSObjectProtocol) {
     FlutterStandardMessageCodec.sharedInstance()
   }
   func create(withFrame frame: CGRect, viewIdentifier viewId: Int64, arguments args: Any?) -> FlutterPlatformView {

@@ -1,3 +1,4 @@
+import Security
 import Cocoa
 import FlutterMacOS
 import WebKit
@@ -7,6 +8,54 @@ class MainFlutterWindow: NSWindow {
   private var bookmarkChannel: FlutterMethodChannel?
   private var fileDropChannel: FlutterMethodChannel?
   private var scopedUrls: [String: URL] = [:]
+
+
+  private var sshSecretsChannel: FlutterMethodChannel?
+  private func installSshSecrets(_ messenger: FlutterBinaryMessenger) {
+    let channel = FlutterMethodChannel(name: "dev.tamtoot/ssh_secrets", binaryMessenger: messenger)
+    sshSecretsChannel = channel
+    channel.setMethodCallHandler { call, result in
+      if call.method == "available" { result(true); return }
+      guard let args = call.arguments as? [String: Any],
+            let id = args["id"] as? String,
+            id.range(of: "^[a-f0-9]{32}$", options: .regularExpression) != nil else {
+        result(FlutterError(code: "invalid_reference", message: "Invalid secret reference", details: nil)); return
+      }
+      let query: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
+        kSecAttrService as String: "dev.tamtoot.ssh", kSecAttrAccount as String: id,
+        kSecAttrSynchronizable as String: false]
+      var status: OSStatus
+      switch call.method {
+      case "write":
+        guard let value = args["value"] as? FlutterStandardTypedData,
+              !value.data.isEmpty, value.data.count <= 65536 else {
+          result(FlutterError(code: "invalid_value", message: "Invalid secret size", details: nil)); return
+        }
+        let attributes: [String: Any] = [kSecValueData as String: value.data,
+          kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly]
+        status = SecItemUpdate(query as CFDictionary, attributes as CFDictionary)
+        if status == errSecItemNotFound {
+          status = SecItemAdd(query.merging(attributes) { _, new in new } as CFDictionary, nil)
+        }
+      case "read":
+        var readQuery = query
+        readQuery[kSecReturnData as String] = true
+        readQuery[kSecMatchLimit as String] = kSecMatchLimitOne
+        var item: CFTypeRef?
+        status = SecItemCopyMatching(readQuery as CFDictionary, &item)
+        if status == errSecItemNotFound { result(nil); return }
+        if status == errSecSuccess, let data = item as? Data {
+          result(FlutterStandardTypedData(bytes: data)); return
+        }
+      case "delete":
+        status = SecItemDelete(query as CFDictionary)
+        if status == errSecItemNotFound { status = errSecSuccess }
+      default: result(FlutterMethodNotImplemented); return
+      }
+      if status == errSecSuccess { result(nil) }
+      else { result(FlutterError(code: "secure_storage", message: "Keychain operation failed (\(status))", details: nil)) }
+    }
+  }
 
   override func awakeFromNib() {
     let flutterViewController = FlutterViewController()
@@ -22,6 +71,7 @@ class MainFlutterWindow: NSWindow {
     self.title = "TamToot"
 
     let messenger = flutterViewController.engine.binaryMessenger
+    installSshSecrets(messenger)
     fileDropChannel = FlutterMethodChannel(
       name: "dev.tamtoot/file_drop",
       binaryMessenger: messenger

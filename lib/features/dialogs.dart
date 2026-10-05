@@ -1,4 +1,5 @@
 import 'model_profiles_dialog.dart';
+import 'ssh_profiles_settings.dart';
 import 'project_search_dialog.dart';
 import 'agent_dialog.dart';
 import 'mcp_dialog.dart';
@@ -300,6 +301,7 @@ class _SettingsDialogState extends State<SettingsDialog> {
     'keymap': 'Keymap',
     'agents': 'Agents',
     'mcp': 'MCP servers',
+    if (!kIsWeb) 'ssh': 'SSH connections',
     if (supportsFlutterTools) 'flutter': 'Flutter',
     if (supportsFlutterTools) 'dotnet': '.NET',
   };
@@ -374,6 +376,8 @@ class _SettingsDialogState extends State<SettingsDialog> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
+                        if (section == 'ssh')
+                          SshProfilesSettings(session: widget.session),
                         if (section == 'flutter')
                           FlutterSettings(session: widget.session),
                         if (section == 'dotnet')

@@ -1,4 +1,5 @@
 #include "flutter_window.h"
+#include "ssh_secrets.h"
 
 #include <shellapi.h>
 
@@ -29,6 +30,7 @@ bool FlutterWindow::OnCreate() {
     return false;
   }
   RegisterPlugins(flutter_controller_->engine());
+  ssh_secrets_channel_ = CreateSshSecrets(flutter_controller_->engine()->messenger());
   file_drop_channel_ =
       std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(
           flutter_controller_->engine()->messenger(), "dev.tamtoot/file_drop",
@@ -54,6 +56,7 @@ bool FlutterWindow::OnCreate() {
 void FlutterWindow::OnDestroy() {
   DragAcceptFiles(GetHandle(), FALSE);
   file_drop_channel_.reset();
+  ssh_secrets_channel_.reset();
   site_preview_.reset();
   if (flutter_controller_) {
     flutter_controller_ = nullptr;

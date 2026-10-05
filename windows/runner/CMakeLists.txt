@@ -35,7 +35,7 @@ target_compile_definitions(${BINARY_NAME} PRIVATE "NOMINMAX")
 # dependencies here.
 target_link_libraries(${BINARY_NAME} PRIVATE flutter flutter_wrapper_app)
 target_link_libraries(${BINARY_NAME} PRIVATE "dwmapi.lib")
-target_link_libraries(${BINARY_NAME} PRIVATE "shell32.lib")
+target_link_libraries(${BINARY_NAME} PRIVATE "shell32.lib" "advapi32.lib")
 target_include_directories(${BINARY_NAME} PRIVATE "${CMAKE_SOURCE_DIR}")
 
 # Microsoft's native SDK only; no Flutter WebView package is used.
@@ -63,3 +63,9 @@ target_link_libraries(${BINARY_NAME} PRIVATE
 
 # Run the Flutter tool portions of the build. This must not be removed.
 add_dependencies(${BINARY_NAME} flutter_assemble)
+
+# Own portable SSH primitives; only OS random APIs and the standard runtime.
+add_library(tamtoot_ssh_crypto SHARED "${CMAKE_CURRENT_SOURCE_DIR}/../../native/ssh/ssh_crypto.cpp")
+target_compile_features(tamtoot_ssh_crypto PRIVATE cxx_std_17)
+add_dependencies(${BINARY_NAME} tamtoot_ssh_crypto)
+target_link_libraries(tamtoot_ssh_crypto PRIVATE bcrypt.lib)

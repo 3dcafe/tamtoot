@@ -19,6 +19,9 @@ val releaseSigningAvailable = !releaseStoreFile.isNullOrBlank() &&
 
 android {
     namespace = "dev.tamtoot.tamtoot"
+    externalNativeBuild {
+        cmake { path = file("../../native/ssh/CMakeLists.txt") }
+    }
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
 
