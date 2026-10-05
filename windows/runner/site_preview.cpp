@@ -15,6 +15,9 @@ struct SitePreview::View {
   bool active = true;
   ComPtr<ICoreWebView2Controller> controller;
   ComPtr<ICoreWebView2> browser;
+  RECT bounds{};
+  bool has_bounds = false;
+  bool visible = false;
   ~View() { if (controller) controller->Close(); }
 };
 
@@ -115,10 +118,20 @@ SitePreview::SitePreview(flutter::BinaryMessenger* messenger, HWND parent) : par
         RECT rect{x, y,
           x + static_cast<LONG>(std::lround(Number(*args, "width") * scale)),
           y + static_cast<LONG>(std::lround(Number(*args, "height") * scale))};
-        found->second->controller->put_Bounds(rect);
+        auto& state = *found->second;
+        if (!state.has_bounds || !EqualRect(&state.bounds, &rect)) {
+          if (SUCCEEDED(state.controller->put_Bounds(rect))) {
+            state.bounds = rect;
+            state.has_bounds = true;
+          }
+        }
         const auto visible = args->find(Value("visible"));
         const bool* show = visible == args->end() ? nullptr : std::get_if<bool>(&visible->second);
-        found->second->controller->put_IsVisible(show && *show);
+        const bool desired_visibility = show && *show;
+        if (state.visible != desired_visibility &&
+            SUCCEEDED(state.controller->put_IsVisible(desired_visibility))) {
+          state.visible = desired_visibility;
+        }
       }
       result->Success(); return;
     }

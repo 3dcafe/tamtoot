@@ -21,7 +21,8 @@ class HttpGitService
         GitHistoryProvider,
         GitFileChangesProvider,
         GitDiagnosticsProvider,
-        GitProgressProvider {
+        GitProgressProvider,
+        GitStatusProgressProvider {
   HttpGitService({
     required GitHttpTransport transport,
     required this.openStore,
@@ -43,6 +44,8 @@ class HttpGitService
   void Function(String)? diagnosticLog;
   @override
   void Function(GitProgress)? onProgress;
+  @override
+  void Function(String)? onStatusProgress;
 
   @override
   Future<GitResult> checkConnection(
@@ -490,6 +493,7 @@ class HttpGitService
 
   @override
   Future<List<GitStatusEntry>> statusEntries(Uri directory) async {
+    onStatusProgress?.call('Reading HEAD and tracked files…');
     final store = openStore(directory);
     final db = GitObjectDatabase(store, inflateAt, deflate);
     final head = await db.readHead();
@@ -499,7 +503,14 @@ class HttpGitService
       await _walkTree(db, commit.tree, '', headFiles);
     }
     final entries = <GitStatusEntry>[];
+    var checked = 0;
     for (final path in headFiles.keys.toList()..sort()) {
+      checked++;
+      if (checked == 1 || checked % 50 == 0 || checked == headFiles.length) {
+        onStatusProgress?.call(
+          'Checking tracked files: $checked / ${headFiles.length}',
+        );
+      }
       if (_internal(path)) continue;
       final headHash = headFiles[path];
       if (!await store.exists(path)) {
@@ -514,12 +525,16 @@ class HttpGitService
         entries.add(GitStatusEntry(' ', 'M', path));
       }
     }
+    onStatusProgress?.call(
+      'Finding untracked files and applying ignore rules…',
+    );
     final workFiles = await store.listGitWorkFiles();
     for (final path in workFiles..sort()) {
       if (!_internal(path) && !headFiles.containsKey(path)) {
         entries.add(GitStatusEntry('?', '?', path));
       }
     }
+    onStatusProgress?.call('Status complete: ${entries.length} changed files');
     return entries;
   }
 

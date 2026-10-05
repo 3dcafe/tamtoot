@@ -34,6 +34,9 @@ class _GitChangesDialogState extends State<GitChangesDialog> {
   bool busy = true, ready = false, _identityLoaded = false;
   bool _credentialsLoaded = false;
   bool _loading = false;
+  String _loadStage = '';
+  Timer? _loadTimer;
+  DateTime? _loadStarted;
   bool _changesExpanded = true;
   bool _unversionedExpanded = true;
   StreamSubscription<int>? _changes;
@@ -80,6 +83,7 @@ class _GitChangesDialogState extends State<GitChangesDialog> {
 
   @override
   void dispose() {
+    _loadTimer?.cancel();
     _changes?.cancel();
     _refreshTimer?.cancel();
     for (final controller in [message, name, email, username, token]) {
@@ -119,6 +123,23 @@ class _GitChangesDialogState extends State<GitChangesDialog> {
   Future<void> _load({bool background = false}) async {
     if (!mounted || _loading) return;
     _loading = true;
+    _loadStarted = DateTime.now();
+    _loadTimer?.cancel();
+    _loadTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (mounted) setState(() {});
+    });
+    void stage(String value) {
+      if (!mounted) return;
+      setState(() => _loadStage = value);
+      scheduleMicrotask(() {
+        if (mounted) widget.session.log('[Git status] $value');
+      });
+    }
+
+    stage('Reading repository settings…');
+    if (git is GitStatusProgressProvider) {
+      (git as GitStatusProgressProvider).onStatusProgress = stage;
+    }
     if (!background) {
       setState(() {
         busy = true;
@@ -128,7 +149,9 @@ class _GitChangesDialogState extends State<GitChangesDialog> {
     try {
       final identity = git;
       if (identity is GitIdentityProvider) {
-        final value = await (identity as GitIdentityProvider).identity(root);
+        final value = await (identity as GitIdentityProvider)
+            .identity(root)
+            .timeout(const Duration(seconds: 15));
         branch = value.branch;
         if (!_identityLoaded) {
           name.text = value.name;
@@ -136,7 +159,9 @@ class _GitChangesDialogState extends State<GitChangesDialog> {
           _identityLoaded = true;
         }
       }
-      final url = await git.remoteUrl(root);
+      final url = await git
+          .remoteUrl(root)
+          .timeout(const Duration(seconds: 15));
       remote = url.ok ? url.stdout.trim() : '';
       // Never display credentials embedded in a pre-existing remote URL.
       if (remote.isNotEmpty) {
@@ -154,7 +179,10 @@ class _GitChangesDialogState extends State<GitChangesDialog> {
           _credentialsLoaded = true;
         }
       }
-      entries = [...await git.statusEntries(root)];
+      stage('Checking working-tree files…');
+      entries = [
+        ...await git.statusEntries(root).timeout(const Duration(seconds: 125)),
+      ];
       unsaved.clear();
       for (final doc in widget.session.documents.documents) {
         final uri = doc.uri;
@@ -181,9 +209,15 @@ class _GitChangesDialogState extends State<GitChangesDialog> {
       entries.sort((a, b) => a.path.compareTo(b.path));
       selected.retainAll(entries.map((e) => e.path));
       ready = true;
+      stage('Ready: ${entries.length} changed files');
     } catch (error) {
       feedback = safeError(error);
+      stage('Failed: $feedback');
     } finally {
+      _loadTimer?.cancel();
+      if (git is GitStatusProgressProvider) {
+        (git as GitStatusProgressProvider).onStatusProgress = null;
+      }
       _loading = false;
       _observedState = _stateFingerprint();
       if (mounted) {
@@ -942,6 +976,14 @@ class _GitChangesDialogState extends State<GitChangesDialog> {
                 ),
               ),
             if (busy) const LinearProgressIndicator(),
+            if (_loading)
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                child: SelectableText(
+                  '$_loadStage · '
+                  '${_loadStarted == null ? 0 : DateTime.now().difference(_loadStarted!).inSeconds}s elapsed',
+                ),
+              ),
             if (ready && entries.isEmpty)
               const Padding(
                 padding: EdgeInsets.symmetric(vertical: 12),

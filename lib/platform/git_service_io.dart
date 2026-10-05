@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'dart:isolate';
+import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
@@ -16,6 +17,7 @@ import 'git_http_client_io.dart';
 final class FileGitRepositoryStore extends GitRepositoryStore {
   FileGitRepositoryStore(this.root);
   final Directory root;
+  void Function(int)? onScanProgress;
 
   File _file(String path) => File.fromUri(root.uri.resolveUri(Uri(path: path)));
   Directory _dir(String path) =>
@@ -100,6 +102,7 @@ final class FileGitRepositoryStore extends GitRepositoryStore {
 
   @override
   Future<List<String>> listGitWorkFiles() async {
+    var scanned = 0;
     final baseIgnore = GitIgnore();
     final infoExclude = _file('.git/info/exclude');
     if (await infoExclude.exists()) {
@@ -118,6 +121,8 @@ final class FileGitRepositoryStore extends GitRepositoryStore {
         ignore.add(await ignoreFile.readAsString(), base: relative);
       }
       await for (final entity in directory.list(followLinks: false)) {
+        scanned++;
+        if (scanned % 250 == 0) onScanProgress?.call(scanned);
         final path = _relative(entity.path);
         if (relative.isEmpty && path == '.git') continue;
         if (entity is Directory) {
@@ -130,6 +135,7 @@ final class FileGitRepositoryStore extends GitRepositoryStore {
     }
 
     await walk(root, '', baseIgnore);
+    onScanProgress?.call(scanned);
     return out;
   }
 
@@ -153,7 +159,11 @@ class PlatformGitService extends HttpGitService {
   Future<List<GitStatusEntry>> statusEntries(Uri directory) async {
     final pending = _statusScans[directory];
     if (pending != null) return pending;
-    final scan = Isolate.run(() => _scanFileGitStatus(directory));
+    final scan = _runFileGitScan(
+      directory,
+      false,
+      (line) => onStatusProgress?.call(line),
+    ).then((value) => value as List<GitStatusEntry>);
     _statusScans[directory] = scan;
     try {
       return await scan;
@@ -166,7 +176,11 @@ class PlatformGitService extends HttpGitService {
   Future<GitPublicationState> publicationState(Uri directory) async {
     final pending = _publicationScans[directory];
     if (pending != null) return pending;
-    final scan = Isolate.run(() => _scanFileGitPublication(directory));
+    final scan = _runFileGitScan(
+      directory,
+      true,
+      (line) => onStatusProgress?.call(line),
+    ).then((value) => value as GitPublicationState);
     _publicationScans[directory] = scan;
     try {
       return await scan;
@@ -196,13 +210,87 @@ FileGitRepositoryStore _openFileGitStore(Uri uri) {
   return FileGitRepositoryStore(Directory.fromUri(uri));
 }
 
-Future<List<GitStatusEntry>> _scanFileGitStatus(Uri directory) =>
-    HttpGitService(
-      transport: PackageHttpTransport(),
-      openStore: _openFileGitStore,
-      inflateAt: sharedInflateAt,
-      deflate: sharedDeflate,
-    ).statusEntries(directory);
+Future<List<GitStatusEntry>> _scanFileGitStatus(Uri directory, SendPort port) =>
+    (HttpGitService(
+          transport: PackageHttpTransport(),
+          openStore: (uri) => _openFileGitStore(uri)
+            ..onScanProgress = (count) => port.send((
+              'progress',
+              'Scanning working-tree entries: $count',
+            )),
+          inflateAt: sharedInflateAt,
+          deflate: sharedDeflate,
+        )..onStatusProgress = (line) => port.send(('progress', line)))
+        .statusEntries(directory);
+
+Future<Object> _runFileGitScan(
+  Uri directory,
+  bool publication,
+  void Function(String) progress,
+) async {
+  final port = ReceivePort();
+  final result = Completer<Object>();
+  Isolate? worker;
+  final subscription = port.listen((message) {
+    if (result.isCompleted) return;
+    if (message is (String, Object)) {
+      switch (message.$1) {
+        case 'progress':
+          progress(message.$2 as String);
+        case 'result':
+          result.complete(message.$2);
+        case 'error':
+          result.completeError(GitException(message.$2 as String));
+      }
+    } else {
+      result.completeError(
+        GitException('Git status worker exited unexpectedly: $message'),
+      );
+    }
+  });
+  final timeout = Timer(const Duration(minutes: 2), () {
+    if (!result.isCompleted) {
+      result.completeError(
+        GitException(
+          'Git status scan timed out after 120 seconds. Check disk access and repository size.',
+        ),
+      );
+    }
+    worker?.kill(priority: Isolate.immediate);
+  });
+  try {
+    worker = await Isolate.spawn(
+      _fileGitScanWorker,
+      (directory, publication, port.sendPort),
+      onError: port.sendPort,
+      onExit: port.sendPort,
+    );
+    return await result.future;
+  } finally {
+    timeout.cancel();
+    worker?.kill(priority: Isolate.immediate);
+    await subscription.cancel();
+    port.close();
+  }
+}
+
+Future<void> _fileGitScanWorker((Uri, bool, SendPort) request) async {
+  final (directory, publication, port) = request;
+  try {
+    port.send((
+      'progress',
+      publication
+          ? 'Checking unpublished commit history…'
+          : 'Starting background Git status scan…',
+    ));
+    final Object result = publication
+        ? await _scanFileGitPublication(directory)
+        : await _scanFileGitStatus(directory, port);
+    port.send(('result', result));
+  } catch (error) {
+    port.send(('error', error.toString()));
+  }
+}
 
 Future<GitPublicationState> _scanFileGitPublication(Uri directory) =>
     readPublicationState(

@@ -138,6 +138,10 @@ abstract interface class GitProgressProvider {
   set onProgress(void Function(GitProgress)? callback);
 }
 
+abstract interface class GitStatusProgressProvider {
+  set onStatusProgress(void Function(String)? callback);
+}
+
 abstract interface class GitService {
   /// `true` when this platform can run the HTTP git client.
   bool get available;

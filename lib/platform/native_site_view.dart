@@ -20,6 +20,7 @@ class _NativeSiteViewState extends State<NativeSiteView>
   Timer? timer;
   bool ready = false, syncing = false, foreground = true;
   String? error;
+  Map<String, Object>? _lastBounds;
   bool get overlay =>
       !kIsWeb &&
       {
@@ -64,19 +65,22 @@ class _NativeSiteViewState extends State<NativeSiteView>
     if (!ready || syncing || !mounted) return;
     final box = area.currentContext?.findRenderObject();
     if (box is! RenderBox || !box.hasSize) return;
-    syncing = true;
     final point = box.localToGlobal(Offset.zero);
     final visible = foreground && (ModalRoute.of(context)?.isCurrent ?? true);
+    final bounds = <String, Object>{
+      'id': id,
+      'x': point.dx,
+      'y': point.dy,
+      'width': box.size.width,
+      'height': box.size.height,
+      'scale': MediaQuery.devicePixelRatioOf(context),
+      'visible': visible,
+    };
+    if (mapEquals(bounds, _lastBounds)) return;
+    syncing = true;
     try {
-      await channel.invokeMethod<void>('bounds', {
-        'id': id,
-        'x': point.dx,
-        'y': point.dy,
-        'width': box.size.width,
-        'height': box.size.height,
-        'scale': MediaQuery.devicePixelRatioOf(context),
-        'visible': visible,
-      });
+      await channel.invokeMethod<void>('bounds', bounds);
+      _lastBounds = bounds;
     } catch (_) {
       /* The runner may already be closing. */
     }
@@ -85,6 +89,9 @@ class _NativeSiteViewState extends State<NativeSiteView>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    // Native browser focus can make Flutter inactive without hiding the app.
+    // Hiding the focused WebView here creates a hide/show loop and loses input.
+    if (state == AppLifecycleState.inactive) return;
     foreground = state == AppLifecycleState.resumed;
     unawaited(sync());
   }

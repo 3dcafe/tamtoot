@@ -55,6 +55,8 @@ void main() {
       final root = await Directory.systemTemp.createTemp('tamtoot-status-');
       addTearDown(() => root.delete(recursive: true));
       final git = PlatformGitService();
+      final stages = <String>[];
+      git.onStatusProgress = stages.add;
       (await git.init(root.uri, branch: 'main')).ensureOk();
       await git.setIdentity(root.uri, 'Test', 'test@example.com');
       final file = File('${root.path}/file.txt');
@@ -64,6 +66,17 @@ void main() {
       (await git.add(root.uri)).ensureOk();
       (await git.commit(root.uri, 'Initial')).ensureOk();
       expect(await git.statusEntries(root.uri), isEmpty);
+      expect(stages, contains('Starting background Git status scan…'));
+      expect(
+        stages.any((stage) => stage.startsWith('Checking tracked files:')),
+        true,
+      );
+      expect(
+        stages.any(
+          (stage) => stage.startsWith('Scanning working-tree entries:'),
+        ),
+        true,
+      );
 
       await file.writeAsString(
         'other',
