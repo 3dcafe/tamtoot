@@ -1,5 +1,6 @@
 #include "flutter_window.h"
 #include "ssh_secrets.h"
+#include "tls_roots.h"
 
 #include <shellapi.h>
 
@@ -30,6 +31,7 @@ bool FlutterWindow::OnCreate() {
     return false;
   }
   RegisterPlugins(flutter_controller_->engine());
+  tls_roots_channel_ = CreateTlsRoots(flutter_controller_->engine()->messenger());
   ssh_secrets_channel_ = CreateSshSecrets(flutter_controller_->engine()->messenger());
   file_drop_channel_ =
       std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(
@@ -57,6 +59,7 @@ void FlutterWindow::OnDestroy() {
   DragAcceptFiles(GetHandle(), FALSE);
   file_drop_channel_.reset();
   ssh_secrets_channel_.reset();
+  tls_roots_channel_.reset();
   site_preview_.reset();
   if (flutter_controller_) {
     flutter_controller_ = nullptr;

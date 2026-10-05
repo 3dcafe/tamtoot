@@ -28,6 +28,7 @@ class FlutterWindow : public Win32Window {
  private:
   // The project to run.
   std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>> ssh_secrets_channel_;
+  std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>> tls_roots_channel_;
   flutter::DartProject project_;
 
   // The Flutter instance hosted by this window.

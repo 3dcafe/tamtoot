@@ -8,6 +8,7 @@ import '../core/git/git_ignore.dart';
 import '../core/git/git_store.dart';
 import '../core/git/http_git_service.dart';
 import 'git_shared.dart';
+import 'git_http_client_io.dart';
 
 /// File-backed repository store for mobile / desktop.
 final class FileGitRepositoryStore extends GitRepositoryStore {
@@ -145,7 +146,7 @@ final class FileGitRepositoryStore extends GitRepositoryStore {
 class PlatformGitService extends HttpGitService {
   PlatformGitService({http.Client? client})
     : super(
-        transport: PackageHttpTransport(client: client),
+        transport: PackageHttpTransport(client: client ?? GitIoClient()),
         openStore: (uri) {
           if (uri.scheme != 'file') {
             throw ArgumentError('Expected file:// directory, got $uri');
