@@ -23,7 +23,11 @@ String normalizeSshHost(String value) {
         )) {
       return parts.map(int.parse).join('.');
     }
-    return host.toLowerCase().replaceAll(RegExp(r'\.+$'), '');
+    final normalized = host.toLowerCase().replaceAll(RegExp(r'\.+$'), '');
+    if (normalized.isEmpty) {
+      throw const SshException('Invalid SSH server name.');
+    }
+    return normalized;
   }
   final zone = host.split('%');
   if (zone.length > 2 ||
@@ -36,7 +40,9 @@ String normalizeSshHost(String value) {
     final split = address.lastIndexOf(':');
     final v4 = address.substring(split + 1).split('.');
     if (v4.length != 4 ||
-        v4.any((p) => !RegExp(r'^\d{1,3}$').hasMatch(p) || int.parse(p) > 255)) {
+        v4.any(
+          (p) => !RegExp(r'^\d{1,3}$').hasMatch(p) || int.parse(p) > 255,
+        )) {
       throw const SshException('Invalid IPv6 address.');
     }
     final nums = v4.map(int.parse).toList();
@@ -52,7 +58,9 @@ String normalizeSshHost(String value) {
         ...left,
         ...right,
       ].any((p) => !RegExp(r'^[a-fA-F0-9]{1,4}$').hasMatch(p)) ||
-      (halves.length == 1 ? left.length != 8 : left.length + right.length >= 8)) {
+      (halves.length == 1
+          ? left.length != 8
+          : left.length + right.length >= 8)) {
     throw const SshException('Invalid IPv6 address.');
   }
   final all = [

@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:math';
 import 'dart:typed_data';
 import '../filesystem/filesystem.dart';
+import 'auth/ssh_private_key.dart';
 
 enum SshAuthentication { password, privateKey }
 
@@ -208,7 +209,7 @@ class SshProfiles {
             throw const FormatException('Invalid secret size.');
           }
           if (profile.authentication == SshAuthentication.privateKey) {
-            validateEd25519PrivateKey(utf8.decode(copied));
+            validateOpenSshPrivateKey(utf8.decode(copied));
           }
           target = persistSecret ? secrets : sessionSecrets;
           if (persistSecret && !await secrets.available) {

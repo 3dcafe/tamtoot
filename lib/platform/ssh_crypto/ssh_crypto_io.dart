@@ -1,4 +1,5 @@
 import 'dart:ffi';
+import 'dart:isolate';
 import 'dart:io';
 import 'dart:typed_data';
 import '../../core/ssh/crypto/ssh_crypto.dart';
@@ -18,16 +19,17 @@ typedef _ApplyN =
 
 SshCrypto createSshCrypto() {
   try {
-    final library = Platform.isAndroid
-        ? DynamicLibrary.open('libtamtoot_ssh_crypto.so')
+    final path = Platform.isAndroid
+        ? 'libtamtoot_ssh_crypto.so'
         : Platform.isWindows
-        ? DynamicLibrary.open('tamtoot_ssh_crypto.dll')
+        ? 'tamtoot_ssh_crypto.dll'
         : Platform.isLinux
-        ? DynamicLibrary.open(
-            '${File(Platform.resolvedExecutable).parent.path}/lib/libtamtoot_ssh_crypto.so',
-          )
-        : DynamicLibrary.process();
-    return NativeSshCrypto(library);
+        ? '${File(Platform.resolvedExecutable).parent.path}/lib/libtamtoot_ssh_crypto.so'
+        : null;
+    return NativeSshCrypto(
+      path == null ? DynamicLibrary.process() : DynamicLibrary.open(path),
+      libraryPath: path,
+    );
   } catch (_) {
     throw const SshException(
       'Native SSH cryptography is unavailable. Rebuild the application.',
@@ -35,8 +37,9 @@ SshCrypto createSshCrypto() {
   }
 }
 
-class NativeSshCrypto implements SshCrypto {
-  NativeSshCrypto(this.library);
+class NativeSshCrypto implements SshSigningCrypto {
+  NativeSshCrypto(this.library, {this.libraryPath});
+  final String? libraryPath;
   final DynamicLibrary library;
   late final _alloc = library
       .lookupFunction<_AllocN, Pointer<Void> Function(int)>(
@@ -82,6 +85,118 @@ class NativeSshCrypto implements SshCrypto {
       .lookupFunction<_DisposeN, void Function(Pointer<Void>)>(
         'tamtoot_ssh_cipher_free',
       );
+  late final _signerCreate = library
+      .lookupFunction<
+        Pointer<Void> Function(Int32, Pointer<Uint8>, UintPtr),
+        Pointer<Void> Function(int, Pointer<Uint8>, int)
+      >('tamtoot_ssh_signer_create');
+  late final _signerSize = library
+      .lookupFunction<
+        UintPtr Function(Pointer<Void>),
+        int Function(Pointer<Void>)
+      >('tamtoot_ssh_signer_size');
+  late final _signerSign = library
+      .lookupFunction<
+        Int32 Function(
+          Pointer<Void>,
+          Int32,
+          Pointer<Uint8>,
+          UintPtr,
+          Pointer<Uint8>,
+          UintPtr,
+        ),
+        int Function(
+          Pointer<Void>,
+          int,
+          Pointer<Uint8>,
+          int,
+          Pointer<Uint8>,
+          int,
+        )
+      >('tamtoot_ssh_signer_sign');
+  late final _signerFree = library
+      .lookupFunction<
+        Void Function(Pointer<Void>),
+        void Function(Pointer<Void>)
+      >('tamtoot_ssh_signer_free');
+  late final _bcrypt = library
+      .lookupFunction<
+        Int32 Function(
+          Pointer<Uint8>,
+          UintPtr,
+          Pointer<Uint8>,
+          UintPtr,
+          Uint32,
+          Pointer<Uint8>,
+          UintPtr,
+        ),
+        int Function(
+          Pointer<Uint8>,
+          int,
+          Pointer<Uint8>,
+          int,
+          int,
+          Pointer<Uint8>,
+          int,
+        )
+      >('tamtoot_ssh_bcrypt');
+  @override
+  SshSigner createSigner(String algorithm, List<int> material) {
+    final kind = algorithm == 'ssh-ed25519'
+        ? 1
+        : algorithm == 'ssh-rsa'
+        ? 2
+        : 0;
+    if (kind == 0) {
+      throw const SshException('Unsupported private-key algorithm.');
+    }
+    final input = _buffer(material.length, material);
+    try {
+      final handle = _signerCreate(kind, input.pointer, material.length);
+      if (handle == nullptr) {
+        throw const SshException(
+          'Private key does not match its public key or has invalid parameters.',
+        );
+      }
+      return _NativeSigner(this, handle, _signerSize(handle), kind);
+    } finally {
+      input.dispose();
+    }
+  }
+
+  @override
+  Future<Uint8List> bcryptPbkdf(
+    List<int> password,
+    List<int> salt,
+    int rounds,
+    int length,
+  ) async {
+    if (password.isEmpty ||
+        password.length > 65536 ||
+        salt.isEmpty ||
+        salt.length > 64 ||
+        rounds < 1 ||
+        rounds > 128 ||
+        length < 1 ||
+        length > 64) {
+      throw const SshException(
+        'Unsupported private-key derivation parameters.',
+      );
+    }
+    final request = (
+      path: libraryPath,
+      password: Uint8List.fromList(password),
+      salt: Uint8List.fromList(salt),
+      rounds: rounds,
+      length: length,
+    );
+    try {
+      return await Isolate.run(() => _deriveInIsolate(request));
+    } finally {
+      request.password.fillRange(0, request.password.length, 0);
+    }
+  }
+
   _Buffer _buffer(int length, [List<int>? bytes]) =>
       _Buffer(this, length, bytes);
   @override
@@ -233,5 +348,120 @@ class _NativeCipher implements SshCipher {
       crypto._cipherFree(handle);
       handle = nullptr;
     }
+  }
+}
+
+NativeSshCrypto _workerCrypto(String? path) => NativeSshCrypto(
+  path == null ? DynamicLibrary.process() : DynamicLibrary.open(path),
+  libraryPath: path,
+);
+Uint8List _deriveInIsolate(
+  ({String? path, Uint8List password, Uint8List salt, int rounds, int length})
+  request,
+) {
+  final crypto = _workerCrypto(request.path);
+  final password = crypto._buffer(request.password.length, request.password),
+      salt = crypto._buffer(request.salt.length, request.salt),
+      output = crypto._buffer(request.length);
+  try {
+    if (crypto._bcrypt(
+          password.pointer,
+          request.password.length,
+          salt.pointer,
+          request.salt.length,
+          request.rounds,
+          output.pointer,
+          request.length,
+        ) !=
+        1) {
+      throw const SshException(
+        'Unsupported private-key derivation parameters.',
+      );
+    }
+    return output.copy(request.length);
+  } finally {
+    password.dispose();
+    salt.dispose();
+    output.dispose();
+    request.password.fillRange(0, request.password.length, 0);
+  }
+}
+
+Uint8List _signInIsolate(
+  ({String? path, int address, int bits, int size, Uint8List message}) request,
+) {
+  final crypto = _workerCrypto(request.path),
+      input = crypto._buffer(request.message.length, request.message);
+  final output = crypto._buffer(request.size);
+  try {
+    if (crypto._signerSign(
+          Pointer<Void>.fromAddress(request.address),
+          request.bits,
+          input.pointer,
+          request.message.length,
+          output.pointer,
+          request.size,
+        ) !=
+        1) {
+      throw const SshException('Native SSH signing failed.');
+    }
+    return output.copy(request.size);
+  } finally {
+    input.dispose();
+    output.dispose();
+    request.message.fillRange(0, request.message.length, 0);
+  }
+}
+
+class _NativeSigner implements SshSigner {
+  _NativeSigner(this.crypto, this.handle, this.size, this.kind);
+  final NativeSshCrypto crypto;
+  Pointer<Void> handle;
+  final int size, kind;
+  bool busy = false, closed = false;
+  @override
+  Future<Uint8List> sign(List<int> message, String algorithm) async {
+    final bits = algorithm == 'ssh-ed25519'
+        ? 0
+        : algorithm == 'rsa-sha2-512'
+        ? 512
+        : algorithm == 'rsa-sha2-256'
+        ? 256
+        : -1;
+    if (closed ||
+        busy ||
+        bits < 0 ||
+        (kind == 1 && bits != 0) ||
+        (kind == 2 && bits == 0)) {
+      throw const SshException('Invalid SSH signing state or algorithm.');
+    }
+    busy = true;
+    final request = (
+      path: crypto.libraryPath,
+      address: handle.address,
+      bits: bits,
+      size: size,
+      message: Uint8List.fromList(message),
+    );
+    try {
+      return await Isolate.run(() => _signInIsolate(request));
+    } finally {
+      request.message.fillRange(0, request.message.length, 0);
+      busy = false;
+      if (closed) _free();
+    }
+  }
+
+  void _free() {
+    if (handle != nullptr) {
+      crypto._signerFree(handle);
+      handle = nullptr;
+    }
+  }
+
+  @override
+  void dispose() {
+    closed = true;
+    if (!busy) _free();
   }
 }

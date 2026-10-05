@@ -5,11 +5,15 @@ import 'package:tamtoot/platform/ssh_crypto/ssh_crypto_io.dart';
 Future<({NativeSshCrypto crypto, Directory? directory})>
 buildSshTestCrypto() async {
   final supplied = Platform.environment['TAMTOOT_SSH_TEST_LIBRARY'];
-  if (supplied != null)
+  if (supplied != null) {
     return (
-      crypto: NativeSshCrypto(DynamicLibrary.open(supplied)),
+      crypto: NativeSshCrypto(
+        DynamicLibrary.open(supplied),
+        libraryPath: supplied,
+      ),
       directory: null,
     );
+  }
   final dir = await Directory.systemTemp.createTemp('tamtoot-ssh-native-');
   final source = '${Directory.current.path}/native/ssh/ssh_crypto.cpp';
   final output =
@@ -52,5 +56,8 @@ buildSshTestCrypto() async {
     await dir.delete(recursive: true);
     throw StateError('Native SSH test compile failed: ${result.stderr}');
   }
-  return (crypto: NativeSshCrypto(DynamicLibrary.open(output)), directory: dir);
+  return (
+    crypto: NativeSshCrypto(DynamicLibrary.open(output), libraryPath: output),
+    directory: dir,
+  );
 }

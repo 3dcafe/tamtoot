@@ -118,12 +118,12 @@ void main() {
       await tester.enterText(find.byType(TextField).at(3), 'user');
       await tester.tap(find.byType(DropdownButton<SshAuthentication>));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Ed25519 private key').last);
+      await tester.tap(find.text('OpenSSH private key').last);
       await tester.pumpAndSettle();
       await tester.ensureVisible(find.text('Import private key'));
       await tester.tap(find.text('Import private key'));
       await tester.pumpAndSettle();
-      expect(find.text('Ed25519 key imported'), findsOneWidget);
+      expect(find.text('Private key imported'), findsOneWidget);
       await tester.tap(find.text('Save'));
       await tester.pumpAndSettle();
       final profile = session.sshProfiles.profiles.single;

@@ -159,3 +159,19 @@ class _EdPoint {
     return result;
   }
 }
+
+/// Private-key operations use native code; implementations must wipe key handles.
+abstract interface class SshSigningCrypto implements SshCrypto {
+  SshSigner createSigner(String algorithm, List<int> material);
+  Future<Uint8List> bcryptPbkdf(
+    List<int> password,
+    List<int> salt,
+    int rounds,
+    int length,
+  );
+}
+
+abstract interface class SshSigner {
+  Future<Uint8List> sign(List<int> message, String algorithm);
+  void dispose();
+}

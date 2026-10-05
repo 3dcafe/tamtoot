@@ -29,8 +29,9 @@ class PacketWire implements SshWire {
   final writes = <Uint8List>[];
   @override
   Future<Uint8List> read(int length) async {
-    if (closed || offset + length > input.length)
+    if (closed || offset + length > input.length) {
       throw const SshException('Test wire ended');
+    }
     final bytes = Uint8List.fromList(input.sublist(offset, offset + length));
     offset += length;
     return bytes;

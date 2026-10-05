@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import '../core/ssh/ssh_profiles.dart';
+import '../core/ssh/auth/ssh_private_key.dart';
 import '../app/ide_session.dart';
 import '../platform/ssh_key_file.dart';
 import 'ssh_connection_dialog.dart';
@@ -103,7 +104,7 @@ class _SshProfilesSettingsState extends State<SshProfilesSettings> {
     crossAxisAlignment: CrossAxisAlignment.stretch,
     children: [
       const Text(
-        'SSH profiles, keys and server verification. Sign-in and commands will be available in the next stage.',
+        'SSH profiles, server verification, sign-in and remote commands.',
       ),
       const SizedBox(height: 12),
       Text(
@@ -266,7 +267,7 @@ class _ProfileEditorState extends State<_ProfileEditor> {
       final text = file.uri.scheme == 'memory'
           ? await widget.session.documents.files.read(file.uri)
           : await readSshKeyFile(file.uri);
-      validateEd25519PrivateKey(text);
+      validateOpenSshPrivateKey(text);
       bytes = Uint8List.fromList(utf8.encode(text.trim()));
       if (!mounted) return;
       _clearKey();
@@ -338,7 +339,7 @@ class _ProfileEditorState extends State<_ProfileEditor> {
                 ),
                 DropdownMenuItem(
                   value: SshAuthentication.privateKey,
-                  child: Text('Ed25519 private key'),
+                  child: Text('OpenSSH private key'),
                 ),
               ],
               onChanged: importing
@@ -365,13 +366,13 @@ class _ProfileEditorState extends State<_ProfileEditor> {
               ),
             ] else ...[
               const Text(
-                'Import an unencrypted OpenSSH Ed25519 key. Encrypted keys and other formats are not yet supported.',
+                'Import an OpenSSH Ed25519 or RSA (2048–4096 bit) key. Encrypted aes256-ctr/bcrypt keys ask for a passphrase when connecting.',
               ),
               OutlinedButton.icon(
                 onPressed: importing ? null : _import,
                 icon: const Icon(Icons.key),
                 label: Text(
-                  key == null ? 'Import private key' : 'Ed25519 key imported',
+                  key == null ? 'Import private key' : 'Private key imported',
                 ),
               ),
               const Text(

@@ -249,6 +249,8 @@ struct Cipher {
   }
 };
 struct Exchange {uint8_t scalar[32];};
+#include "ssh_auth_crypto.inc"
+#include "ssh_bcrypt.inc"
 }
 SSH_EXPORT void* tamtoot_ssh_alloc(size_t n) {return n>0&&n<=limit?std::calloc(1,n):nullptr;}
 SSH_EXPORT void tamtoot_ssh_free(void* p,size_t n) {if(p) {wipe(p,n);std::free(p);}}
@@ -276,3 +278,23 @@ SSH_EXPORT int tamtoot_ssh_cipher_apply(void* handle,const uint8_t* data,size_t 
   if(!handle||!data||!out||n>limit) return 0;static_cast<Cipher*>(handle)->apply(data,n,out);return 1;
 }
 SSH_EXPORT void tamtoot_ssh_cipher_free(void* handle) {if(handle) {auto p=static_cast<Cipher*>(handle);wipe(p,sizeof(*p));delete p;}}
+
+SSH_EXPORT void* tamtoot_ssh_signer_create(int kind,const uint8_t* material,size_t length) {
+  if(!material||length>65536||(kind!=1&&kind!=2))return nullptr;
+  auto key=new(std::nothrow) SigningKey{};if(!key)return nullptr;key->kind=kind;bool valid=false;
+  if(kind==1&&length==64){
+    std::memcpy(key->seed,material,32);uint8_t scalar[64];hash512(key->seed,32,scalar);scalar[0]&=248;scalar[31]=(scalar[31]&63)|64;
+    ed_multiply(key->public_key,scalar);wipe(scalar,sizeof(scalar));valid=equal_bytes(key->public_key,material+32,32);key->size=64;
+  }else if(kind==2)valid=rsa_initialize(*key,material,length);
+  if(!valid){wipe(key,sizeof(*key));delete key;return nullptr;}return key;
+}
+SSH_EXPORT size_t tamtoot_ssh_signer_size(void* handle){return handle?static_cast<SigningKey*>(handle)->size:0;}
+SSH_EXPORT int tamtoot_ssh_signer_sign(void* handle,int bits,const uint8_t* message,size_t length,uint8_t* out,size_t out_length){
+  if(!handle||!message||!out||length>1024*1024)return 0;const auto& key=*static_cast<SigningKey*>(handle);
+  if(out_length!=key.size)return 0;return (key.kind==1&&bits==0?ed_sign(key,message,length,out):key.kind==2?rsa_sign(key,bits,message,length,out):false)?1:0;
+}
+SSH_EXPORT void tamtoot_ssh_signer_free(void* handle){if(handle){auto key=static_cast<SigningKey*>(handle);wipe(key,sizeof(*key));delete key;}}
+
+SSH_EXPORT int tamtoot_ssh_bcrypt(const uint8_t* password,size_t password_size,const uint8_t* salt,size_t salt_size,unsigned rounds,uint8_t* output,size_t output_size){
+  if(!password||!salt||!output)return 0;return bcrypt_derive(password,password_size,salt,salt_size,rounds,output,output_size)?1:0;
+}

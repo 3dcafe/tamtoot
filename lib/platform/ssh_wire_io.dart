@@ -11,6 +11,20 @@ Future<SshWire> openSshWire(
   int port,
   SshCancellation cancellation,
 ) async {
+  if (cancellation.cancelled) {
+    throw const SshException('SSH connection cancelled.');
+  }
+  void cancelTask(ConnectionTask<Socket> connection) {
+    // Observe cancellation errors even when cancellation won the DNS/task race.
+    unawaited(
+      connection.socket.then(
+        (socket) => socket.destroy(),
+        onError: (Object _, StackTrace _) {},
+      ),
+    );
+    connection.cancel();
+  }
+
   try {
     final pending = Socket.startConnect(host, port);
     ConnectionTask<Socket>? task;
@@ -21,7 +35,7 @@ Future<SshWire> openSshWire(
           (_) => throw const SshException('SSH connection cancelled.'),
         ),
       ]).timeout(const Duration(seconds: 10));
-      unawaited(cancellation.whenCancelled.then((_) => task?.cancel()));
+      unawaited(cancellation.whenCancelled.then((_) => cancelTask(task!)));
       final socket = await task.socket.timeout(const Duration(seconds: 10));
       if (cancellation.cancelled) {
         socket.destroy();
@@ -30,13 +44,8 @@ Future<SshWire> openSshWire(
       socket.setOption(SocketOption.tcpNoDelay, true);
       return SocketSshWire(socket);
     } catch (_) {
-      task?.cancel();
-      unawaited(
-        pending.then(
-          (lateTask) => lateTask.cancel(),
-          onError: (Object _, StackTrace _) {},
-        ),
-      );
+      if (task != null) cancelTask(task);
+      unawaited(pending.then(cancelTask, onError: (Object _, StackTrace _) {}));
       rethrow;
     }
   } on SocketException {

@@ -174,3 +174,61 @@ The expanded test suite passes **57 tests**, including folder collapse/reopen, s
 - Windows/Linux builds and real-device native secret CRUD were not verified.
 - Scope and platform details: [SSH stage 1](ssh-stage-1.ru.md). SSH connections,
   cryptographic key validation, encrypted-key import and key generation are later work.
+
+## Native SSH stage 2 — 2026-10-05
+
+- Implemented TCP, bounded packet framing, Curve25519/Ed25519 server verification,
+  AES-256-CTR with HMAC-SHA-256 EtM, strict KEX, sequence reset, rekey and cancellation.
+  Uses own C++ primitives through standard Dart FFI and OS randomness; no dependencies added.
+- Added explicit TOFU, SHA-256 fingerprints, normalized endpoint trust, multiple
+  saved keys, changed-key decisions and trusted-key removal in SSH settings.
+- Fixed rekey handling for in-flight application/control messages, initial-only
+  strict KEX markers, reentrant completion, banner boundary and TCP cancellation races.
+  Automatic rekey starts only after the upper authentication protocol reports success.
+- Full suite: **256 passed, 1 skipped**. After the final authentication/rekey hook,
+  all **18 SSH stage 2 tests** passed again. Analyzer: **No issues found**.
+- Real isolated OpenSSH verified initial encryption, four client rekeys, preservation
+  of an in-flight host-key announcement, 40 KiB on an open echo channel and
+  server-initiated rekey. Negative cases: altered server signature, unsupported cipher,
+  changed host key and cancellation with a late trust confirmation.
+- Native published vectors, invalid packet/MAC cases, fragmented/coalesced TCP,
+  cancellation races and trust dialogs at 430px passed.
+- AddressSanitizer/UndefinedBehaviorSanitizer: 100 native random X25519 exchanges,
+  AES partial blocks and SHA boundary lengths; no errors. Reproducible harness:
+  `native/ssh/ssh_crypto_sanitizer_test.cpp`.
+- macOS debug, Android debug APK and full iOS Simulator debug builds: successful.
+  Android APK contains the own native module for arm64-v8a, armeabi-v7a and x86_64.
+  SSH FFI exports were checked in the macOS/iOS app binaries.
+- Windows/Linux builds and physical-device runtime checks remain unverified here.
+  The own cryptographic implementation has not received an independent audit.
+- Application sign-in, command execution, terminal and SFTP remain for subsequent
+  stages. Test-only signing uses a public RFC fixture and is not production auth.
+- Scope, algorithms, limits and reproduction: [SSH stage 2](ssh-stage-2.ru.md).
+
+## Native SSH stage 3 — 2026-10-05
+
+- Implemented password, Ed25519, RSA SHA-2 and keyboard-interactive authentication,
+  including partial success, bounded attempts, server banners and verified PK_OK.
+- Added OpenSSH private-key parsing/unlock for none or AES-256-CTR + bcrypt;
+  own native Ed25519/RSA signing and bcrypt_pbkdf. No dependencies added.
+  Expensive native operations run through standard Dart isolates; active signers
+  defer disposal until their worker finishes.
+- Implemented session/exec, separate stdout/stderr, exit status/signal, stdin flow
+  control, EOF, channel cancellation, command timeouts and output limits.
+  Added profile sign-in prompts and command UI; no automatic command replay.
+- Full suite: **283 passed, 1 skipped**. Analyzer: **No issues found**.
+- Real isolated OpenSSH: Ed25519/RSA plaintext/encrypted keys, RSA 3072/4096,
+  lcm private exponent validation, second command, stdout/stderr/exit code 7,
+  512 KiB stdin during rekey, incorrect key/passphrase, attempt/output limits
+  and command timeout. Actual password/keyboard-interactive login is covered
+  by protocol simulation, not by changing an operating-system account.
+- UI trust → password → command and cancellation verified at 430px.
+  Published Ed25519 and bcrypt vectors and disposal during signing passed.
+- ASan/UBSan harness passed: stage 2 primitives plus native Ed25519 signing,
+  invalid seed/public rejection and bcrypt_pbkdf vector. RSA sanitizer coverage
+  is not claimed. Native source also compiled with C++11 and strict warnings.
+- macOS debug, Android debug APK and iOS Simulator debug builds passed.
+  Fixed C++11 aggregate initialization compatibility for the iOS compiler.
+- Windows/Linux builds and physical-device runtime remain unverified.
+  Own cryptography has not received an independent audit.
+- Scope, limits and reproduction: [SSH stage 3](ssh-stage-3.ru.md).

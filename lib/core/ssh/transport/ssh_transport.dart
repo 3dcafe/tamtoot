@@ -42,7 +42,9 @@ class SshTransport {
     required this.hostKeys,
     required this.openWire,
   }) : incoming = SshPacketCodec(crypto),
-       outgoing = SshPacketCodec(crypto);
+       outgoing = SshPacketCodec(crypto) {
+    unawaited(cancellation.whenCancelled.then((_) => close()));
+  }
   final SshCrypto crypto;
   final SshHostKeys hostKeys;
   final SshWireOpener openWire;
@@ -64,7 +66,18 @@ class SshTransport {
   String? error;
   String serverVersion = '';
   SshHostKey? serverKey;
+
+  /// Public session identifier used by the upper authentication protocol.
+  Uint8List get sessionIdentifier {
+    _checkOpen();
+    if (_sessionId == null) {
+      throw const SshException('SSH session is not established.');
+    }
+    return Uint8List.fromList(_sessionId!);
+  }
+
   Uint8List? _sessionId;
+  bool _authenticated = false;
   Uint8List? _clientKex;
   Completer<void>? _rekeyDone;
   Timer? _rekeyDeadline, _rekeyTimer;
@@ -148,7 +161,7 @@ class SshTransport {
       while (true) {
         final b = (await _wire!.read(1))[0];
         total++;
-        if (total > 8192 || bytes.length >= 254) {
+        if (total > 8192 || (b != 10 && bytes.length >= 254)) {
           throw const SshException(
             'SSH server identification exceeds its limit.',
           );
@@ -178,7 +191,10 @@ class SshTransport {
       (SshWriter()
             ..byte(20)
             ..raw(crypto.randomBytes(16))
-            ..names(['curve25519-sha256', 'kex-strict-c-v00@openssh.com'])
+            ..names([
+              'curve25519-sha256',
+              if (_sessionId == null) 'kex-strict-c-v00@openssh.com',
+            ])
             ..names(['ssh-ed25519'])
             ..names(['aes256-ctr'])
             ..names(['aes256-ctr'])
@@ -404,7 +420,8 @@ class SshTransport {
   /// The upper protocol may send only after signature and host trust verification.
   Future<void> send(List<int> payload) async {
     _checkOpen();
-    if (state != SshTransportState.ready && state != SshTransportState.rekeying) {
+    if (state != SshTransportState.ready &&
+        state != SshTransportState.rekeying) {
       throw const SshException('SSH server is not yet verified.');
     }
     if (payload.isEmpty ||
@@ -415,7 +432,9 @@ class SshTransport {
         payload[0] == 31) {
       throw const SshException('Invalid SSH application message.');
     }
-    if (outgoing.needsRekey || incoming.needsRekey) await rekey();
+    if (_authenticated && (outgoing.needsRekey || incoming.needsRekey)) {
+      await rekey();
+    }
     if (state == SshTransportState.rekeying) await _rekeyDone!.future;
     _checkOpen();
     try {
@@ -446,6 +465,20 @@ class SshTransport {
     }
   }
 
+  /// Call only after the upper protocol receives SSH_MSG_USERAUTH_SUCCESS.
+  /// OpenSSH rejects client-initiated rekey during authentication.
+  void authenticationSucceeded() {
+    _checkOpen();
+    if (state != SshTransportState.ready &&
+        state != SshTransportState.rekeying) {
+      throw const SshException(
+        'SSH transport is not ready for authentication.',
+      );
+    }
+    _authenticated = true;
+    _scheduleRekey();
+  }
+
   void _beginRekey() {
     _rekeyDone = Completer<void>();
     // Attach an observer even for a server-initiated exchange with no caller.
@@ -462,6 +495,9 @@ class SshTransport {
 
   void _scheduleRekey() {
     _rekeyTimer?.cancel();
+    if (!_authenticated) {
+      return;
+    }
     _rekeyTimer = Timer(const Duration(hours: 1), () {
       if (state == SshTransportState.ready) {
         unawaited(rekey().then((_) {}, onError: (Object _, StackTrace _) {}));
@@ -481,22 +517,12 @@ class SshTransport {
           _clientKex = null;
           _checkOpen();
           _rekeyDeadline?.cancel();
-          _setState(SshTransportState.ready);
-          _rekeyDone!.complete();
+          final completedRekey = _rekeyDone!;
           _rekeyDone = null;
+          _setState(SshTransportState.ready);
+          completedRekey.complete();
           _scheduleRekey();
           _drainMessages();
-        } else if (state == SshTransportState.rekeying) {
-          if (packet[0] < 50) {
-            throw const SshException(
-              'Unexpected message while waiting for SSH rekey.',
-            );
-          }
-          _deferredBytes += packet.length;
-          if (_deferredBytes > 1024 * 1024) {
-            throw const SshException('SSH rekey data buffer limit exceeded.');
-          }
-          _deferred.add(packet);
         } else if (packet[0] == 2 || packet[0] == 4) {
           final reader = SshReader(packet);
           final kind = reader.byte();
@@ -504,6 +530,20 @@ class SshTransport {
           reader.string();
           if (kind == 4) reader.string();
           reader.end();
+        } else if (state == SshTransportState.rekeying) {
+          if (packet[0] < 5 ||
+              packet[0] == 21 ||
+              packet[0] == 30 ||
+              packet[0] == 31) {
+            throw SshException(
+              'Unexpected message ${packet[0]} while waiting for SSH rekey.',
+            );
+          }
+          _deferredBytes += packet.length;
+          if (_deferredBytes > 1024 * 1024) {
+            throw const SshException('SSH rekey data buffer limit exceeded.');
+          }
+          _deferred.add(packet);
         } else if (packet[0] == 3) {
           throw const SshException('SSH server rejected a transport message.');
         } else if (packet[0] == 21 ||
@@ -514,7 +554,8 @@ class SshTransport {
         } else {
           _deliver(packet);
         }
-        if (state == SshTransportState.ready &&
+        if (_authenticated &&
+            state == SshTransportState.ready &&
             (incoming.needsRekey || outgoing.needsRekey)) {
           unawaited(rekey().then((_) {}, onError: (Object _, StackTrace _) {}));
         }
