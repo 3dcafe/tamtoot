@@ -681,6 +681,159 @@ class _CloneRepositoryDialogState extends State<CloneRepositoryDialog> {
   final branch = TextEditingController();
   bool busy = false;
   bool folderEdited = false;
+  final List<String> _diagnostics = [];
+  final Set<String> _logSecrets = {};
+  String _operation = 'Downloading over HTTPS…';
+
+  String _safeDiagnostic(String text) {
+    for (final secret
+        in _logSecrets.toList()..sort((a, b) => b.length.compareTo(a.length))) {
+      if (secret.isNotEmpty) text = text.replaceAll(secret, '[REDACTED]');
+    }
+    return text.replaceAllMapped(
+      RegExp(r'(https?://)[^/\s]*@'),
+      (match) => '${match[1]}[REDACTED]@',
+    );
+  }
+
+  void _recordDiagnostic(String line) {
+    final safe = _safeDiagnostic(line);
+    final entry = '${DateTime.now().toIso8601String()}  $safe';
+    if (mounted) setState(() => _diagnostics.add(entry));
+    widget.session.log('Git: $safe');
+  }
+
+  void _startDiagnostics(GitCredentials? credentials, String operation) {
+    _diagnostics.clear();
+    _logSecrets.clear();
+    for (final value in [credentials?.token, credentials?.password]) {
+      if (value != null && value.isNotEmpty) {
+        _logSecrets.add(value);
+        _logSecrets.add(Uri.encodeComponent(value));
+      }
+    }
+    if (credentials != null) {
+      final pass = credentials.token ?? credentials.password ?? '';
+      _logSecrets.add(
+        base64Encode(utf8.encode('${credentials.username ?? 'git'}:$pass')),
+      );
+    }
+    _recordDiagnostic(
+      '$operation; ${defaultTargetPlatform.name}; '
+      'authentication: ${credentials == null || credentials.isEmpty ? "none" : "provided"}',
+    );
+    final git = widget.session.git;
+    if (git is GitDiagnosticsProvider) {
+      (git as GitDiagnosticsProvider).diagnosticLog = _recordDiagnostic;
+    }
+  }
+
+  void _stopDiagnostics() {
+    final git = widget.session.git;
+    if (git is GitDiagnosticsProvider) {
+      (git as GitDiagnosticsProvider).diagnosticLog = null;
+    }
+  }
+
+  Future<void> _showDiagnostics() => showDialog<void>(
+    context: context,
+    builder: (ctx) => AlertDialog(
+      title: const Text('Repository connection log'),
+      content: SizedBox(
+        width: 680,
+        height: 400,
+        child: SingleChildScrollView(
+          child: SelectableText(_diagnostics.join('\n')),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () async {
+            await Clipboard.setData(
+              ClipboardData(text: _diagnostics.join('\n')),
+            );
+            if (ctx.mounted) {
+              ScaffoldMessenger.of(
+                ctx,
+              ).showSnackBar(const SnackBar(content: Text('Log copied')));
+            }
+          },
+          child: const Text('Copy log'),
+        ),
+        TextButton(
+          onPressed: () => Navigator.pop(ctx),
+          child: const Text('Close'),
+        ),
+      ],
+    ),
+  );
+
+  Future<void> _checkConnection() async {
+    final git = widget.session.git;
+    final remote = Uri.tryParse(url.text.trim());
+    if (remote == null ||
+        remote.host.isEmpty ||
+        remote.scheme != 'https' ||
+        remote.userInfo.isNotEmpty ||
+        remote.hasQuery ||
+        remote.hasFragment) {
+      setState(
+        () => error =
+            'Enter an HTTPS repository URL without credentials or query parameters',
+      );
+      return;
+    }
+    if (git is! GitDiagnosticsProvider) {
+      setState(
+        () => error = 'Connection check is unavailable for this Git client',
+      );
+      return;
+    }
+    final saved = widget.session.gitCredentials(remote.toString());
+    final tokenValue = token.text.trim();
+    final credentials = tokenValue.isNotEmpty
+        ? GitCredentials(
+            username: username.text.trim().isEmpty
+                ? 'git'
+                : username.text.trim(),
+            token: tokenValue,
+          )
+        : password.text.isNotEmpty
+        ? GitCredentials(
+            username: username.text.trim(),
+            password: password.text,
+          )
+        : saved.token.isNotEmpty
+        ? GitCredentials(username: saved.username, token: saved.token)
+        : null;
+    setState(() {
+      busy = true;
+      error = null;
+      _operation = 'Checking repository connection…';
+    });
+    _startDiagnostics(credentials, 'Connection check');
+    try {
+      final result = await (git as GitDiagnosticsProvider).checkConnection(
+        remote,
+        credentials: credentials,
+        branch: branch.text.trim(),
+      );
+      _recordDiagnostic(result.message);
+      if (mounted) {
+        setState(
+          () => error = result.ok ? null : _safeDiagnostic(result.message),
+        );
+      }
+    } catch (e) {
+      _recordDiagnostic('Connection failed: $e');
+      if (mounted) setState(() => error = _safeDiagnostic('$e'));
+    } finally {
+      _stopDiagnostics();
+      if (mounted) setState(() => busy = false);
+    }
+    if (mounted) await _showDiagnostics();
+  }
+
   String? error;
   String? destinationPath;
   Uri? selectedWebRoot;
@@ -755,6 +908,7 @@ class _CloneRepositoryDialogState extends State<CloneRepositoryDialog> {
   @override
   void dispose() {
     url.dispose();
+    _stopDiagnostics();
     folder.dispose();
     username.dispose();
     password.dispose();
@@ -814,6 +968,16 @@ class _CloneRepositoryDialogState extends State<CloneRepositoryDialog> {
         setState(() => error = 'Only http(s) URLs are supported');
         return;
       }
+      if (remote.host.isEmpty ||
+          remote.userInfo.isNotEmpty ||
+          remote.hasQuery ||
+          remote.hasFragment) {
+        setState(
+          () => error =
+              'Use a repository URL without credentials or query parameters. Enter credentials below.',
+        );
+        return;
+      }
     } catch (_) {
       setState(() => error = 'Invalid URL');
       return;
@@ -860,8 +1024,10 @@ class _CloneRepositoryDialogState extends State<CloneRepositoryDialog> {
       busy = true;
       error = null;
       existingWorkspace = null;
+      _operation = 'Downloading over HTTPS…';
     });
-    widget.session.log('Cloning $remoteText…');
+    _startDiagnostics(credentials, 'Clone');
+    _recordDiagnostic('Cloning $remote…');
     try {
       Uri targetUri;
       if (webDirectoryPickerSupported) {
@@ -926,9 +1092,9 @@ class _CloneRepositoryDialogState extends State<CloneRepositoryDialog> {
       if (!result.ok) {
         setState(() {
           busy = false;
-          error = result.message;
+          error = _safeDiagnostic(result.message);
         });
-        widget.session.log('Clone failed: ${result.message}', error: true);
+        _recordDiagnostic('Clone failed: ${result.message}');
         return;
       }
       if (credentials != null) {
@@ -940,14 +1106,18 @@ class _CloneRepositoryDialogState extends State<CloneRepositoryDialog> {
         await widget.session.persistNow();
       }
       await widget.session.openWorkspaceFolder(targetUri);
-      widget.session.log('Cloned and opened ${folder.text.trim()}');
+      _recordDiagnostic('Cloned and opened ${folder.text.trim()}');
       if (mounted) Navigator.pop(context);
     } catch (e) {
-      setState(() {
-        busy = false;
-        error = '$e';
-      });
-      widget.session.log('Clone failed: $e', error: true);
+      if (mounted) {
+        setState(() {
+          busy = false;
+          error = _safeDiagnostic('$e');
+        });
+      }
+      _recordDiagnostic('Clone failed: $e');
+    } finally {
+      _stopDiagnostics();
     }
   }
 
@@ -1087,16 +1257,21 @@ class _CloneRepositoryDialogState extends State<CloneRepositoryDialog> {
                 const SizedBox(height: 16),
                 const LinearProgressIndicator(),
                 const SizedBox(height: 8),
-                Text(
-                  'Downloading over HTTPS…',
-                  style: Theme.of(context).textTheme.bodySmall,
-                ),
+                Text(_operation, style: Theme.of(context).textTheme.bodySmall),
               ],
             ],
           ),
         ),
       ),
       actions: [
+        TextButton(
+          onPressed: busy ? null : _checkConnection,
+          child: const Text('Check connection'),
+        ),
+        TextButton(
+          onPressed: busy || _diagnostics.isEmpty ? null : _showDiagnostics,
+          child: const Text('View log'),
+        ),
         TextButton(
           onPressed: busy ? null : () => Navigator.pop(context),
           child: const Text('Cancel'),

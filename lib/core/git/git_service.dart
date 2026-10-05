@@ -110,6 +110,15 @@ Uri gitRemoteWithCredentials(Uri remote, GitCredentials credentials) {
 }
 
 /// Minimal git client: clone / fetch / pull / push / status over HTTPS.
+abstract interface class GitDiagnosticsProvider {
+  set diagnosticLog(void Function(String)? log);
+  Future<GitResult> checkConnection(
+    Uri remote, {
+    GitCredentials? credentials,
+    String? branch,
+  });
+}
+
 abstract interface class GitService {
   /// `true` when this platform can run the HTTP git client.
   bool get available;

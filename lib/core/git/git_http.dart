@@ -25,6 +25,42 @@ abstract interface class GitHttpTransport {
   });
 }
 
+/// Logs only request endpoints and status, never headers or payloads.
+class DiagnosticGitTransport implements GitHttpTransport {
+  DiagnosticGitTransport(this.delegate, this.log);
+  final GitHttpTransport delegate;
+  final void Function(String) log;
+
+  @override
+  Future<GitHttpResponse> send({
+    required String method,
+    required Uri url,
+    Map<String, String>? headers,
+    List<int>? body,
+  }) async {
+    final endpoint = url.replace(userInfo: '', query: '', fragment: '');
+    log('$method $endpoint');
+    final timer = Stopwatch()..start();
+    try {
+      final response = await delegate.send(
+        method: method,
+        url: url,
+        headers: headers,
+        body: body,
+      );
+      log(
+        'HTTP ${response.statusCode}; ${response.body.length} bytes; ${timer.elapsedMilliseconds} ms',
+      );
+      return response;
+    } catch (error) {
+      log(
+        'Request failed: ${error.runtimeType}; ${timer.elapsedMilliseconds} ms',
+      );
+      rethrow;
+    }
+  }
+}
+
 Map<String, String> gitAuthHeaders(GitCredentials? credentials) {
   if (credentials == null || credentials.isEmpty) return const {};
   final user = credentials.token != null && credentials.token!.isNotEmpty
@@ -106,14 +142,13 @@ Future<GitRefDiscovery> discoverRefs(
   if (response.statusCode != 200) {
     final hint = switch (response.statusCode) {
       401 =>
-        ' Authentication failed. Check the GitHub username and access token.',
+        ' Authentication failed. Check the HTTPS username, access token and repository access.',
       403 =>
-        ' Push forbidden. Use a token with repository write access '
-            '(classic: repo scope; fine-grained: Contents Read and write on this repo), '
-            'and confirm the HTTPS username matches the token owner.',
+        ' Access forbidden. Check token permissions and repository access '
+            '(GitLab: read_repository for cloning, write_repository for pushing).',
       404 =>
         ' Repository not found (or private without access). '
-            'Create it on GitHub first, or turn on “Create repository via GitHub API”.',
+            'Check the repository URL and token permissions.',
       _ => '',
     };
     throw GitException(

@@ -18,15 +18,54 @@ class HttpGitService
         GitPublicationProvider,
         GitIdentityProvider,
         GitHistoryProvider,
-        GitFileChangesProvider {
+        GitFileChangesProvider,
+        GitDiagnosticsProvider {
   HttpGitService({
-    required this.transport,
+    required GitHttpTransport transport,
     required this.openStore,
     required this.inflateAt,
     required this.deflate,
-  });
+  }) {
+    this.transport = DiagnosticGitTransport(
+      transport,
+      (line) => diagnosticLog?.call(line),
+    );
+  }
 
-  final GitHttpTransport transport;
+  late final GitHttpTransport transport;
+  @override
+  void Function(String)? diagnosticLog;
+
+  @override
+  Future<GitResult> checkConnection(
+    Uri remote, {
+    GitCredentials? credentials,
+    String? branch,
+  }) async {
+    final discovery = await discoverRefs(
+      transport,
+      remote,
+      'git-upload-pack',
+      credentials: credentials,
+    ).timeout(const Duration(seconds: 30));
+    diagnosticLog?.call(
+      'Git Smart HTTP: ${discovery.refs.length} refs received',
+    );
+    if (branch != null && branch.isNotEmpty) {
+      final ref = branch.startsWith('refs/') ? branch : 'refs/heads/$branch';
+      if (discovery.hashFor(ref) == null) {
+        return _fail(
+          'Connection works, but branch $branch was not found',
+          const ['check-connection'],
+        );
+      }
+    }
+    return _ok(
+      'Connection and repository access verified. Default branch: '
+      '${discovery.defaultBranch ?? "none (empty repository)"}',
+      const ['check-connection'],
+    );
+  }
 
   /// Opens a store rooted at the given workspace / clone directory.
   final GitRepositoryStore Function(Uri directory) openStore;
@@ -119,6 +158,9 @@ class HttpGitService
       capabilities: discovery.capabilities,
       credentials: credentials,
     );
+    diagnosticLog?.call(
+      'Pack downloaded: ${pack.length} bytes. Unpacking objects…',
+    );
     final db = GitObjectDatabase(store, inflateAt, deflate);
     for (final obj in unpackPackfile(pack, inflateAt)) {
       await db.writeUnpacked(obj);
@@ -129,6 +171,7 @@ class HttpGitService
     await db.writeRef('refs/remotes/origin/$short', want);
     await db.writeHead(refName);
     await db.writeConfig(remote: remote, branch: short);
+    diagnosticLog?.call('Checking out branch $short…');
     await _checkout(db, store, want);
     await store.writeText(
       TamtootProjectMeta.relativePath,
