@@ -122,12 +122,17 @@ Investigation rules:
 - Maximum 2 consecutive search_files calls since the last read/edit.
 - When a search returns ≤4 plausible implementation files, READ THEM NEXT.
 - Never repeat a search with the same/similar query under the same or overlapping path.
+- Never repeat list_files for an unchanged directory. Empty results mean no files were found, not that a reference was inspected.
+- Use exact indexed paths. For empty or missing paths, check similarly named indexed files, including accidental leading dots, before declaring a reference unavailable.
 - Read the smallest useful context.
 - If search results include line numbers, read ~40 lines around each match.
 - Do not read files from line 1 unless the file structure is actually needed.
 - Prefer 1-2 highly relevant files; use up to 4 only when necessary.
 - If you already have the edit location, edit immediately.
 - After editing, read the changed area once and finish.
+- For reference-based tasks, read BOTH the reference and current implementation before editing. Verify all requested differences before finishing.
+- Remembered claims of earlier completion are not proof that the current request is satisfied.
+- Do not present a cosmetic partial edit as completion of a layout task. State unfinished work and concrete blockers explicitly.
 
 Implementation rules:
 - Once the root cause is identified, STOP investigating and implement the smallest safe fix.
@@ -191,10 +196,12 @@ Reuse retained excerpts — do not re-read unchanged files.
   static const int maxFinalReadLines = 160;
 
   static const investigationBudgetPrompt =
-      'Investigation budget reached. You have enough context.\n'
-      'Next action must be replace_in_file, write_file, or finish.\n'
-      'Do NOT call read_file/read_files again — Active file context already '
-      'has the relevant lines. Emit replace_in_file NOW.\n'
+      'Investigation budget reached. Reuse loaded context.\n'
+      'Edit only if the essential source and reference are available. '
+      'Otherwise use the remaining targeted read for missing essential evidence; '
+      'do not guess or make a token cosmetic edit.\n'
+      'After the final targeted read, implement the requested change or finish '
+      'with the precise blocker and unfinished work.\n'
       'search_files and list_files stay disabled until you edit.';
 
   /// Compiler-style diagnostics: `path/file.cshtml(103,3): error RZ1034: ...`
@@ -267,7 +274,14 @@ Reuse retained excerpts — do not re-read unchanged files.
     const contextCompactor = AgentContextCompactor();
     final activeFiles = <String, String>{};
     final observations = <String, String>{};
-    _rememberObservation(observations, 'Project index', await _projectIndex());
+    final indexedPaths = (await store.listFiles('')).where(_useful).toList()
+      ..sort();
+    final listedDirectories = <String>{};
+    _rememberObservation(
+      observations,
+      'Project index',
+      await _projectIndex(indexedPaths),
+    );
     final memoryStore = ProjectMemoryStore(store);
     var projectMemory = await memoryStore.load();
     final memorySelection = projectMemory.selectRelevant(task);
@@ -587,13 +601,28 @@ Reuse retained excerpts — do not re-read unchanged files.
               continue;
             }
             final path = _path(action['path'] ?? '', allowEmpty: true);
+            if (!listedDirectories.add(path)) {
+              throw ModelApiException(
+                'Directory ${path.isEmpty ? '.' : path} was already listed. '
+                'Reuse its result. Read an exact indexed file instead of repeating list_files.',
+              );
+            }
             final files = await store.listFiles(path);
             final visible = files.where(_useful).take(120).join('\n');
+            final hint = path.replaceFirst(RegExp(r'^\.+/?'), '');
+            final alternatives = visible.isEmpty && hint.isNotEmpty
+                ? indexedPaths
+                      .where((p) => p.startsWith('$hint/') || p == hint)
+                      .take(12)
+                      .join('\n')
+                : '';
             onEvent(AgentEvent('tool', 'Listed ${path.isEmpty ? '.' : path}'));
             _rememberObservation(
               observations,
               'List ${path.isEmpty ? '.' : path}',
-              'Tool list_files result for ${path.isEmpty ? '.' : path}:\n$visible',
+              'Tool list_files result for ${path.isEmpty ? '.' : path}:\n'
+                  '${visible.isEmpty ? 'No files found. The directory may be empty or missing.' : visible}'
+                  '${alternatives.isEmpty ? '' : '\nSimilarly named indexed files (use these exact paths):\n$alternatives'}',
             );
             _compactProjectIndex(observations);
           case 'search_files':
@@ -873,6 +902,7 @@ Reuse retained excerpts — do not re-read unchanged files.
               'Tool replace_in_file result: edited $path successfully. Read the changed area before finishing.',
             );
             hasEdited = true;
+            listedDirectories.clear();
           case 'write_file':
             consecutiveSays = 0;
             consecutiveSearches = 0;
@@ -903,6 +933,7 @@ Reuse retained excerpts — do not re-read unchanged files.
               'Tool write_file result: wrote $path successfully. Inspect it before finishing.',
             );
             hasEdited = true;
+            listedDirectories.clear();
           case 'run_command':
             transcript.add(
               'run_command is unavailable: Tamtoot is a mobile IDE without a terminal, interpreter, debugger, build runner, or test runner. Inspect changed files and finish without executing commands.',
@@ -1196,6 +1227,15 @@ Reuse retained excerpts — do not re-read unchanged files.
     required List<String> transcript,
   }) {
     final first = _decodeActionObject(objects.first);
+    if (objects.length > 1) {
+      _replaceNote(
+        transcript,
+        'Host note:',
+        'Host note: Your reply contained multiple actions. Only one is executed '
+        'per iteration; the remaining actions and claimed results were NOT executed. '
+        'Wait for the actual tool result and emit exactly one JSON object next.',
+      );
+    }
     final firstName = first['action'] as String;
     final canPreferFollowUp = _wouldBlockRead(
       firstName,
@@ -1402,6 +1442,7 @@ Reuse retained excerpts — do not re-read unchanged files.
     final parts = path.split('/');
     const generated = {
       '.dart_tool',
+      '.angular',
       '.gradle',
       '.idea',
       'build',
@@ -1450,8 +1491,7 @@ Reuse retained excerpts — do not re-read unchanged files.
     return out.toString();
   }
 
-  Future<String> _projectIndex() async {
-    final paths = (await store.listFiles('')).where(_useful).toList()..sort();
+  Future<String> _projectIndex(List<String> paths) async {
     const maxPaths = 240;
     const maxCharacters = 8000;
     final out = StringBuffer(
@@ -2017,8 +2057,7 @@ Reuse retained excerpts — do not re-read unchanged files.
     // Wiping to a single window caused start↔end ping-pong and missed mismatches.
     final samePath = activeFiles.keys
         .where(
-          (existing) =>
-              existing == pathKey || existing.startsWith('$pathKey '),
+          (existing) => existing == pathKey || existing.startsWith('$pathKey '),
         )
         .toList();
     if (activeFiles.containsKey(key)) {
@@ -2032,8 +2071,7 @@ Reuse retained excerpts — do not re-read unchanged files.
     } else {
       final cut = content.lastIndexOf('\n', maxExcerptCharacters);
       final keepTo = cut > 0 ? cut : maxExcerptCharacters;
-      activeFiles[key] =
-          '${content.substring(0, keepTo)}\n… excerpt truncated';
+      activeFiles[key] = '${content.substring(0, keepTo)}\n… excerpt truncated';
     }
     final evicted = <String>[];
     int characters() =>
@@ -2085,10 +2123,7 @@ Reuse retained excerpts — do not re-read unchanged files.
         final excerpt = _fileExcerpt(
           path,
           content,
-          {
-            'startLine': (line - 25).clamp(1, 1 << 30),
-            'lineCount': 60,
-          },
+          {'startLine': (line - 25).clamp(1, 1 << 30), 'lineCount': 60},
           focusLines: focusLinesByPath[path],
           maxLines: 80,
         );
