@@ -5,6 +5,7 @@ import 'git_http.dart';
 import 'git_index.dart';
 import 'git_objects.dart';
 import 'git_pack.dart';
+import 'git_unpack_async.dart';
 import 'git_service.dart';
 import 'git_store.dart';
 import 'git_publication.dart';
@@ -19,13 +20,18 @@ class HttpGitService
         GitIdentityProvider,
         GitHistoryProvider,
         GitFileChangesProvider,
-        GitDiagnosticsProvider {
+        GitDiagnosticsProvider,
+        GitProgressProvider {
   HttpGitService({
     required GitHttpTransport transport,
     required this.openStore,
     required this.inflateAt,
     required this.deflate,
   }) {
+    if (transport is GitTransferProgressProvider) {
+      (transport as GitTransferProgressProvider).onTransferProgress =
+          (progress) => onProgress?.call(progress);
+    }
     this.transport = DiagnosticGitTransport(
       transport,
       (line) => diagnosticLog?.call(line),
@@ -35,6 +41,8 @@ class HttpGitService
   late final GitHttpTransport transport;
   @override
   void Function(String)? diagnosticLog;
+  @override
+  void Function(GitProgress)? onProgress;
 
   @override
   Future<GitResult> checkConnection(
@@ -162,8 +170,24 @@ class HttpGitService
       'Pack downloaded: ${pack.length} bytes. Unpacking objects…',
     );
     final db = GitObjectDatabase(store, inflateAt, deflate);
-    for (final obj in unpackPackfile(pack, inflateAt)) {
+    onProgress?.call(const GitProgress('Unpacking objects…'));
+    await Future<void>.delayed(Duration.zero);
+    final objects = await unpackGitPackAsync(pack, inflateAt);
+    var written = 0;
+    for (final obj in objects) {
       await db.writeUnpacked(obj);
+      written++;
+      if (written == objects.length || written % 50 == 0) {
+        onProgress?.call(
+          GitProgress(
+            'Writing objects…',
+            completed: written,
+            total: objects.length,
+            unit: 'objects',
+          ),
+        );
+        await Future<void>.delayed(Duration.zero);
+      }
     }
 
     final short = refName.replaceFirst('refs/heads/', '');
@@ -172,6 +196,7 @@ class HttpGitService
     await db.writeHead(refName);
     await db.writeConfig(remote: remote, branch: short);
     diagnosticLog?.call('Checking out branch $short…');
+    onProgress?.call(const GitProgress('Creating project files…'));
     await _checkout(db, store, want);
     await store.writeText(
       TamtootProjectMeta.relativePath,
@@ -757,12 +782,28 @@ class HttpGitService
         if (await store.exists(path)) await store.delete(path);
       }
     }
-    for (final entry in files.entries) {
+    var created = 0;
+    final workFiles = files.entries
+        .where((entry) => !_internal(entry.key))
+        .toList();
+    for (final entry in workFiles) {
       if (_internal(entry.key)) continue;
       _validateWorkPath(entry.key);
       await store.validateRegularFilePath(entry.key);
       final blob = await db.read(entry.value);
       await store.writeBytes(entry.key, blob.content);
+      created++;
+      if (created == workFiles.length || created % 25 == 0) {
+        onProgress?.call(
+          GitProgress(
+            'Creating project files…',
+            completed: created,
+            total: workFiles.length,
+            unit: 'files',
+          ),
+        );
+        await Future<void>.delayed(Duration.zero);
+      }
     }
   }
 

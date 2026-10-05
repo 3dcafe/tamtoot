@@ -46,7 +46,11 @@ class _GitChangesDialogState extends State<GitChangesDialog> {
   void initState() {
     super.initState();
     _observedState = _stateFingerprint();
-    _load();
+    if (widget.visible) {
+      _load();
+    } else {
+      busy = false;
+    }
     if (widget.embedded) {
       _changes = widget.session.changes.listen((_) {
         final current = _stateFingerprint();
@@ -69,7 +73,9 @@ class _GitChangesDialogState extends State<GitChangesDialog> {
   @override
   void didUpdateWidget(GitChangesDialog oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (!oldWidget.visible && widget.visible && !busy && !_loading) _load();
+    if (!oldWidget.visible && widget.visible && !busy && !_loading) {
+      _load(background: ready);
+    }
   }
 
   @override

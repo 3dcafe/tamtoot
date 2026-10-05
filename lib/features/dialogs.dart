@@ -684,6 +684,33 @@ class _CloneRepositoryDialogState extends State<CloneRepositoryDialog> {
   final List<String> _diagnostics = [];
   final Set<String> _logSecrets = {};
   String _operation = 'Downloading over HTTPS…';
+  GitProgress? _progress;
+  Timer? _progressTimer;
+  DateTime? _operationStarted;
+  DateTime? _lastProgressAt;
+
+  String _progressDescription() {
+    final progress = _progress;
+    if (progress == null) return _operation;
+    String formatBytes(int bytes) => bytes < 1024
+        ? '$bytes B'
+        : bytes < 1024 * 1024
+        ? '${(bytes / 1024).toStringAsFixed(1)} KB'
+        : '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
+    final amount = progress.unit == 'bytes'
+        ? '${formatBytes(progress.completed)}${progress.total == null ? " received" : " / ${formatBytes(progress.total!)}"}'
+        : progress.unit.isEmpty
+        ? ''
+        : '${progress.completed}${progress.total == null ? "" : " / ${progress.total}"} ${progress.unit}';
+    final elapsed = _operationStarted == null
+        ? 0
+        : DateTime.now().difference(_operationStarted!).inSeconds;
+    final idle = _lastProgressAt == null
+        ? 0
+        : DateTime.now().difference(_lastProgressAt!).inSeconds;
+    return '${progress.stage}\n${amount.isEmpty ? "" : "$amount · "}${elapsed}s elapsed'
+        '${idle >= 10 && (progress.unit == 'bytes' || progress.stage.startsWith('Waiting')) ? " · No new data for ${idle}s" : ""}';
+  }
 
   String _safeDiagnostic(String text) {
     for (final secret
@@ -704,6 +731,13 @@ class _CloneRepositoryDialogState extends State<CloneRepositoryDialog> {
   }
 
   void _startDiagnostics(GitCredentials? credentials, String operation) {
+    _progress = null;
+    _operationStarted = DateTime.now();
+    _lastProgressAt = _operationStarted;
+    _progressTimer?.cancel();
+    _progressTimer = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (mounted && busy) setState(() {});
+    });
     _diagnostics.clear();
     _logSecrets.clear();
     for (final value in [credentials?.token, credentials?.password]) {
@@ -723,13 +757,26 @@ class _CloneRepositoryDialogState extends State<CloneRepositoryDialog> {
       'authentication: ${credentials == null || credentials.isEmpty ? "none" : "provided"}',
     );
     final git = widget.session.git;
+    if (git is GitProgressProvider) {
+      (git as GitProgressProvider).onProgress = (progress) {
+        if (!mounted || !busy) return;
+        setState(() {
+          _progress = progress;
+          _lastProgressAt = DateTime.now();
+        });
+      };
+    }
     if (git is GitDiagnosticsProvider) {
       (git as GitDiagnosticsProvider).diagnosticLog = _recordDiagnostic;
     }
   }
 
   void _stopDiagnostics() {
+    _progressTimer?.cancel();
     final git = widget.session.git;
+    if (git is GitProgressProvider) {
+      (git as GitProgressProvider).onProgress = null;
+    }
     if (git is GitDiagnosticsProvider) {
       (git as GitDiagnosticsProvider).diagnosticLog = null;
     }
@@ -1105,6 +1152,9 @@ class _CloneRepositoryDialogState extends State<CloneRepositoryDialog> {
         );
         await widget.session.persistNow();
       }
+      if (mounted) {
+        setState(() => _progress = const GitProgress('Opening project…'));
+      }
       await widget.session.openWorkspaceFolder(targetUri);
       _recordDiagnostic('Cloned and opened ${folder.text.trim()}');
       if (mounted) Navigator.pop(context);
@@ -1255,9 +1305,12 @@ class _CloneRepositoryDialogState extends State<CloneRepositoryDialog> {
               ],
               if (busy) ...[
                 const SizedBox(height: 16),
-                const LinearProgressIndicator(),
+                LinearProgressIndicator(value: _progress?.fraction),
                 const SizedBox(height: 8),
-                Text(_operation, style: Theme.of(context).textTheme.bodySmall),
+                Text(
+                  _progressDescription(),
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
               ],
             ],
           ),

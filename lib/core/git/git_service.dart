@@ -119,6 +119,25 @@ abstract interface class GitDiagnosticsProvider {
   });
 }
 
+class GitProgress {
+  const GitProgress(
+    this.stage, {
+    this.completed = 0,
+    this.total,
+    this.unit = '',
+  });
+  final String stage;
+  final int completed;
+  final int? total;
+  final String unit;
+  double? get fraction =>
+      total != null && total! > 0 ? (completed / total!).clamp(0.0, 1.0) : null;
+}
+
+abstract interface class GitProgressProvider {
+  set onProgress(void Function(GitProgress)? callback);
+}
+
 abstract interface class GitService {
   /// `true` when this platform can run the HTTP git client.
   bool get available;

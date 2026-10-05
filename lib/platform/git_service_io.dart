@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:isolate';
 import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
@@ -6,6 +7,7 @@ import 'package:http/http.dart' as http;
 import '../core/git/git_service.dart';
 import '../core/git/git_ignore.dart';
 import '../core/git/git_store.dart';
+import '../core/git/git_publication.dart';
 import '../core/git/http_git_service.dart';
 import 'git_shared.dart';
 import 'git_http_client_io.dart';
@@ -144,6 +146,35 @@ final class FileGitRepositoryStore extends GitRepositoryStore {
 
 /// Mobile/desktop git client over HTTPS Smart HTTP — no system git required.
 class PlatformGitService extends HttpGitService {
+  final _statusScans = <Uri, Future<List<GitStatusEntry>>>{};
+  final _publicationScans = <Uri, Future<GitPublicationState>>{};
+
+  @override
+  Future<List<GitStatusEntry>> statusEntries(Uri directory) async {
+    final pending = _statusScans[directory];
+    if (pending != null) return pending;
+    final scan = Isolate.run(() => _scanFileGitStatus(directory));
+    _statusScans[directory] = scan;
+    try {
+      return await scan;
+    } finally {
+      _statusScans.remove(directory);
+    }
+  }
+
+  @override
+  Future<GitPublicationState> publicationState(Uri directory) async {
+    final pending = _publicationScans[directory];
+    if (pending != null) return pending;
+    final scan = Isolate.run(() => _scanFileGitPublication(directory));
+    _publicationScans[directory] = scan;
+    try {
+      return await scan;
+    } finally {
+      _publicationScans.remove(directory);
+    }
+  }
+
   PlatformGitService({http.Client? client})
     : super(
         transport: PackageHttpTransport(client: client ?? GitIoClient()),
@@ -157,5 +188,29 @@ class PlatformGitService extends HttpGitService {
         deflate: sharedDeflate,
       );
 }
+
+// Construct the file-backed reader inside the worker. UI services, HTTP clients,
+// method channels and mutable staging state must never cross isolate boundaries.
+FileGitRepositoryStore _openFileGitStore(Uri uri) {
+  if (uri.scheme != 'file') throw ArgumentError('Expected a file directory');
+  return FileGitRepositoryStore(Directory.fromUri(uri));
+}
+
+Future<List<GitStatusEntry>> _scanFileGitStatus(Uri directory) =>
+    HttpGitService(
+      transport: PackageHttpTransport(),
+      openStore: _openFileGitStore,
+      inflateAt: sharedInflateAt,
+      deflate: sharedDeflate,
+    ).statusEntries(directory);
+
+Future<GitPublicationState> _scanFileGitPublication(Uri directory) =>
+    readPublicationState(
+      GitObjectDatabase(
+        _openFileGitStore(directory),
+        sharedInflateAt,
+        sharedDeflate,
+      ),
+    );
 
 GitService createGitService({String? gitExecutable}) => PlatformGitService();

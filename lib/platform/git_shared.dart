@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 
 import '../core/git/git_http.dart';
 import '../core/git/git_pack.dart';
+import '../core/git/git_service.dart';
 
 /// Inflate one zlib stream from [pack] at [offset], returning consumed end index.
 ///
@@ -55,10 +56,13 @@ import '../core/git/git_pack.dart';
 Uint8List archiveDeflate(List<int> data) =>
     Uint8List.fromList(const ZLibEncoder().encodeBytes(data));
 
-final class PackageHttpTransport implements GitHttpTransport {
+final class PackageHttpTransport
+    implements GitHttpTransport, GitTransferProgressProvider {
   PackageHttpTransport({http.Client? client})
     : _client = client ?? http.Client();
   final http.Client _client;
+  @override
+  void Function(GitProgress)? onTransferProgress;
 
   @override
   Future<GitHttpResponse> send({
@@ -70,11 +74,34 @@ final class PackageHttpTransport implements GitHttpTransport {
     final request = http.Request(method, url);
     if (headers != null) request.headers.addAll(headers);
     if (body != null) request.bodyBytes = body;
+    final callback = onTransferProgress;
+    callback?.call(const GitProgress('Waiting for server…'));
     final streamed = await _client.send(request);
-    final bytes = await streamed.stream.toBytes();
+    final total = streamed.contentLength;
+    var received = 0;
+    final bytes = BytesBuilder(copy: false);
+    final timer = Stopwatch()..start();
+    void report() => callback?.call(
+      GitProgress(
+        'Downloading repository…',
+        completed: received,
+        total: total,
+        unit: 'bytes',
+      ),
+    );
+    report();
+    await for (final chunk in streamed.stream) {
+      bytes.add(chunk);
+      received += chunk.length;
+      if (timer.elapsedMilliseconds >= 100) {
+        report();
+        timer.reset();
+      }
+    }
+    report();
     return GitHttpResponse(
       statusCode: streamed.statusCode,
-      body: Uint8List.fromList(bytes),
+      body: bytes.takeBytes(),
       contentType: streamed.headers['content-type'],
     );
   }

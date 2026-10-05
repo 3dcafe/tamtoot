@@ -25,6 +25,10 @@ abstract interface class GitHttpTransport {
   });
 }
 
+abstract interface class GitTransferProgressProvider {
+  set onTransferProgress(void Function(GitProgress)? callback);
+}
+
 /// Logs only request endpoints and status, never headers or payloads.
 class DiagnosticGitTransport implements GitHttpTransport {
   DiagnosticGitTransport(this.delegate, this.log);
