@@ -143,7 +143,7 @@ void main() {
     final root = await Directory.systemTemp.createTemp('tamtoot-status-retry-');
     addTearDown(() => root.delete(recursive: true));
     final git = PlatformGitService();
-    (await git.init(root.uri, branch: 'main')).ensureOk();
+    (await git.init(root.uri, branch: 'main')).ens4ureOk();
     final ref = File('${root.path}/.git/refs/heads/main');
     await ref.parent.create(recursive: true);
     await ref.writeAsString('${'a' * 40}\n');
