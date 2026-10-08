@@ -240,17 +240,39 @@ void main() {
           output += utf8.decode(o.data, allowMalformed: true);
         },
       );
-      await channel.writeStdin(utf8.encode('stty -echo; top -s 1\n'));
-      final deadline = DateTime.now().add(const Duration(seconds: 8));
-      while (!output.contains('Processes:')) {
-        if (DateTime.now().isAfter(deadline)) {
-          throw StateError('Process monitor did not draw a screen');
+      // BSD top uses -s for the interval; procps top uses -d.
+      final command = Platform.isMacOS ? 'top -s 1' : 'top -d 1';
+      Future<void> waitFor(bool Function() ready, String message) async {
+        final deadline = DateTime.now().add(const Duration(seconds: 8));
+        while (!ready()) {
+          if (DateTime.now().isAfter(deadline)) {
+            throw StateError('$message: ${output.replaceAll('\x1b', '<ESC>')}');
+          }
+          await Future<void>.delayed(const Duration(milliseconds: 20));
         }
-        await Future<void>.delayed(const Duration(milliseconds: 20));
       }
+
+      await channel.writeStdin(
+        utf8.encode(
+          'stty -echo; LC_ALL=C $command; '
+          'printf "__TOP_EXIT_%s__\\n" "\$?"; stty size\n',
+        ),
+      );
+      // Both implementations display PID, but their summary labels differ.
+      await waitFor(() => output.contains('PID'), 'Monitor did not draw');
       screen.resize(90, 25);
       await channel.resize(90, 25);
+      final previousLength = output.length;
+      await channel.writeStdin(utf8.encode(' '));
+      await waitFor(
+        () => output.length > previousLength,
+        'Monitor did not refresh after resize',
+      );
       await channel.writeStdin(utf8.encode('q'));
+      await waitFor(
+        () => output.contains('__TOP_EXIT_0__') && output.contains('25 90'),
+        'Monitor did not quit successfully with the resized PTY',
+      );
       await channel.writeStdin(utf8.encode('exit 0\n'));
       expect((await channel.result).exitStatus, 0);
       expect(screen.cursorY, inInclusiveRange(0, 24));
