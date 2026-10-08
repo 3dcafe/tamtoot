@@ -232,3 +232,62 @@ The expanded test suite passes **57 tests**, including folder collapse/reopen, s
 - Windows/Linux builds and physical-device runtime remain unverified.
   Own cryptography has not received an independent audit.
 - Scope, limits and reproduction: [SSH stage 3](ssh-stage-3.ru.md).
+
+## Native SSH stage 4 — 2026-10-08
+
+- Added remote PTY (`pty-req` → `shell`) and bounded dimensions with debounced
+  `window-change`. Uses the existing channel flow control and cancellation;
+  interactive output streams without accumulating a lifetime transcript.
+- Added an own Dart VT100/ANSI screen/parser and Flutter Canvas renderer: colors,
+  cursor, margins/origin, insert/delete, scrollback, alternate screen and line
+  drawing. Unicode 17 data tables cover wide/combining characters; tests cover
+  fragmented UTF-8, Hangul, flags, emoji modifiers, ZWJ and VS16.
+- Added desktop/mobile input, application cursor/keypad modes, selection/copy,
+  bounded sanitized bracketed paste, keyboard toggle and accessible history.
+  Remote OSC/DCS commands, including clipboard commands, are ignored.
+- Android/iOS explicitly close SSH when the app becomes paused; returning from
+  background displays a disconnect warning and never reopens or replays shell.
+- Full suite: **320 passed, 1 skipped**. Final application-keypad change also
+  passed all **3 terminal widget tests**. Analyzer: **No issues found**.
+- Real isolated OpenSSH passed PTY TERM, stty dimensions before/after resize,
+  Unicode input, Ctrl-C and exit; full-screen vi saved a temporary file after
+  resize, and interactive macOS top accepted refresh, resize and quit.
+- Protocol tests passed PTY/shell refusal, cancelled opening, transport loss,
+  resizing and more than 2 MiB of streamed interactive output. Parser tests
+  passed bounded adversarial CSI/OSC/UTF-8 and random input/resize sequences.
+  Widget tests passed at 430px, with clipboard, control keys and lifecycle.
+- macOS debug, Android offline debug APK and iOS Simulator debug builds passed.
+  Windows/Linux builds and physical-device input/lifecycle remain unverified.
+- No pubspec dependencies added. Own cryptography remains unaudited; full xterm
+  emulation, full Unicode grapheme segmentation and transcript reflow are not
+  claimed. Exact scope: [SSH stage 4](ssh-stage-4.ru.md).
+
+## SSH/SFTP основной сценарий — 2026-10-08
+
+- Completed SFTP v3 over the own SSH subsystem stream: negotiated extensions,
+  bounded framing/IDs, directory listing, attributes, realpath/readlink, binary
+  transfer/progress/cancel, mkdir, non-overwriting rename and confirmed deletion.
+- Added remote text editing with full-content/metadata conflict checks, explicit
+  reload/discard, exclusive temporary uploads, fsync when advertised, retained
+  recovery copies, and safe failure when a competing destination appears.
+  Existing-file replacement is deliberately not advertised as atomic or CAS.
+- Native Android SAF and iOS UIDocumentPicker bridges support binary import/export
+  up to 32 MiB with bounded stream reads. Desktop reuses the project's existing
+  native file-selector adapter; no pubspec dependencies added.
+- Full suite: **334 passed, 1 skipped**. Analyzer: **No issues found**.
+- Real isolated OpenSSH verified a 170000-byte binary Unicode file through rekey,
+  listing/stat/realpath, save/recovery, conflict, symlinks, rename/removal, cancellation
+  and exec while the SFTP channel remains open. Existing native login/PTY/vi/top
+  checks also passed in the full suite.
+- Protocol tests: byte fragmentation, reversed response order, eight pending IDs,
+  wrong version/size/ID, same-size/same-mtime content conflict, rename race,
+  retention of a competing destination and original recovery copy, cancellation
+  of a stalled source and inert late cancellation after success.
+- Widget tests: 430px binary upload/export, deletion confirmation, remote editor,
+  conflict rejection, confirmed reload and retained recovery copy. Test event-loop
+  turns are allowed via runAsync for async stream completion.
+- Final macOS debug, Android offline debug APK and iOS Simulator debug builds passed.
+  Native picker/provider interaction on physical devices and Windows/Linux builds
+  remain unverified; own cryptography still requires an independent audit.
+- Stages 1–5 implement the primary client flow. Stage 6 features remain optional
+  extensions. Scope, recovery procedure and limits: [SSH stage 5](ssh-stage-5.ru.md).

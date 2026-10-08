@@ -21,7 +21,13 @@ class SshCommandResult {
 }
 
 class SshExecChannel {
-  SshExecChannel._(this.client, this.local, Duration timeout, this.onOutput) {
+  SshExecChannel._(
+    this.client,
+    this.local,
+    Duration timeout,
+    this.onOutput, {
+    this.interactive = false,
+  }) {
     for (final future in [_opened.future, _accepted.future, _result.future]) {
       unawaited(future.then((_) {}, onError: (Object _, StackTrace _) {}));
     }
@@ -30,6 +36,7 @@ class SshExecChannel {
   static const windowSize = 256 * 1024,
       packetSize = 32768,
       outputLimit = 2 * 1024 * 1024;
+  final bool interactive;
   final SshClient client;
   final int local;
   final void Function(SshCommandOutput)? onOutput;
@@ -53,7 +60,7 @@ class SshExecChannel {
       _stderr = BytesBuilder(copy: false);
   Future<SshCommandResult> get result => _result.future;
   Future<void> _writeTail = Future.value();
-  Completer<void>? _windowWaiting;
+  Completer<void>? _windowWaiting, _requestWaiting;
   void _check() {
     if (_closing || _closed) {
       throw const SshException('SSH command channel is closed.');
@@ -192,13 +199,13 @@ class SshExecChannel {
         );
       }
       if (type == 94 || extended == 1) {
-        _outputBytes += data.length;
+        if (!interactive) _outputBytes += data.length;
         if (_outputBytes > outputLimit) {
           _fail('SSH command output exceeded 2 MiB.');
           return;
         }
         final copy = Uint8List.fromList(data);
-        (type == 94 ? _stdout : _stderr).add(copy);
+        if (!interactive) (type == 94 ? _stdout : _stderr).add(copy);
         onOutput?.call(SshCommandOutput(copy, type == 95));
       }
       if (!_closing && _localWindow <= windowSize ~/ 2) {
@@ -237,7 +244,7 @@ class SshExecChannel {
         );
       }
       if (!_result.isCompleted) {
-        if (_exitStatus == null && _exitSignal == null) {
+        if (!interactive && _exitStatus == null && _exitSignal == null) {
           _fail('SSH channel closed without an exit status.', sendClose: false);
         } else {
           _result.complete(
@@ -256,6 +263,18 @@ class SshExecChannel {
     if (type == 99 || type == 100) {
       reader.end();
       if (_closing) return;
+      if (_requestWaiting != null) {
+        final pending = _requestWaiting!;
+        _requestWaiting = null;
+        if (type == 99) {
+          pending.complete();
+        } else {
+          pending.completeError(
+            const SshException('SSH server refused terminal request.'),
+          );
+        }
+        return;
+      }
       if (!_execSent || _accepted.isCompleted) {
         throw const SshException('Unexpected SSH channel request response.');
       }
@@ -327,6 +346,10 @@ class SshExecChannel {
     if (!_opened.isCompleted) _opened.completeError(exception);
     if (!_accepted.isCompleted) _accepted.completeError(exception);
     if (!_result.isCompleted) _result.completeError(exception);
+    if (_requestWaiting != null && !_requestWaiting!.isCompleted) {
+      _requestWaiting!.completeError(exception);
+    }
+    _requestWaiting = null;
     _stdout.clear();
     _stderr.clear();
     if (sendClose && client.state != SshClientState.closed) {

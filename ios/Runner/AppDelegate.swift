@@ -6,6 +6,7 @@ import WebKit
 
 @main
 @objc class AppDelegate: FlutterAppDelegate, FlutterImplicitEngineDelegate, UIDropInteractionDelegate {
+  private var sftpDocuments: SftpDocumentBridge?
   private var fileDropChannel: FlutterMethodChannel?
   private var fileDropInstalled = false
 
@@ -70,6 +71,7 @@ import WebKit
   func didInitializeImplicitFlutterEngine(_ engineBridge: FlutterImplicitEngineBridge) {
     GeneratedPluginRegistrant.register(with: engineBridge.pluginRegistry)
     installSshSecrets(engineBridge.applicationRegistrar.messenger())
+    sftpDocuments = SftpDocumentBridge(engineBridge.applicationRegistrar.messenger())
     engineBridge.applicationRegistrar.register(
       SitePreviewFactory(), withId: "dev.tamtoot/local_preview")
     fileDropChannel = FlutterMethodChannel(
@@ -188,4 +190,88 @@ private class SitePreview: NSObject, FlutterPlatformView {
     }
   }
   func view() -> UIView { webView }
+}
+
+/// User-scoped binary import/export. No permanent bookmark or broad file access.
+private final class SftpDocumentBridge: NSObject, UIDocumentPickerDelegate {
+  private var pending: FlutterResult?
+  private var exporting = false
+  private var temporary: URL?
+  init(_ messenger: FlutterBinaryMessenger) {
+    super.init()
+    FlutterMethodChannel(name: "dev.tamtoot/sftp_files", binaryMessenger: messenger)
+      .setMethodCallHandler { [weak self] call, result in self?.handle(call, result) }
+  }
+  private func handle(_ call: FlutterMethodCall, _ result: @escaping FlutterResult) {
+    guard pending == nil else { result(FlutterError(code: "BUSY", message: "Document picker is open", details: nil)); return }
+    let root = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+      .flatMap { $0.windows }.first { $0.isKeyWindow }?.rootViewController
+    guard var controller = root else { result(FlutterError(code: "FILE", message: "No document window available", details: nil)); return }
+    while let next = controller.presentedViewController { controller = next }
+    let picker: UIDocumentPickerViewController
+    if call.method == "pick" {
+      exporting = false
+      picker = UIDocumentPickerViewController(documentTypes: [kUTTypeData as String], in: .open)
+    } else if call.method == "save" {
+      guard let args = call.arguments as? [String: Any], let bytes = args["bytes"] as? FlutterStandardTypedData,
+            bytes.data.count <= 32 * 1024 * 1024 else {
+        result(FlutterError(code: "FILE", message: "File exceeds 32 MiB", details: nil)); return
+      }
+      do {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("sftp-export-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        temporary = directory
+        let raw = args["name"] as? String ?? "download"
+        let name = raw.components(separatedBy: CharacterSet(charactersIn: "/\\").union(.controlCharacters)).joined(separator: "_")
+        let file = directory.appendingPathComponent(name.isEmpty ? "download" : name)
+        try bytes.data.write(to: file, options: .atomic)
+        exporting = true; picker = UIDocumentPickerViewController(url: file, in: .exportToService)
+      } catch { cleanup(); result(FlutterError(code: "FILE", message: "Unable to prepare export", details: nil)); return }
+    } else { result(FlutterMethodNotImplemented); return }
+    pending = result; picker.delegate = self; picker.allowsMultipleSelection = false
+    controller.present(picker, animated: true)
+  }
+  private func cleanup() {
+    if let directory = temporary { try? FileManager.default.removeItem(at: directory) }
+    temporary = nil
+  }
+  func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) {
+    let reply = pending; pending = nil; cleanup(); reply?(exporting ? false : nil)
+  }
+  func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
+    let reply = pending; pending = nil
+    if exporting { cleanup(); reply?(true); return }
+    guard let url = urls.first else { reply?(nil); return }
+    DispatchQueue.global(qos: .userInitiated).async {
+      let access = url.startAccessingSecurityScopedResource()
+      defer { if access { url.stopAccessingSecurityScopedResource() } }
+      do {
+        let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
+        guard let size = attributes[.size] as? NSNumber, size.int64Value <= 32 * 1024 * 1024 else {
+          throw NSError(domain: "SFTP", code: 1)
+        }
+        var bytes: Data?; var readError: Error?; var coordinationError: NSError?
+        NSFileCoordinator().coordinate(readingItemAt: url, options: [], error: &coordinationError) { source in
+          do {
+            guard let input = InputStream(url: source) else { throw NSError(domain: "SFTP", code: 3) }
+            input.open(); defer { input.close() }
+            var data = Data(); var buffer = [UInt8](repeating: 0, count: 32768)
+            while true {
+              let count = input.read(&buffer, maxLength: buffer.count)
+              if count == 0 { break }
+              guard count > 0, data.count + count <= 32 * 1024 * 1024 else { throw NSError(domain: "SFTP", code: 4) }
+              data.append(contentsOf: buffer.prefix(count))
+            }
+            bytes = data
+          } catch { readError = error }
+        }
+        guard coordinationError == nil, readError == nil, let data = bytes, data.count <= 32 * 1024 * 1024 else {
+          throw NSError(domain: "SFTP", code: 2)
+        }
+        DispatchQueue.main.async { reply?(["name": url.lastPathComponent, "bytes": FlutterStandardTypedData(bytes: data)]) }
+      } catch {
+        DispatchQueue.main.async { reply?(FlutterError(code: "FILE", message: "Document read failed or exceeded 32 MiB", details: nil)) }
+      }
+    }
+  }
 }

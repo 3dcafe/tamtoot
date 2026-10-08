@@ -12,6 +12,7 @@ import io.flutter.plugin.common.MethodChannel
 
 /** SAF export adapter. No broad storage permission is requested. */
 class MainActivity : FlutterActivity() {
+    private var sftpFiles: SftpFiles? = null
     private var pending: MethodChannel.Result? = null
     private var pendingText: String? = null
     private val createDocumentRequest = 4810
@@ -21,6 +22,7 @@ class MainActivity : FlutterActivity() {
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         SshSecrets(this, flutterEngine.dartExecutor.binaryMessenger)
+        sftpFiles = SftpFiles(this, flutterEngine.dartExecutor.binaryMessenger)
         flutterEngine.platformViewsController.registry.registerViewFactory(
             "dev.tamtoot/local_preview", SitePreviewFactory())
         fileDropChannel = MethodChannel(
@@ -196,6 +198,7 @@ class MainActivity : FlutterActivity() {
     @Deprecated("Activity result bridge for Flutter document channel")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
+        if (sftpFiles?.onResult(requestCode, resultCode, data) == true) return
         if (requestCode != createDocumentRequest && requestCode != openDocumentRequest) return
         val result = pending ?: return
         pending = null

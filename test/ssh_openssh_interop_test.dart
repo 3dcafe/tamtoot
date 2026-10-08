@@ -48,6 +48,7 @@ HostKeyAlgorithms ssh-ed25519
 Ciphers $cipher
 MACs hmac-sha2-256-etm@openssh.com
 RekeyLimit 16K
+Subsystem sftp internal-sftp
 ''');
     process = await Process.start('/usr/sbin/sshd', [
       '-D',

@@ -4,6 +4,8 @@ import 'dart:math';
 import 'dart:typed_data';
 import 'package:flutter/services.dart';
 import '../core/ssh/ssh_client.dart';
+import 'ssh_terminal_view.dart';
+import 'sftp_browser_view.dart';
 import '../core/ssh/auth/ssh_private_key.dart';
 import '../core/ssh/crypto/ssh_crypto.dart';
 import '../platform/ssh_key_file.dart';
@@ -415,6 +417,34 @@ class _SshConnectionDialogState extends State<SshConnectionDialog> {
                   child: Text(banner),
                 ),
               if (ready) ...[
+                OutlinedButton.icon(
+                  onPressed: running
+                      ? null
+                      : () => Navigator.of(context).push(
+                          MaterialPageRoute<void>(
+                            builder: (_) => SshTerminalView(
+                              client: client!,
+                              title: widget.profile.name,
+                            ),
+                          ),
+                        ),
+                  icon: const Icon(Icons.terminal),
+                  label: const Text('Open terminal'),
+                ),
+                OutlinedButton.icon(
+                  onPressed: running
+                      ? null
+                      : () => Navigator.of(context).push(
+                          MaterialPageRoute<void>(
+                            builder: (_) => SftpBrowserView(
+                              client: client!,
+                              title: widget.profile.name,
+                            ),
+                          ),
+                        ),
+                  icon: const Icon(Icons.folder_open),
+                  label: const Text('Open SFTP'),
+                ),
                 const SizedBox(height: 12),
                 TextField(
                   controller: command,

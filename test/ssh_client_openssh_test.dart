@@ -1,4 +1,6 @@
 import 'dart:convert';
+import 'package:tamtoot/core/sftp/sftp_client.dart';
+import 'package:tamtoot/core/terminal/terminal_screen.dart';
 import 'dart:io';
 import 'dart:typed_data';
 import 'package:flutter_test/flutter_test.dart';
@@ -126,6 +128,232 @@ void main() {
       },
     );
   }
+
+  test(
+    'real OpenSSH PTY: TERM, resize, Unicode input, Ctrl-C and shell exit',
+    () async {
+      final pem = await key('ed25519', false), protocol = await connect();
+      await login(protocol, pem);
+      final output = StringBuffer();
+      final terminal = TerminalScreen(columns: 80, rows: 24);
+      final channel = await protocol.openShell(
+        columns: 80,
+        rows: 24,
+        onOutput: (o) {
+          output.write(utf8.decode(o.data, allowMalformed: true));
+          terminal.add(o.data);
+        },
+      );
+      Future<void> waitFor(String value) async {
+        final deadline = DateTime.now().add(const Duration(seconds: 8));
+        while (!output.toString().contains(value)) {
+          if (DateTime.now().isAfter(deadline)) {
+            throw StateError('Expected PTY marker not received: $value');
+          }
+          await Future<void>.delayed(const Duration(milliseconds: 20));
+        }
+      }
+
+      Future<void> send(String value) => channel.writeStdin(utf8.encode(value));
+      await send(
+        'stty -echo; export LC_ALL=en_US.UTF-8; printf "__TERM_%s__\\n" "\$TERM"; stty size\n',
+      );
+      await waitFor('__TERM_vt100__');
+      await waitFor('24 80');
+      terminal.resize(83, 25);
+      await channel.resize(83, 25);
+      await send('stty size\n');
+      await waitFor('25 83');
+      await send('read v; printf "__UTF_%s__\\n" "\$v"\n');
+      await send('界e\u0301\n');
+      await waitFor('__UTF_界e\u0301__');
+      await send('sleep 30\n');
+      await Future<void>.delayed(const Duration(milliseconds: 150));
+      await channel.writeStdin([3]);
+      await send('printf "__AFTER_INTERRUPT__\\n"\n');
+      await waitFor('__AFTER_INTERRUPT__');
+      await send('printf "\\033[31mRED\\033[0m\\n"; exit 0\n');
+      expect((await channel.result).exitStatus, 0);
+      expect(output.toString(), contains('RED'));
+      expect(terminal.lines.length, 25);
+    },
+    timeout: const Timeout(Duration(seconds: 30)),
+  );
+
+  test(
+    'real OpenSSH PTY full-screen vi edits a fixture after resize',
+    () async {
+      final pem = await key('ed25519', false), protocol = await connect();
+      await login(protocol, pem);
+      final screen = TerminalScreen(columns: 80, rows: 24);
+      var output = '';
+      final channel = await protocol.openShell(
+        columns: 80,
+        rows: 24,
+        onOutput: (o) {
+          screen.add(o.data);
+          output += utf8.decode(o.data, allowMalformed: true);
+        },
+      );
+      final file = '${caseDirectory.path}/terminal-editor.txt';
+      await channel.writeStdin(
+        utf8.encode("stty -echo; vi -u NONE -i NONE -n '$file'\n"),
+      );
+      final deadline = DateTime.now().add(const Duration(seconds: 8));
+      while (!output.contains('[J') && !output.contains('[2J')) {
+        if (DateTime.now().isAfter(deadline)) {
+          throw StateError(
+            'vi did not initialize the screen: ${output.replaceAll('\x1b', '<ESC>')}',
+          );
+        }
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+      }
+      screen.resize(100, 30);
+      await channel.resize(100, 30);
+      await channel.writeStdin(utf8.encode('iNative PTY editor\x1b:wq\r'));
+      final saved = DateTime.now().add(const Duration(seconds: 8));
+      while (!await File(file).exists()) {
+        if (DateTime.now().isAfter(saved)) {
+          throw StateError('vi did not write the fixture');
+        }
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+      }
+      expect(await File(file).readAsString(), 'Native PTY editor\n');
+      await channel.writeStdin(utf8.encode('exit 0\n'));
+      expect((await channel.result).exitStatus, 0);
+    },
+    timeout: const Timeout(Duration(seconds: 30)),
+  );
+
+  test(
+    'real OpenSSH PTY process monitor accepts refresh, resize and quit',
+    () async {
+      final pem = await key('ed25519', false), protocol = await connect();
+      await login(protocol, pem);
+      final screen = TerminalScreen(columns: 100, rows: 30);
+      var output = '';
+      final channel = await protocol.openShell(
+        columns: 100,
+        rows: 30,
+        onOutput: (o) {
+          screen.add(o.data);
+          output += utf8.decode(o.data, allowMalformed: true);
+        },
+      );
+      await channel.writeStdin(utf8.encode('stty -echo; top -s 1\n'));
+      final deadline = DateTime.now().add(const Duration(seconds: 8));
+      while (!output.contains('Processes:')) {
+        if (DateTime.now().isAfter(deadline)) {
+          throw StateError('Process monitor did not draw a screen');
+        }
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+      }
+      screen.resize(90, 25);
+      await channel.resize(90, 25);
+      await channel.writeStdin(utf8.encode('q'));
+      await channel.writeStdin(utf8.encode('exit 0\n'));
+      expect((await channel.result).exitStatus, 0);
+      expect(screen.cursorY, inInclusiveRange(0, 24));
+    },
+    timeout: const Timeout(Duration(seconds: 30)),
+  );
+
+  test(
+    'native SFTP v3 listing, binary transfer, editing conflicts, recovery copy and symlinks',
+    () async {
+      final pem = await key('ed25519', false), protocol = await connect();
+      await login(protocol, pem);
+      final sftp = await SftpClient.connect(protocol);
+      addTearDown(sftp.close);
+      final folder = '${caseDirectory.path}/files';
+      await sftp.mkdir(folder);
+      expect((await sftp.stat(folder)).directory, true);
+      expect(
+        await sftp.realpath(folder),
+        await Directory(folder).resolveSymbolicLinks(),
+      );
+      final bytes = Uint8List.fromList(
+        List.generate(170000, (i) => (i * 17) % 256),
+      );
+      var progress = 0;
+      final path = '$folder/данные.bin';
+      await sftp.writeFile(
+        path,
+        bytes,
+        progress: (done, total) {
+          expect(done, greaterThanOrEqualTo(progress));
+          progress = done;
+        },
+      );
+      expect(progress, bytes.length);
+      expect(await sftp.readFile(path), orderedEquals(bytes));
+      expect((await sftp.list(folder)).single.name, 'данные.bin');
+      final snapshot = await sftp.snapshot(path);
+      final commit = await sftp.writeFile(path, [1, 2, 3], expected: snapshot);
+      expect(await sftp.readFile(path), [1, 2, 3]);
+      expect(await sftp.readFile(commit.backupPath!), orderedEquals(bytes));
+      await expectLater(
+        sftp.writeFile(path, [9], expected: snapshot),
+        throwsA(isA<SftpConflict>()),
+      );
+      expect(await sftp.readFile(path), [1, 2, 3]);
+      final link = Link('$folder/link');
+      await link.create(path);
+      expect((await sftp.stat(link.path)).symlink, true);
+      expect(await sftp.readlink(link.path), path);
+      await expectLater(
+        sftp.snapshot(link.path),
+        throwsA(isA<SftpException>()),
+      );
+      await sftp.remove(link.path);
+      expect(await File(path).exists(), true);
+      await sftp.rename(path, '$folder/renamed.bin');
+      expect(await sftp.readFile('$folder/renamed.bin'), [1, 2, 3]);
+      await expectLater(
+        sftp.rename('$folder/renamed.bin', commit.backupPath!),
+        throwsA(isA<SftpException>()),
+      );
+      final stats = await Future.wait([
+        sftp.stat('$folder/renamed.bin'),
+        sftp.stat(commit.backupPath!),
+      ]);
+      expect(stats[0].size, 3);
+      await sftp.remove('$folder/renamed.bin');
+      await sftp.remove(commit.backupPath!);
+      await sftp.remove(folder, directory: true);
+      expect(await sftp.tryStat(folder), null);
+      final exec = await protocol.openExec('true');
+      await exec.finishStdin();
+      expect((await exec.result).succeeded, true);
+    },
+    timeout: const Timeout(Duration(seconds: 45)),
+  );
+
+  test(
+    'SFTP cancellation cannot become success or commit a partial file',
+    () async {
+      final pem = await key('ed25519', false), protocol = await connect();
+      await login(protocol, pem);
+      final sftp = await SftpClient.connect(protocol);
+      addTearDown(sftp.close);
+      final token = SshCancellation(),
+          path = '${caseDirectory.path}/cancelled.bin';
+      await expectLater(
+        sftp.writeFile(
+          path,
+          Uint8List(1024 * 1024),
+          cancellation: token,
+          progress: (done, total) {
+            if (done >= 32768) token.cancel();
+          },
+        ),
+        throwsA(isA<SftpException>()),
+      );
+      expect(await File(path).exists(), false);
+      expect(sftp.closed, true);
+    },
+    timeout: const Timeout(Duration(seconds: 30)),
+  );
 
   for (final kind in ['ed25519', 'rsa']) {
     for (final encrypted in [false, true]) {

@@ -10,6 +10,7 @@ import 'transport/ssh_codec.dart';
 import 'transport/ssh_transport.dart';
 part 'auth/ssh_authentication.dart';
 part 'channels/ssh_exec_channel.dart';
+part 'channels/ssh_shell_channel.dart';
 
 enum SshClientState { idle, authenticating, ready, closed }
 
@@ -273,6 +274,134 @@ class SshClient {
     } catch (e) {
       channel._fail(
         e is SshException ? e.message : 'SSH command could not start.',
+      );
+      rethrow;
+    }
+  }
+
+  Future<SshShellChannel> openShell({
+    required int columns,
+    required int rows,
+    required void Function(SshCommandOutput) onOutput,
+    SshCancellation? cancellation,
+  }) async {
+    _verified();
+    SshShellChannel.validateSize(columns, rows);
+    if (state != SshClientState.ready ||
+        _channels.length >= 4 ||
+        _nextChannel > 0xffffffff) {
+      throw const SshException(
+        'SSH channel limit or connection state is invalid.',
+      );
+    }
+    final channel = SshShellChannel._(this, _nextChannel++, onOutput);
+    _channels[channel.local] = channel;
+    if (cancellation != null) {
+      unawaited(cancellation.whenCancelled.then((_) => channel.cancel()));
+      if (cancellation.cancelled) {
+        channel._fail('SSH terminal cancelled.', sendClose: false);
+        channel._remove();
+        throw const SshException('SSH terminal cancelled.');
+      }
+    }
+    try {
+      await _send(
+        (SshWriter()
+              ..byte(90)
+              ..text('session')
+              ..uint32(channel.local)
+              ..uint32(SshExecChannel.windowSize)
+              ..uint32(SshExecChannel.packetSize))
+            .take(),
+      );
+      await channel._opened.future;
+      await channel._request(
+        'pty-req',
+        (SshWriter()
+              ..text(SshShellChannel.terminalType)
+              ..uint32(columns)
+              ..uint32(rows)
+              ..uint32(0)
+              ..uint32(0)
+              ..string([0]))
+            .take(),
+      );
+      channel._execSent = true;
+      await _send(
+        (SshWriter()
+              ..byte(98)
+              ..uint32(channel.remote!)
+              ..text('shell')
+              ..byte(1))
+            .take(),
+      );
+      await channel._accepted.future;
+      channel._timer?.cancel();
+      return channel;
+    } catch (e) {
+      channel._fail(
+        e is SshException ? e.message : 'SSH terminal could not start.',
+      );
+      rethrow;
+    }
+  }
+
+  /// Binary subsystem stream; uses the same bounded channel flow control as PTY.
+  Future<SshExecChannel> openSubsystem(
+    String name, {
+    required void Function(SshCommandOutput) onOutput,
+    SshCancellation? cancellation,
+  }) async {
+    _verified();
+    if (state != SshClientState.ready ||
+        name != 'sftp' ||
+        _channels.length >= 4 ||
+        _nextChannel > 0xffffffff) {
+      throw const SshException('Invalid SSH subsystem or channel limit.');
+    }
+    final channel = SshExecChannel._(
+      this,
+      _nextChannel++,
+      const Duration(seconds: 30),
+      onOutput,
+      interactive: true,
+    );
+    _channels[channel.local] = channel;
+    if (cancellation != null) {
+      unawaited(cancellation.whenCancelled.then((_) => channel.cancel()));
+      if (cancellation.cancelled) {
+        channel._fail('SSH subsystem cancelled.', sendClose: false);
+        channel._remove();
+        throw const SshException('SSH subsystem cancelled.');
+      }
+    }
+    try {
+      await _send(
+        (SshWriter()
+              ..byte(90)
+              ..text('session')
+              ..uint32(channel.local)
+              ..uint32(SshExecChannel.windowSize)
+              ..uint32(SshExecChannel.packetSize))
+            .take(),
+      );
+      await channel._opened.future;
+      channel._execSent = true;
+      await _send(
+        (SshWriter()
+              ..byte(98)
+              ..uint32(channel.remote!)
+              ..text('subsystem')
+              ..byte(1)
+              ..text(name))
+            .take(),
+      );
+      await channel._accepted.future;
+      channel._timer?.cancel();
+      return channel;
+    } catch (e) {
+      channel._fail(
+        e is SshException ? e.message : 'SSH subsystem could not start.',
       );
       rethrow;
     }

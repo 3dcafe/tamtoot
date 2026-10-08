@@ -7,6 +7,10 @@ import 'package:tamtoot/core/ssh/transport/ssh_codec.dart';
 import 'package:tamtoot/core/ssh/transport/ssh_transport.dart';
 
 class ProtocolDisplayCrypto implements SshCrypto {
+  int _nonce = 0;
+  @override
+  Uint8List randomBytes(int length) =>
+      Uint8List.fromList(List.generate(length, (i) => (i + ++_nonce) & 255));
   @override
   Uint8List sha256(List<int> bytes) => Uint8List(32);
   @override
