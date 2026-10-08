@@ -186,7 +186,7 @@ extension SshAuthenticationProtocol on SshClient {
           signature?.fillRange(0, signature.length, 0);
           request?.fillRange(0, request.length, 0);
         }
-        return _response();
+        return await _response();
       }
       return false;
     } finally {
