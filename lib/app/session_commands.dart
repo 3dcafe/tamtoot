@@ -230,7 +230,7 @@ void registerSessionCommands(IdeSession s, PresentationActions ui) {
   add('file.save', 'Save', (_) async {
     if (await s.documents.save(s.documents.active!)) {
       s.log('Saved ${s.documents.active!.name}');
-      await s.refreshGitIndicators();
+      await s.ensureGitIndicators();
     }
   }, enabled: editor);
   add('file.saveAs', 'Save as…', (_) async {

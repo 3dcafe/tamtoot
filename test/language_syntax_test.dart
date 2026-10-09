@@ -63,6 +63,80 @@ void main() {
     expect(registry.forPath('Component.razor')?.id, 'razor');
     expect(registry.forPath('site.CSS')?.id, 'css');
     expect(registry.forPath('App.CSPROJ')?.id, 'xml');
+    for (final extension in ['py', 'pyw', 'pyi']) {
+      expect(registry.forPath('module.$extension')?.id, 'python');
+    }
+    expect(registry.forPath(r'C:\project\MAIN.KT')?.id, 'kotlin');
+    expect(registry.forPath('build.gradle.kts')?.id, 'kotlin');
+    expect(registry.forPath('Main.JAVA')?.id, 'java');
+    expect(registry.forPath('main.py.txt'), isNull);
+  });
+  test('Python decorators, literals and multiline strings', () {
+    final language = loadLanguage('python');
+    const source = '@cache async def run(): return True';
+    expect(scopeAt(language, source, '@cache'), 'annotation');
+    expect(scopeAt(language, source, 'async'), 'keyword');
+    expect(scopeAt(language, source, 'def'), 'keyword');
+    expect(scopeAt(language, source, 'run'), 'function');
+    expect(scopeAt(language, 'value = 0xFF', '0xFF'), 'number');
+    expect(scopeAt(language, 'value = r"# text"', 'r"# text"'), 'string');
+    expect(scopeAt(language, 'value = "# text"', '"# text"'), 'string');
+    for (final delimiter in ['"""', "'''"]) {
+      var plain = language.tokenizeLine('text = $delimiter');
+      expect(plain.state, isNotNull);
+      plain = language.tokenizeLine('# still a string', plain.state);
+      expect(plain.tokens.single.scope, 'string');
+      plain = language.tokenizeLine('$delimiter; pass', plain.state);
+      expect(plain.state, isNull);
+      expect(plain.tokens.last.scope, 'keyword');
+    }
+    expect(language.tokenize('# def ignored()').single.scope, 'comment');
+    var result = language.tokenizeLine('text = f"""hello');
+    result = language.tokenizeLine('# {value} is string content', result.state);
+    expect(result.tokens.single.scope, 'string');
+    result = language.tokenizeLine('"""; return', result.state);
+    expect(result.state, isNull);
+    expect(result.tokens.last.scope, 'keyword');
+  });
+  test('Kotlin raw strings, escaped identifiers and nested comments', () {
+    final language = loadLanguage('kotlin');
+    const source = '@Deprecated suspend fun run(): Int = 42';
+    expect(scopeAt(language, source, '@Deprecated'), 'annotation');
+    expect(scopeAt(language, source, 'suspend'), 'keyword');
+    expect(scopeAt(language, source, 'fun'), 'keyword');
+    expect(scopeAt(language, source, 'Int'), 'type');
+    expect(scopeAt(language, 'val `class` = 1', '`class`'), 'foreground');
+    var result = language.tokenizeLine('/* outer /* inner');
+    result = language.tokenizeLine('*/ still outer', result.state);
+    expect(result.tokens.single.scope, 'comment');
+    expect(result.state, isNotNull);
+    result = language.tokenizeLine('*/ val text = """hello', result.state);
+    expect(result.state, isNotNull);
+    result = language.tokenizeLine(r'backslash \ and // comment', result.state);
+    expect(result.tokens.single.scope, 'string');
+    result = language.tokenizeLine('"""; return', result.state);
+    expect(result.state, isNull);
+    expect(result.tokens.last.scope, 'keyword');
+  });
+  test('Java declarations, annotations and text blocks', () {
+    final language = loadLanguage('java');
+    const source = '@Override public record Example(int value) {}';
+    expect(scopeAt(language, source, '@Override'), 'annotation');
+    expect(scopeAt(language, source, 'record'), 'keyword');
+    expect(scopeAt(language, source, 'int'), 'type');
+    expect(scopeAt(language, 'long value = 42L;', '42L'), 'number');
+    expect(scopeAt(language, 'boolean value = true;', 'true'), 'constant');
+    var result = language.tokenizeLine('String text = """');
+    result = language.tokenizeLine('// not a comment', result.state);
+    expect(result.tokens.single.scope, 'string');
+    result = language.tokenizeLine('"""; return;', result.state);
+    expect(result.state, isNull);
+    expect(result.tokens.any((t) => t.scope == 'keyword'), isTrue);
+    result = language.tokenizeLine('/* comment');
+    result = language.tokenizeLine('*/ class Example {}', result.state);
+    expect(result.state, isNull);
+    expect(result.tokens.first.scope, 'comment');
+    expect(result.tokens.any((t) => t.scope == 'keyword'), isTrue);
   });
   test('Dart recognizes modern declarations, annotations, numbers and calls', () {
     final language = loadLanguage('dart');

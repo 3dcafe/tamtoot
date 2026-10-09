@@ -66,7 +66,11 @@ class _GitChangesDialogState extends State<GitChangesDialog> {
               !_loading &&
               !busy &&
               !widget.session.gitBusy) {
-            _load(background: true);
+            if (ready) {
+              setState(_applyCachedEntries);
+            } else {
+              _load(background: true);
+            }
           }
         });
       });
@@ -77,7 +81,11 @@ class _GitChangesDialogState extends State<GitChangesDialog> {
   void didUpdateWidget(GitChangesDialog oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (!oldWidget.visible && widget.visible && !busy && !_loading) {
-      _load(background: ready);
+      if (ready) {
+        setState(_applyCachedEntries);
+      } else {
+        _load();
+      }
     }
   }
 
@@ -120,7 +128,37 @@ class _GitChangesDialogState extends State<GitChangesDialog> {
     return '${widget.session.gitStatusRevision}|${documents.join('|')}';
   }
 
-  Future<void> _load({bool background = false}) async {
+  void _applyCachedEntries() {
+    entries = [...widget.session.cachedGitStatus];
+    unsaved.clear();
+    for (final doc in widget.session.documents.documents) {
+      final uri = doc.uri;
+      if (!doc.dirty ||
+          uri == null ||
+          !uri.toString().startsWith(root.toString())) {
+        continue;
+      }
+      final path = Uri.decodeComponent(
+        uri.toString().substring(root.toString().length),
+      );
+      final sharedRequestFile =
+          path == '.tamtoot/environment.json' ||
+          path.startsWith('.tamtoot/requests/');
+      if ((!sharedRequestFile && path.startsWith('.tamtoot/')) ||
+          path.startsWith('.git/')) {
+        continue;
+      }
+      unsaved.add(path);
+      if (!entries.any((entry) => entry.path == path)) {
+        entries.add(GitStatusEntry(' ', 'M', path));
+      }
+    }
+    entries.sort((a, b) => a.path.compareTo(b.path));
+    selected.retainAll(entries.map((e) => e.path));
+    ready = true;
+  }
+
+  Future<void> _load({bool background = false, bool force = false}) async {
     if (!mounted || _loading) return;
     _loading = true;
     _loadStarted = DateTime.now();
@@ -143,72 +181,57 @@ class _GitChangesDialogState extends State<GitChangesDialog> {
     if (!background) {
       setState(() {
         busy = true;
-        ready = false;
       });
     }
     try {
-      final identity = git;
-      if (identity is GitIdentityProvider) {
-        final value = await (identity as GitIdentityProvider)
-            .identity(root)
-            .timeout(const Duration(seconds: 15));
-        branch = value.branch;
-        if (!_identityLoaded) {
-          name.text = value.name;
-          email.text = value.email;
-          _identityLoaded = true;
-        }
-      }
-      final url = await git
-          .remoteUrl(root)
-          .timeout(const Duration(seconds: 15));
-      remote = url.ok ? url.stdout.trim() : '';
-      // Never display credentials embedded in a pre-existing remote URL.
-      if (remote.isNotEmpty) {
-        remote = Uri.parse(remote).replace(userInfo: '').toString();
-        if (!_credentialsLoaded) {
-          final saved = widget.session.gitCredentials(remote);
-          username.text = saved.username;
-          token.text = saved.token;
-          final author = await widget.session.store.read('gitAuthor');
-          if (author != null) {
-            final data = jsonDecode(author) as Map<String, dynamic>;
-            if (name.text.isEmpty) name.text = data['name'] as String? ?? '';
-            if (email.text.isEmpty) email.text = data['email'] as String? ?? '';
+      if (!ready || force) {
+        final identity = git;
+        if (identity is GitIdentityProvider) {
+          final value = await (identity as GitIdentityProvider)
+              .identity(root)
+              .timeout(const Duration(seconds: 15));
+          branch = value.branch;
+          if (!_identityLoaded) {
+            name.text = value.name;
+            email.text = value.email;
+            _identityLoaded = true;
           }
-          _credentialsLoaded = true;
+        }
+        final url = await git
+            .remoteUrl(root)
+            .timeout(const Duration(seconds: 15));
+        remote = url.ok ? url.stdout.trim() : '';
+        // Never display credentials embedded in a pre-existing remote URL.
+        if (remote.isNotEmpty) {
+          remote = Uri.parse(remote).replace(userInfo: '').toString();
+          if (!_credentialsLoaded) {
+            final saved = widget.session.gitCredentials(remote);
+            username.text = saved.username;
+            token.text = saved.token;
+            final author = await widget.session.store.read('gitAuthor');
+            if (author != null) {
+              final data = jsonDecode(author) as Map<String, dynamic>;
+              if (name.text.isEmpty) {
+                name.text = data['name'] as String? ?? '';
+              }
+              if (email.text.isEmpty) {
+                email.text = data['email'] as String? ?? '';
+              }
+            }
+            _credentialsLoaded = true;
+          }
         }
       }
-      stage('Checking working-tree files…');
-      entries = [
-        ...await git.statusEntries(root).timeout(const Duration(seconds: 125)),
-      ];
-      unsaved.clear();
-      for (final doc in widget.session.documents.documents) {
-        final uri = doc.uri;
-        if (!doc.dirty ||
-            uri == null ||
-            !uri.toString().startsWith(root.toString())) {
-          continue;
-        }
-        final path = Uri.decodeComponent(
-          uri.toString().substring(root.toString().length),
+      if (force) {
+        await widget.session.refreshGitIndicators().timeout(
+          const Duration(seconds: 125),
         );
-        final sharedRequestFile =
-            path == '.tamtoot/environment.json' ||
-            path.startsWith('.tamtoot/requests/');
-        if ((!sharedRequestFile && path.startsWith('.tamtoot/')) ||
-            path.startsWith('.git/')) {
-          continue;
-        }
-        unsaved.add(path);
-        if (!entries.any((entry) => entry.path == path)) {
-          entries.add(GitStatusEntry(' ', 'M', path));
-        }
+      } else {
+        await widget.session.ensureGitIndicators().timeout(
+          const Duration(seconds: 125),
+        );
       }
-      entries.sort((a, b) => a.path.compareTo(b.path));
-      selected.retainAll(entries.map((e) => e.path));
-      ready = true;
+      _applyCachedEntries();
       stage('Ready: ${entries.length} changed files');
     } catch (error) {
       feedback = safeError(error);
@@ -587,7 +610,7 @@ class _GitChangesDialogState extends State<GitChangesDialog> {
           jsonEncode({'name': name.text.trim(), 'email': email.text.trim()}),
         );
         await widget.session.persistNow();
-        await _load();
+        await _load(force: true);
         widget.session.log('[Git] Settings updated for origin/$branch');
       } catch (error) {
         if (mounted) setState(() => feedback = safeError(error));
@@ -968,7 +991,7 @@ class _GitChangesDialogState extends State<GitChangesDialog> {
                     ),
                     IconButton(
                       tooltip: 'Refresh',
-                      onPressed: busy ? null : _load,
+                      onPressed: busy ? null : () => _load(force: true),
                       icon: const Icon(Icons.refresh, size: 20),
                       visualDensity: VisualDensity.compact,
                     ),
@@ -1022,6 +1045,11 @@ class _GitChangesDialogState extends State<GitChangesDialog> {
                 ),
                 if (widget.embedded) ...[
                   const SizedBox(width: 8),
+                  IconButton(
+                    tooltip: 'Refresh',
+                    onPressed: busy ? null : () => _load(force: true),
+                    icon: const Icon(Icons.refresh),
+                  ),
                   IconButton(
                     tooltip: 'Git settings',
                     onPressed: busy ? null : _settings,

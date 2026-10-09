@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "packageVersion": "0.1.0",
+  "snippets": {
+    "fun": {
+      "prefix": "fun",
+      "body": "fun function() {\n    \n}"
+    },
+    "class": {
+      "prefix": "class",
+      "body": "class Example {\n    \n}"
+    },
+    "main": {
+      "prefix": "main",
+      "body": "fun main() {\n    \n}"
+    }
+  }
+}

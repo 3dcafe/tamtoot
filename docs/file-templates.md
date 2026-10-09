@@ -16,4 +16,6 @@ Language packages can declare optional `fileTemplates` in `language.json`:
 }
 ```
 
-The first template is suggested by default. `{{name}}` expands to the filename stem. C# and Dart templates require a simple valid identifier; choose Empty file for other filenames. Template bodies are text, with no scripts or commands executed. Packages without templates still offer an empty file with their first registered extension.
+The first template is suggested by default. `{{name}}` expands to the filename stem. C#, Dart, Python, Kotlin and Java templates that use this placeholder require a simple ASCII identifier; choose Empty file for other filenames. Template bodies are text, with no scripts or commands executed. Packages without templates still offer an empty file with their first registered extension.
+
+Python includes module and class templates, Kotlin includes class, main and `.kts` script templates, and Java includes class, main class and interface templates. A Java public class uses the filename stem as its class name.

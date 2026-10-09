@@ -1,0 +1,61 @@
+{
+  "schemaVersion": 1,
+  "packageVersion": "0.1.0",
+  "rules": [
+    {
+      "pattern": "//.*$",
+      "scope": "comment"
+    },
+    {
+      "begin": "/\\*",
+      "end": "\\*/",
+      "scope": "comment",
+      "nested": true
+    },
+    {
+      "begin": "\"\"\"",
+      "end": "\"\"\"",
+      "scope": "string"
+    },
+    {
+      "pattern": "\\\"(?:\\\\.|[^\\\"\\\\])*\\\"|'(?:\\\\.|[^'\\\\])*'",
+      "scope": "string"
+    },
+    {
+      "pattern": "@[A-Za-z_]\\w*(?:\\.[A-Za-z_]\\w*)*",
+      "scope": "annotation"
+    },
+    {
+      "pattern": "`[^`]+`",
+      "scope": "foreground"
+    },
+    {
+      "pattern": "\\b(?:as|break|class|continue|do|else|false|for|fun|if|in|interface|is|null|object|package|return|super|this|throw|true|try|typealias|typeof|val|var|when|while|by|catch|constructor|delegate|dynamic|field|file|finally|get|import|init|param|property|receiver|set|setparam|where|actual|abstract|annotation|companion|const|crossinline|data|enum|expect|external|final|infix|inline|inner|internal|lateinit|noinline|open|operator|out|override|private|protected|public|reified|sealed|suspend|tailrec|vararg|value)\\b",
+      "scope": "keyword"
+    },
+    {
+      "pattern": "\\b(?:Any|Boolean|Byte|Char|Double|Float|Int|Long|Nothing|Short|String|Unit|Array|List|Map|Set|MutableList|MutableMap|MutableSet|Sequence)\\b",
+      "scope": "type"
+    },
+    {
+      "pattern": "\\b(?:0[xX][0-9a-fA-F_]+|0[bB][01_]+|0[oO][0-7_]+|\\d[\\d_]*(?:\\.[\\d_]+)?(?:[eE][+-]?[\\d_]+)?)[uUlLfFdDjJ]*\\b|(?<!\\w)\\.\\d+(?:[eE][+-]?\\d+)?",
+      "scope": "number"
+    },
+    {
+      "pattern": "\\b[A-Za-z_$][\\w$]*(?=\\s*\\()",
+      "scope": "function"
+    },
+    {
+      "pattern": "\\b[A-Z][A-Za-z0-9_]*\\b",
+      "scope": "type"
+    },
+    {
+      "pattern": "\\*\\*=?|//=?|===?|!==?|=>|->|&&|\\|\\||\\?\\.|\\?:|::|[+*/%~^!<>=&|?:-]=?",
+      "scope": "operator"
+    },
+    {
+      "pattern": "[A-Za-z_$][\\w$]*",
+      "scope": "foreground"
+    }
+  ]
+}

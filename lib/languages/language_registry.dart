@@ -3,6 +3,9 @@ import '../core/persistence/schema.dart';
 const bundledLanguageIds = [
   'dart',
   'csharp',
+  'python',
+  'kotlin',
+  'java',
   'html',
   'javascript',
   'typescript',

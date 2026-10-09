@@ -1,0 +1,58 @@
+{
+  "schemaVersion": 1,
+  "packageVersion": "0.1.0",
+  "rules": [
+    {
+      "pattern": "#.*$",
+      "scope": "comment"
+    },
+    {
+      "begin": "(?:\\b(?:[bB][rR]|[rR][bB]|[fF][rR]|[rR][fF]|[rRuUbBfF]))?\"\"\"",
+      "end": "\"\"\"",
+      "scope": "string",
+      "escape": "\\\\."
+    },
+    {
+      "begin": "(?:\\b(?:[bB][rR]|[rR][bB]|[fF][rR]|[rR][fF]|[rRuUbBfF]))?'''",
+      "end": "'''",
+      "scope": "string",
+      "escape": "\\\\."
+    },
+    {
+      "pattern": "(?:\\b(?:[bB][rR]|[rR][bB]|[fF][rR]|[rR][fF]|[rRuUbBfF]))?(?:\\\"(?:\\\\.|[^\\\"\\\\])*\\\"|'(?:\\\\.|[^'\\\\])*')",
+      "scope": "string"
+    },
+    {
+      "pattern": "@[A-Za-z_]\\w*(?:\\.[A-Za-z_]\\w*)*",
+      "scope": "annotation"
+    },
+    {
+      "pattern": "\\b(?:False|None|True|and|as|assert|async|await|break|case|class|continue|def|del|elif|else|except|finally|for|from|global|if|import|in|is|lambda|match|nonlocal|not|or|pass|raise|return|try|while|with|yield)\\b",
+      "scope": "keyword"
+    },
+    {
+      "pattern": "\\b(?:bool|bytes|bytearray|complex|dict|float|frozenset|int|list|memoryview|object|range|set|str|tuple|type)\\b",
+      "scope": "type"
+    },
+    {
+      "pattern": "\\b(?:0[xX][0-9a-fA-F_]+|0[bB][01_]+|0[oO][0-7_]+|\\d[\\d_]*(?:\\.[\\d_]+)?(?:[eE][+-]?[\\d_]+)?)[jJ]?\\b|(?<!\\w)\\.\\d+(?:[eE][+-]?\\d+)?[jJ]?",
+      "scope": "number"
+    },
+    {
+      "pattern": "\\b[A-Za-z_$][\\w$]*(?=\\s*\\()",
+      "scope": "function"
+    },
+    {
+      "pattern": "\\b[A-Z][A-Za-z0-9_]*\\b",
+      "scope": "type"
+    },
+    {
+      "pattern": "\\*\\*=?|//=?|===?|!==?|=>|->|&&|\\|\\||\\?\\.|\\?:|::|[+*/%~^!<>=&|?:-]=?",
+      "scope": "operator"
+    },
+    {
+      "pattern": "[A-Za-z_$][\\w$]*",
+      "scope": "foreground"
+    }
+  ]
+}

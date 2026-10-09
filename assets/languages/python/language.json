@@ -1,0 +1,69 @@
+{
+  "schemaVersion": 1,
+  "packageVersion": "0.1.0",
+  "id": "python",
+  "name": "Python",
+  "extensions": [
+    ".py",
+    ".pyw",
+    ".pyi"
+  ],
+  "comments": {
+    "line": "#"
+  },
+  "brackets": [
+    {
+      "open": "(",
+      "close": ")"
+    },
+    {
+      "open": "[",
+      "close": "]"
+    },
+    {
+      "open": "{",
+      "close": "}"
+    }
+  ],
+  "autoClosingPairs": [
+    {
+      "open": "(",
+      "close": ")"
+    },
+    {
+      "open": "[",
+      "close": "]"
+    },
+    {
+      "open": "{",
+      "close": "}"
+    },
+    {
+      "open": "\"",
+      "close": "\""
+    },
+    {
+      "open": "'",
+      "close": "'"
+    }
+  ],
+  "indentation": {
+    "increaseAfter": ":"
+  },
+  "icons": {
+    "symbol": "code"
+  },
+  "adapters": [],
+  "fileTemplates": {
+    "module": {
+      "name": "Python module",
+      "extension": ".py",
+      "body": "def main():\n    pass\n\n\nif __name__ == \"__main__\":\n    main()\n"
+    },
+    "class": {
+      "name": "Python class",
+      "extension": ".py",
+      "body": "class {{name}}:\n    def __init__(self):\n        pass\n"
+    }
+  }
+}

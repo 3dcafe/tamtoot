@@ -9,6 +9,7 @@ class SettingsService {
     'tabSize': 2,
     'insertSpaces': true,
     'readOnly': false,
+    'agentPrivacy': false,
     'flutterSdkPath': '',
     'dotnetPath': '',
     'flutterDeviceId': '',
@@ -17,7 +18,10 @@ class SettingsService {
   };
   final Map<String, Object> user = {}, workspace = {};
   Object get(String key) =>
-      key == 'theme' || key.startsWith('flutter') || key.startsWith('dotnet')
+      key == 'theme' ||
+          key == 'agentPrivacy' ||
+          key.startsWith('flutter') ||
+          key.startsWith('dotnet')
       ? user[key] ?? defaults[key]!
       : workspace[key] ?? user[key] ?? defaults[key]!;
   double get fontSize => (get('fontSize') as num).toDouble();
@@ -36,7 +40,7 @@ class SettingsService {
       'flutterDeviceName' => value is String,
       'fontSize' => value is num && value >= 8 && value <= 40,
       'tabSize' => value is int && value >= 1 && value <= 8,
-      'insertSpaces' || 'readOnly' => value is bool,
+      'insertSpaces' || 'readOnly' || 'agentPrivacy' => value is bool,
       _ => value is String && value.isNotEmpty,
     };
     if (!valid) throw SchemaException('Invalid setting $key: $value');

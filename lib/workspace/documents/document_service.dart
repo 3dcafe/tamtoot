@@ -43,6 +43,7 @@ class DocumentService {
   DocumentService(this.files, this.dialogs);
   final FileSystemProvider files;
   final FileDialogs dialogs;
+  void Function(Uri uri)? onSaved;
   final List<OpenDocument> documents = [];
   String? activeId;
   int _counter = 0;
@@ -166,6 +167,8 @@ class DocumentService {
       return true;
     }
     final text = doc.editor.text;
+    final previousUri = doc.uri;
+    final contentChanged = doc.savedText != text;
     if (!saveAs && doc.uri != null && files.canWrite(doc.uri!)) {
       await files.write(doc.uri!, text);
     } else {
@@ -175,6 +178,10 @@ class DocumentService {
       if (target.scheme == 'file') doc.name = target.pathSegments.last;
     }
     doc.savedText = text;
+    final uri = doc.uri;
+    if (uri != null && (contentChanged || previousUri != uri)) {
+      onSaved?.call(uri);
+    }
     return true;
   }
 

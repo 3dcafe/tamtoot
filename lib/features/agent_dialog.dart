@@ -53,6 +53,8 @@ class _AgentPanelState extends State<AgentPanel> {
   final scroll = ScrollController();
   final events = <AgentEvent>[];
   final profiles = <String, ModelProfile>{};
+  final _rawProfiles = <String, ModelProfile>{};
+  bool enhancedPrivacy = false;
   final attachments = <ModelAttachment>[];
   String? selected, error;
   bool loading = true, running = false, yolo = true, yoloConfirmed = false;
@@ -78,6 +80,7 @@ class _AgentPanelState extends State<AgentPanel> {
   @override
   void initState() {
     super.initState();
+    enhancedPrivacy = widget.session.settings.get('agentPrivacy') as bool;
     _catalogRevision = widget.session.agentCatalogRevision;
     _sessionSub = widget.session.changes.listen((_) {
       if (!mounted || running) return;
@@ -127,6 +130,7 @@ class _AgentPanelState extends State<AgentPanel> {
         loading = true;
         error = null;
         profiles.clear();
+        _rawProfiles.clear();
         if (!preserveSelection) selected = null;
       });
     }
@@ -156,6 +160,7 @@ class _AgentPanelState extends State<AgentPanel> {
         final text = await store.read(path);
         if (text != null) {
           final loaded = ModelProfile.parse(text);
+          _rawProfiles[path] = loaded;
           profiles[path] = ModelProfile(
             id: loaded.id,
             name: loaded.name,
@@ -433,7 +438,9 @@ class _AgentPanelState extends State<AgentPanel> {
     try {
       final projectStore = ProfileStore(git.openStore(root!));
       final configText = await projectStore.read('.tamtoot/mcp.json');
-      if (configText != null && configText.trim().isNotEmpty) {
+      if (!enhancedPrivacy &&
+          configText != null &&
+          configText.trim().isNotEmpty) {
         mcp = McpRegistry(McpConfig.parse(configText));
         await mcp.connect();
       }
@@ -443,7 +450,7 @@ class _AgentPanelState extends State<AgentPanel> {
       return;
     }
     final runner = AgentTaskEngine(
-      profile: profile,
+      profile: enhancedPrivacy ? (_rawProfiles[path] ?? profile) : profile,
       store: MultiRootGitRepositoryStore(
         primary: git.openStore(root!),
         additional: {
@@ -457,6 +464,12 @@ class _AgentPanelState extends State<AgentPanel> {
       apiKey: apiKey.text.trim(),
       attachments: runAttachments,
       onEvent: (event) {
+        final path = event.data['changedPath'];
+        if (path is String && !path.startsWith('@')) {
+          widget.session.markGitFileChanged(
+            root!.resolve(path.split('/').map(Uri.encodeComponent).join('/')),
+          );
+        }
         _appendEvent(event);
       },
       approve: _approve,
@@ -491,11 +504,13 @@ class _AgentPanelState extends State<AgentPanel> {
         prompt,
         AgentRunOptions(
           yolo: yolo,
+          enhancedPrivacy: enhancedPrivacy,
           timeout: Duration(seconds: timeoutSeconds),
           maxConsecutiveMistakes: maxMistakes,
         ),
       );
-      await widget.session.refreshExplorer();
+      await widget.session.refreshExplorer(refreshGit: false);
+      await widget.session.ensureGitIndicators();
       if (mounted) {
         setState(() {
           _lastFailure = null;
@@ -738,6 +753,32 @@ class _AgentPanelState extends State<AgentPanel> {
                       isDense: true,
                     ),
                   ),
+                ],
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 10),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  FilterChip(
+                    key: const ValueKey('agent-enhanced-privacy'),
+                    selected: enhancedPrivacy,
+                    avatar: const Icon(Icons.privacy_tip_outlined, size: 18),
+                    label: const Text('Enhance privacy'),
+                    onSelected: running
+                        ? null
+                        : (value) {
+                            setState(() => enhancedPrivacy = value);
+                            widget.session.settings.set('agentPrivacy', value);
+                            widget.session.changed();
+                          },
+                  ),
+                  if (enhancedPrivacy)
+                    const Text(
+                      'Masks hosts; skips custom/project instructions, memory and automatic file context. Reads one small excerpt at a time. Text attachments only; MCP and hooks disabled. Code excerpts still go to the selected provider.',
+                      style: TextStyle(fontSize: 11),
+                    ),
                 ],
               ),
             ),
@@ -1118,10 +1159,7 @@ class _AgentJsonLogSheetState extends State<_AgentJsonLogSheet>
                 const Expanded(
                   child: Text(
                     'Client ↔ Agent JSON',
-                    style: TextStyle(
-                      fontWeight: FontWeight.w600,
-                      fontSize: 15,
-                    ),
+                    style: TextStyle(fontWeight: FontWeight.w600, fontSize: 15),
                   ),
                 ),
                 IconButton(

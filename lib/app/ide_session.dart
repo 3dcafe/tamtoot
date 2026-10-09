@@ -26,7 +26,13 @@ import '../workspace/explorer/file_indicators.dart';
 
 /// Application orchestration. UI observes events through a Riverpod adapter.
 class IdeSession {
-  IdeSession({required this.store, required this.documents, required this.git});
+  IdeSession({
+    required this.store,
+    required this.documents,
+    required this.git,
+  }) {
+    documents.onSaved = markGitFileChanged;
+  }
   late final sshProfiles = SshProfiles(store, NativeSshSecrets());
   late final sshHostKeys = SshHostKeys(store);
   final PersistenceStore store;
@@ -108,7 +114,34 @@ class IdeSession {
   String? gitStatusNote;
   int _gitStatusRevision = 0;
   int get gitStatusRevision => _gitStatusRevision;
-  bool _refreshingGit = false;
+  Future<void>? _gitRefresh;
+  Uri? _gitCacheRoot;
+  List<GitStatusEntry> _cachedGitStatus = const [];
+  int _gitMutationRevision = 0;
+  final Set<Uri> _pendingGitPaths = {};
+  Set<Uri> get pendingGitPaths => Set.unmodifiable(_pendingGitPaths);
+  List<GitStatusEntry> get cachedGitStatus =>
+      List.unmodifiable(_cachedGitStatus);
+
+  void markGitFileChanged(Uri uri) {
+    final root = workspaceRoot;
+    if (root == null || !uri.toString().startsWith(root.toString())) return;
+    _pendingGitPaths.add(uri);
+    _gitMutationRevision++;
+    changed(persist: false);
+    _gitTimer?.cancel();
+    _gitTimer = Timer(const Duration(milliseconds: 600), () {
+      if (!_disposed) unawaited(ensureGitIndicators());
+    });
+  }
+
+  Future<void> ensureGitIndicators() {
+    if (_gitCacheRoot == workspaceRoot && _pendingGitPaths.isEmpty) {
+      return _gitRefresh ?? Future.value();
+    }
+    return refreshGitIndicators();
+  }
+
   Timer? _gitTimer;
 
   bool _sameGitEntry(GitStatusEntry a, GitStatusEntry b) =>
@@ -181,17 +214,46 @@ class IdeSession {
     );
   }
 
-  Future<void> refreshGitIndicators() async {
-    final root = workspaceRoot;
-    if (root == null || !git.available || _refreshingGit) return;
-    _refreshingGit = true;
+  Future<void> refreshGitIndicators() {
+    if (_disposed || workspaceRoot == null || !git.available) {
+      return Future.value();
+    }
+    final running = _gitRefresh;
+    if (running != null) return running;
+    _gitTimer?.cancel();
+    final operation = _refreshGitCache();
+    _gitRefresh = operation;
+    return operation;
+  }
+
+  Future<void> _refreshGitCache() async {
+    try {
+      while (!_disposed && workspaceRoot != null) {
+        final root = workspaceRoot;
+        final revision = _gitMutationRevision;
+        await _scanGitIndicators();
+        if (workspaceRoot == root && revision == _gitMutationRevision) {
+          _pendingGitPaths.clear();
+          break;
+        }
+      }
+    } finally {
+      _gitRefresh = null;
+    }
+  }
+
+  Future<void> _scanGitIndicators() async {
+    final root = workspaceRoot!;
     final status = <String, GitStatusEntry>{};
     var unpublished = <String>{};
     String? note;
     try {
       if (await git.isRepository(root)) {
         try {
-          for (final entry in await git.statusEntries(root)) {
+          final entries = await git.statusEntries(root);
+          if (workspaceRoot != root || _disposed) return;
+          _cachedGitStatus = List.of(entries);
+          for (final entry in entries) {
             final sharedRequestFile =
                 entry.path == '.tamtoot/environment.json' ||
                 entry.path.startsWith('.tamtoot/requests/');
@@ -218,23 +280,21 @@ class IdeSession {
         }
       }
       if (workspaceRoot != root || _disposed) return;
+      _gitCacheRoot = root;
       _setGitState(status, unpublished, note);
     } catch (error) {
       if (workspaceRoot == root && !_disposed) {
         _setGitState({}, {}, 'Git status unavailable: $error');
       }
-    } finally {
-      _refreshingGit = false;
-      if (workspaceRoot != root && !_disposed) {
-        unawaited(refreshGitIndicators());
-      }
     }
   }
 
-  Future<void> refreshExplorer() async {
+  Future<void> refreshExplorer({bool refreshGit = true}) async {
     await explorer.refresh();
     await detectProject();
-    await refreshGitIndicators();
+    if (refreshGit) {
+      await refreshGitIndicators();
+    }
   }
 
   Future<void> selectTheme(String id) async {
@@ -373,6 +433,10 @@ class IdeSession {
     completionIndex = null;
     _gitEntries = {};
     _unpublished = {};
+    _gitCacheRoot = null;
+    _cachedGitStatus = const [];
+    _pendingGitPaths.clear();
+    _gitTimer?.cancel();
     gitStatusNote = null;
     await explorer.open(root);
     if (workspaceRoot != root) return;
@@ -448,10 +512,6 @@ class IdeSession {
     }
     await refreshGitIndicators();
     _gitTimer?.cancel();
-    _gitTimer = Timer.periodic(
-      const Duration(seconds: 30),
-      (_) => unawaited(refreshGitIndicators()),
-    );
     changed();
   }
 
@@ -486,6 +546,7 @@ class IdeSession {
   void observe(OpenDocument doc) {
     if (_subscriptions.containsKey(doc.id)) return;
     configure(doc);
+    // Cursor/selection and unsaved edits update the UI, never scan the disk.
     _subscriptions[doc.id] = doc.editor.changes.listen((_) => changed());
   }
 
@@ -741,6 +802,7 @@ class IdeSession {
 
   Future<void> dispose() async {
     sshProfiles.sessionSecrets.clear();
+    documents.onSaved = null;
     _gitTimer?.cancel();
     _saveTimer?.cancel();
     await persistNow();

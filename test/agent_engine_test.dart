@@ -74,6 +74,106 @@ ModelClient queueClient(List<String> actions) => ModelClient(
 void main() {
   final root = Uri.parse('memory:///project/');
   test(
+    'enhanced privacy sends minimal context and restores hosts before edits',
+    () async {
+      final store = RepositoryMemory();
+      const original = 'const endpoint = "https://customer.example.com/v1";';
+      await store.writeText(
+        'lib/a.dart',
+        [original, ...List.generate(60, (i) => '// line ${i + 2}')].join('\n'),
+      );
+      await store.writeText(
+        'docs/private.md',
+        'unrelated documentation secret',
+      );
+      final oldMemory = ProjectMemory().encode();
+      await store.writeText(ProjectMemory.storePath, oldMemory);
+      final bodies = <String>[];
+      var turn = 0;
+      ModelClient client() => ModelClient(
+        client: MockClient((request) async {
+          bodies.add(request.body);
+          final body = jsonDecode(request.body) as Map<String, dynamic>;
+          final text = (body['messages'] as List).last['content'] as String;
+          late Map<String, dynamic> action;
+          if (turn == 0) {
+            expect(request.body, isNot(contains('Project file index')));
+            expect(request.body, isNot(contains('docs/private.md')));
+            expect(request.body, isNot(contains('custom project secret')));
+            action = {
+              'action': 'read_files',
+              'paths': ['lib/a.dart', 'docs/private.md'],
+              'lineCount': 500,
+            };
+          } else if (turn == 1) {
+            expect(text, contains('// line 40'));
+            expect(text, isNot(contains('// line 41')));
+            expect(text, isNot(contains('unrelated documentation secret')));
+            final alias = RegExp(
+              r'https://(private-[a-z0-9-]+\.invalid)/v1',
+            ).firstMatch(text)!.group(1)!;
+            action = {
+              'action': 'replace_in_file',
+              'path': 'lib/a.dart',
+              'oldText': 'const endpoint = "https://$alias/v1";',
+              'newText': 'const endpoint = "https://$alias/v2";',
+            };
+          } else {
+            action = {'action': 'finish', 'summary': 'Updated endpoint path.'};
+          }
+          turn++;
+          return http.Response(
+            jsonEncode({
+              'choices': [
+                {
+                  'message': {'content': jsonEncode(action)},
+                  'finish_reason': 'stop',
+                },
+              ],
+            }),
+            200,
+          );
+        }),
+      );
+      final engine = AgentTaskEngine(
+        profile: ModelProfile(
+          id: 'private',
+          name: 'Private',
+          provider: 'test',
+          model: 'model',
+          endpoint: 'https://example.test/v1/chat/completions',
+          systemPrompt: 'custom project secret https://internal.example.com',
+        ),
+        store: store,
+        git: AgentGit(),
+        root: root,
+        apiKey: '',
+        onEvent: (_) {},
+        approve: (_, _) async => true,
+        clientFactory: client,
+        hooks: NoHooks(),
+        commands: FakeCommands(),
+      );
+      final result = await engine.run(
+        'Update the path for customer.example.com',
+        const AgentRunOptions(enhancedPrivacy: true),
+      );
+      expect(result.success, isTrue);
+      expect(bodies, hasLength(3));
+      for (final body in bodies) {
+        expect(body, isNot(contains('customer.example.com')));
+        expect(body, isNot(contains('internal.example.com')));
+        expect(body, isNot(contains('unrelated documentation secret')));
+      }
+      expect(
+        await store.readText('lib/a.dart'),
+        startsWith('const endpoint = "https://customer.example.com/v2";'),
+      );
+      expect(await store.readText(ProjectMemory.storePath), oldMemory);
+    },
+  );
+
+  test(
     'agent sends attachments once and retains investigation context',
     () async {
       final store = RepositoryMemory();

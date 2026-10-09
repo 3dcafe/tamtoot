@@ -12,10 +12,12 @@ import 'hook_runner.dart';
 import 'command_runner.dart';
 import 'mcp_client.dart';
 import 'project_memory.dart';
+import 'agent_privacy.dart';
 
 class AgentRunOptions {
   const AgentRunOptions({
     this.yolo = true,
+    this.enhancedPrivacy = false,
     this.timeout = const Duration(minutes: 10),
     this.maxConsecutiveMistakes = 3,
     this.maxIterations = 40,
@@ -24,7 +26,7 @@ class AgentRunOptions {
     this.maxInvestigationIterationsBeforeFirstEdit = 12,
   });
 
-  final bool yolo;
+  final bool yolo, enhancedPrivacy;
   final Duration timeout;
   final int maxConsecutiveMistakes, maxIterations;
   final int maxSearchesBeforeFirstEdit;
@@ -94,6 +96,8 @@ class AgentTaskEngine {
   final McpRegistry? mcp;
   final List<Uri> workspaceRoots;
   bool _stopped = false;
+  AgentPrivacy? _privacy;
+  int get _excerptLimit => _privacy == null ? maxExcerptCharacters : 2000;
   ModelClient? _active;
 
   /// Set while a run is in flight so aborted runs still keep what they learned.
@@ -218,6 +222,20 @@ Reuse retained excerpts — do not re-read unchanged files.
     if (options.maxConsecutiveMistakes < 1 || options.maxIterations < 1) {
       throw const ModelApiException('Agent limits must be positive.');
     }
+    _privacy = options.enhancedPrivacy ? AgentPrivacy() : null;
+    if (_privacy != null) {
+      try {
+        _privacy!.prepareAttachments(attachments);
+      } on FormatException catch (error) {
+        throw ModelApiException(error.message);
+      }
+      onEvent(
+        AgentEvent(
+          'privacy',
+          'Enhanced privacy: minimal context, masked hosts, one small file excerpt at a time.',
+        ),
+      );
+    }
     final startHook = await _hook('TaskStart', {
       'task': task,
       'yolo': options.yolo,
@@ -242,7 +260,7 @@ Reuse retained excerpts — do not re-read unchanged files.
     } catch (error) {
       if (_stopped) {
         try {
-          await hooks.run('TaskCancel', {'task': task});
+          await _hook('TaskCancel', {'task': task});
         } catch (_) {}
       }
       final flush = _flushMemoryOnFailure;
@@ -274,16 +292,23 @@ Reuse retained excerpts — do not re-read unchanged files.
     const contextCompactor = AgentContextCompactor();
     final activeFiles = <String, String>{};
     final observations = <String, String>{};
-    final indexedPaths = (await store.listFiles('')).where(_useful).toList()
-      ..sort();
+    final indexedPaths =
+        (_privacy != null
+              ? <String>[]
+              : (await store.listFiles('')).where(_useful).toList())
+          ..sort();
     final listedDirectories = <String>{};
-    _rememberObservation(
-      observations,
-      'Project index',
-      await _projectIndex(indexedPaths),
-    );
+    if (_privacy == null) {
+      _rememberObservation(
+        observations,
+        'Project index',
+        await _projectIndex(indexedPaths),
+      );
+    }
     final memoryStore = ProjectMemoryStore(store);
-    var projectMemory = await memoryStore.load();
+    var projectMemory = _privacy == null
+        ? await memoryStore.load()
+        : ProjectMemory();
     final memorySelection = projectMemory.selectRelevant(task);
     final stalePaths = await _staleMemoryPaths(projectMemory, memorySelection);
     final memoryPrompt = projectMemory.formatForPrompt(
@@ -344,18 +369,22 @@ Reuse retained excerpts — do not re-read unchanged files.
     var filesReadBeforeEdit = 0;
     var hasEdited = false;
     var finalReadUsed = false;
-    await _seedBuildErrorContext(
-      task: task,
-      activeFiles: activeFiles,
-      transcript: transcript,
-      runReadPaths: runReadPaths,
-      runFingerprints: runFingerprints,
-      focusLinesByPath: focusLinesByPath,
-    );
+    if (_privacy == null) {
+      await _seedBuildErrorContext(
+        task: task,
+        activeFiles: activeFiles,
+        transcript: transcript,
+        runReadPaths: runReadPaths,
+        runFingerprints: runFingerprints,
+        focusLinesByPath: focusLinesByPath,
+      );
+    }
     final systemPrompt = [
-      profile.systemPrompt,
+      _privacy == null ? profile.systemPrompt : defaultSystemPrompt,
       protocol,
-      if (mcp != null && mcp!.tools.isNotEmpty)
+      if (_privacy != null)
+        'Enhanced privacy overrides context defaults: no project index, instructions or retained memory was supplied. Discover only the files needed for this task. Read one file at a time, at most 40 lines. Hosts are represented by private-*.invalid aliases; preserve aliases exactly in edits. Their real values are restored locally. Do not guess real hosts. MCP and hooks are disabled.',
+      if (_privacy == null && mcp != null && mcp!.tools.isNotEmpty)
         'Available MCP tools:\n${mcp!.describe()}',
     ].join('\n\n');
     for (var iteration = 1; iteration <= options.maxIterations; iteration++) {
@@ -496,8 +525,8 @@ Reuse retained excerpts — do not re-read unchanged files.
         if (name == 'replace_in_file' || name == 'write_file') {
           _assertCompactEditPayload(name, action);
         }
-        int? readLineBudget;
-        var readFileBudget = 4;
+        int? readLineBudget = options.enhancedPrivacy ? 40 : null;
+        var readFileBudget = options.enhancedPrivacy ? 1 : 4;
         final isRead = name == 'read_file' || name == 'read_files';
         if (budgetReached && isRead) {
           if (finalReadUsed) {
@@ -525,8 +554,8 @@ Reuse retained excerpts — do not re-read unchanged files.
           // Normalize the read instead of denying it: denying would only cost
           // another model round-trip to ask for the same thing, smaller.
           finalReadUsed = true;
-          readLineBudget = maxFinalReadLines;
-          readFileBudget = maxFinalReadFiles;
+          readLineBudget = options.enhancedPrivacy ? 40 : maxFinalReadLines;
+          readFileBudget = options.enhancedPrivacy ? 1 : maxFinalReadFiles;
           onEvent(
             AgentEvent(
               'context',
@@ -608,7 +637,10 @@ Reuse retained excerpts — do not re-read unchanged files.
               );
             }
             final files = await store.listFiles(path);
-            final visible = files.where(_useful).take(120).join('\n');
+            final visible = files
+                .where(_useful)
+                .take(_privacy == null ? 120 : 20)
+                .join('\n');
             final hint = path.replaceFirst(RegExp(r'^\.+/?'), '');
             final alternatives = visible.isEmpty && hint.isNotEmpty
                 ? indexedPaths
@@ -895,7 +927,9 @@ Reuse retained excerpts — do not re-read unchanged files.
             activeFiles.removeWhere(
               (key, _) => key == path || key.startsWith('$path ['),
             );
-            onEvent(AgentEvent('tool', 'Edited $path'));
+            onEvent(
+              AgentEvent('tool', 'Edited $path', data: {'changedPath': path}),
+            );
             runEditedPaths.add(path);
             runFingerprints[path] = ProjectMemory.fingerprintText(updated);
             transcript.add(
@@ -926,7 +960,9 @@ Reuse retained excerpts — do not re-read unchanged files.
             activeFiles.removeWhere(
               (key, _) => key == path || key.startsWith('$path ['),
             );
-            onEvent(AgentEvent('tool', 'Wrote $path'));
+            onEvent(
+              AgentEvent('tool', 'Wrote $path', data: {'changedPath': path}),
+            );
             runEditedPaths.add(path);
             runFingerprints[path] = ProjectMemory.fingerprintText(content);
             transcript.add(
@@ -945,6 +981,11 @@ Reuse retained excerpts — do not re-read unchanged files.
               ),
             );
           case 'mcp_call':
+            if (_privacy != null) {
+              throw const ModelApiException(
+                'MCP calls are disabled in enhanced privacy mode.',
+              );
+            }
             consecutiveSays = 0;
             consecutiveSearches = 0;
             final registry = mcp;
@@ -1090,9 +1131,12 @@ Reuse retained excerpts — do not re-read unchanged files.
     try {
       return await client.send(
         _agentRequestProfile(maxTokens: maxTokens, jsonMode: jsonMode),
-        {'systemPrompt': systemPrompt, 'userPrompt': userPrompt},
+        {
+          'systemPrompt': _privacy?.mask(systemPrompt) ?? systemPrompt,
+          'userPrompt': _privacy?.mask(userPrompt) ?? userPrompt,
+        },
         apiKey: apiKey,
-        attachments: attachments,
+        attachments: _privacy?.prepareAttachments(attachments) ?? attachments,
       );
     } finally {
       _active = null;
@@ -1205,6 +1249,7 @@ Reuse retained excerpts — do not re-read unchanged files.
   }
 
   Future<HookResult> _hook(String type, Map<String, dynamic> input) async {
+    if (_privacy != null) return const HookResult();
     final result = await hooks.run(type, input);
     onEvent(AgentEvent('hook', '$type: ${result.cancel ? 'blocked' : 'ok'}'));
     return result;
@@ -1215,7 +1260,9 @@ Reuse retained excerpts — do not re-read unchanged files.
     if (decoded is! Map<String, dynamic> || decoded['action'] is! String) {
       throw const ModelApiException('Model returned an invalid agent action.');
     }
-    return decoded;
+    return _privacy == null
+        ? decoded
+        : _privacy!.restoreValue(decoded) as Map<String, dynamic>;
   }
 
   /// When the model emits NDJSON and the first action is a read the host would
@@ -1232,8 +1279,8 @@ Reuse retained excerpts — do not re-read unchanged files.
         transcript,
         'Host note:',
         'Host note: Your reply contained multiple actions. Only one is executed '
-        'per iteration; the remaining actions and claimed results were NOT executed. '
-        'Wait for the actual tool result and emit exactly one JSON object next.',
+            'per iteration; the remaining actions and claimed results were NOT executed. '
+            'Wait for the actual tool result and emit exactly one JSON object next.',
       );
     }
     final firstName = first['action'] as String;
@@ -1560,7 +1607,9 @@ Reuse retained excerpts — do not re-read unchanged files.
       model: profile.model,
       systemPrompt: profile.systemPrompt,
       userTemplate: profile.userTemplate,
-      parameters: params,
+      parameters: _privacy == null
+          ? params
+          : _privacy!.maskValue(params) as Map<String, dynamic>,
       apiFormat: format,
       endpoint: profile.endpoint,
     );
@@ -1681,6 +1730,7 @@ Reuse retained excerpts — do not re-read unchanged files.
     required List<String> learned,
     List<String> unresolved = const [],
   }) async {
+    if (_privacy != null) return;
     if (readPaths.isEmpty && editedPaths.isEmpty && summary.trim().isEmpty) {
       return;
     }
@@ -1840,12 +1890,13 @@ Reuse retained excerpts — do not re-read unchanged files.
     final files = (await store.listFiles(directory)).where(_useful).toList()
       ..sort();
     final matches = <String>[];
+    final matchLimit = _privacy == null ? 24 : 8;
     var scanned = 0;
     for (final path in files) {
-      if (matches.length >= 24 || scanned >= 800) break;
+      if (matches.length >= matchLimit || scanned >= 800) break;
       if (path.toLowerCase().contains(lower)) {
         matches.add('$path (path match)');
-        if (matches.length >= 24) break;
+        if (matches.length >= matchLimit) break;
       }
       if (!_searchable(path)) continue;
       scanned++;
@@ -1865,8 +1916,12 @@ Reuse retained excerpts — do not re-read unchanged files.
               .substring(start, end)
               .replaceAll(RegExp(r'\s+'), ' ')
               .trim();
-          matches.add('$path:${index + 1}: $snippet');
-          if (matches.length >= 24) break;
+          matches.add(
+            _privacy == null
+                ? '$path:${index + 1}: $snippet'
+                : '$path:${index + 1}: [content withheld; read a small excerpt]',
+          );
+          if (matches.length >= matchLimit) break;
         }
       } catch (_) {
         // Unreadable and transient files are omitted from search results.
@@ -1952,6 +2007,10 @@ Reuse retained excerpts — do not re-read unchanged files.
         if (line >= 1 && line <= lines.length) line,
     }.toList()..sort();
     if (uniqueFocus.isNotEmpty) {
+      if (_privacy != null) {
+        final start = (uniqueFocus.first - 21).clamp(0, lines.length);
+        return _sliceExcerpt(path, lines, start, start + 40);
+      }
       return _excerptAroundMatches(
         path,
         lines,
@@ -1960,7 +2019,7 @@ Reuse retained excerpts — do not re-read unchanged files.
       );
     }
 
-    if (lines.length <= budget && content.length <= maxExcerptCharacters) {
+    if (lines.length <= budget && content.length <= _excerptLimit) {
       return _AgentFileExcerpt(path, content, '$path (${lines.length} lines)');
     }
     return _sliceExcerpt(path, lines, 0, budget);
@@ -1993,8 +2052,8 @@ Reuse retained excerpts — do not re-read unchanged files.
       final from = window[0] + 1;
       final to = window[1];
       var chunk = lines.sublist(window[0], window[1]).join('\n');
-      if (total + chunk.length > maxExcerptCharacters) {
-        final remaining = maxExcerptCharacters - total;
+      if (total + chunk.length > _excerptLimit) {
+        final remaining = _excerptLimit - total;
         if (remaining <= 0) break;
         chunk = '${chunk.substring(0, remaining)}\n… excerpt character limit';
         parts.add('… lines $from-$to …\n$chunk');
@@ -2026,7 +2085,7 @@ Reuse retained excerpts — do not re-read unchanged files.
     for (var i = safeStart; i < end; i++) {
       final line = lines[i];
       final add = line.length + (kept.isEmpty ? 0 : 1);
-      if (total + add > maxExcerptCharacters) break;
+      if (total + add > _excerptLimit) break;
       kept.add(line);
       total += add;
       actualEnd = i + 1;
@@ -2066,17 +2125,17 @@ Reuse retained excerpts — do not re-read unchanged files.
       activeFiles.remove(samePath.first);
     }
     // Prefer whole-line truncation so replace_in_file never sees a fake file end.
-    if (content.length <= maxExcerptCharacters) {
+    if (content.length <= _excerptLimit) {
       activeFiles[key] = content;
     } else {
-      final cut = content.lastIndexOf('\n', maxExcerptCharacters);
-      final keepTo = cut > 0 ? cut : maxExcerptCharacters;
+      final cut = content.lastIndexOf('\n', _excerptLimit);
+      final keepTo = cut > 0 ? cut : _excerptLimit;
       activeFiles[key] = '${content.substring(0, keepTo)}\n… excerpt truncated';
     }
     final evicted = <String>[];
     int characters() =>
         activeFiles.values.fold(0, (total, value) => total + value.length);
-    while (activeFiles.length > maxActiveFiles ||
+    while (activeFiles.length > (_privacy == null ? maxActiveFiles : 1) ||
         characters() > maxActiveCharacters) {
       final oldest = activeFiles.keys.first;
       activeFiles.remove(oldest);

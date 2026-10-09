@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "packageVersion": "0.1.0",
+  "snippets": {
+    "main": {
+      "prefix": "main",
+      "body": "public static void main(String[] args) {\n    \n}"
+    },
+    "class": {
+      "prefix": "class",
+      "body": "class Example {\n    \n}"
+    },
+    "print": {
+      "prefix": "print",
+      "body": "System.out.println();"
+    }
+  }
+}

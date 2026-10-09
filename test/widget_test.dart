@@ -293,12 +293,16 @@ void main() {
     git.pendingStatus = Completer<List<GitStatusEntry>>();
     document.editor.replaceSelection('changed');
     await tester.pump(const Duration(milliseconds: 700));
-    expect(git.statusCalls, initialCalls + 1);
+    expect(git.statusCalls, initialCalls);
+    expect(find.textContaining('Unsaved —'), findsOneWidget);
     expect(find.byType(LinearProgressIndicator), findsNothing);
 
+    await session.documents.save(document);
+    await tester.pump(const Duration(milliseconds: 700));
+    expect(git.statusCalls, initialCalls + 1);
     git.pendingStatus!.complete(git.entries);
     await tester.pumpAndSettle();
-    expect(find.textContaining('Unsaved —'), findsOneWidget);
+    expect(find.textContaining('Unsaved —'), findsNothing);
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox());
     await tester.pumpAndSettle();

@@ -26,14 +26,14 @@ Tamtoot is a **free code and plain-text editor** and an extensible Flutter IDE f
   - `?` — a new, untracked file;
   - `↑` — changes in commits not reachable from the locally known upstream.
 - Git clone/fetch/pull/push and local repository operations through the existing pure-Dart Smart HTTP client.
-- Versioned Dart, C#, HTML, JavaScript, TypeScript, XML, Razor, CSS, SCSS, Markdown and configuration language packages, plus declarative language package installation.
+- Versioned Dart, C#, Python, Kotlin, Java, HTML, JavaScript, TypeScript, XML, Razor, CSS, SCSS, Markdown and configuration language packages, plus declarative language package installation.
 - Live Markdown preview and syntax-aware TypeScript folding.
 - Angular project detection and a resizable interactive website preview beside the editor, using native system WebViews. [Preview setup and platform requirements](docs/angular-preview.md).
 - Git file context actions, including **Add to .gitignore**; private saved credentials and a repository access test.
 - Midnight Ink and Porcelain themes. The active theme is saved immediately as an **IDE-wide preference**, including when selected in **Tools → Settings**.
 - A command registry, editable keybindings, font settings, and tab preferences.
 
-Git indicators refresh on project open, after saving, when the app resumes, every 30 seconds while a project is open, and through the Explorer refresh button. They never fetch or push automatically. The upstream information reflects the last clone/fetch/push: if there is no upstream or the current Git provider cannot read its history, Explorer shows a status note instead of guessing.
+Git status is cached for the open project. Opening the Git tab or returning to the app reuses that cache. Status refreshes on project open, after saved file changes or agent edits, after Git operations, and through the Git or Explorer refresh buttons. Changed paths are collected and updates are batched; unsaved editor changes appear without scanning the disk. There is no periodic status scan. Changes made outside Tamtoot require manual refresh. Git never fetches or pushes automatically. The upstream information reflects the last clone/fetch/push: if there is no upstream or the current Git provider cannot read its history, Explorer shows a status note instead of guessing.
 
 ## Run locally
 
@@ -108,8 +108,13 @@ Bundled language packages are versioned independently (currently 0.2.0). File ex
 | JavaScript | `.js`, `.mjs`, `.cjs` | Module/async keywords, built-ins, calls, operators, numeric literals including BigInt, strings, multiline templates and comments |
 | Dart | `.dart` | Expanded keywords and built-in types, annotations, calls, hexadecimal/exponent numbers, raw/triple-quoted strings and nested block comments |
 | C# | `.cs` | Contextual keywords, attributes, directives, escaped identifiers, numeric suffixes, verbatim/interpolated/raw strings and block comments |
+| Python | `.py`, `.pyw`, `.pyi` | Keywords, built-in types, decorators, calls, numbers, prefixed/triple-quoted strings and line comments |
+| Kotlin | `.kt`, `.kts` | Keywords, built-in types, annotations, escaped identifiers, calls, raw strings and nested block comments |
+| Java | `.java` | Keywords, primitive types, annotations, calls, numeric suffixes, text blocks and block comments |
 
 Multiline states remain correct when scrolling into the middle of a document. Editing a preceding delimiter invalidates the cached suffix. Existing single-line regex language packages remain supported.
+
+Python, Kotlin and Java also provide templates in **New file…**: Python modules/classes, Kotlin classes/main functions/scripts, and Java classes/main classes/interfaces. Their support covers editing and syntax coloring; dedicated execution, debugging and semantic completion are not included.
 
 This is syntax coloring, not semantic analysis. Interpolated expressions inside strings/templates use the string color; JavaScript regular-expression detection is heuristic. Embedded JavaScript/CSS in HTML, JSX/TypeScript, live preview and code execution are not implemented by these packages. Snippet definitions are supplied as package data; an interactive snippet insertion UI remains future work.
 
@@ -237,6 +242,24 @@ The agent has bounded tools to list/read/write project files and call connected
 MCP tools. Tamtoot targets mobile devices, so every agent request explicitly
 forbids attempts to run tests, builds, interpreters, debuggers, shells or other
 executables. File writes require one-time approval in normal mode.
+
+**Enhance privacy** in the Agent panel is an optional, remembered setting. Its
+first request contains the task and the built-in agent protocol, without the
+automatic file index, custom/project instructions, retained project memory or
+compiler-error file excerpts. The agent discovers relevant locations through
+small listings/search results and reads one excerpt at a time, up to 40 lines
+and 2000 characters. Search results contain locations rather than source text.
+Literal URL authorities (including credentials), recognizable domain names,
+IPv4 addresses and bracketed IPv6 addresses are replaced with run-local aliases
+before model requests, including recovery requests and text attachments. Aliases
+are restored locally in tool actions so edits preserve actual addresses.
+Private runs do not update project memory. Hooks and MCP are disabled; image,
+PDF and other binary attachments are rejected before sending.
+
+This reduces disclosure rather than providing complete anonymization: requested
+code/text excerpts still reach the selected provider, filename-like dotted names
+are excluded from bare-domain detection, and other secrets or obfuscated hosts
+are not covered. The provider endpoint and API authentication still work normally.
 
 The visible conversation is restored per project from
 `.tamtoot/agents/chat_history.json`; clearing the chat also removes that local

@@ -128,6 +128,39 @@ The expanded test suite passes **57 tests**, including folder collapse/reopen, s
 - The private completion cache was versioned to `.tamtoot/cache/completions-v2.json`. No dependencies were added.
 - Added regression coverage for IME input after a tab switch, Windows physical-character input while completion is open, and Dart local/member discovery. `flutter analyze`: no issues. Full suite: **136 tests passed**.
 
+## Agent enhanced privacy — 2026-10-09
+
+- A remembered Agent toggle omits the automatic project index, custom/project
+  instructions, retained memory and seeded compiler-error excerpts.
+- A private run reads one file excerpt at a time (40 source lines, approximately
+  2000 characters). Searches disclose locations instead of matching source text.
+- Run-local host aliases are applied at the common model-send boundary, including
+  recovery requests, string parameter values and text attachments. Decoded tool
+  actions restore aliases locally, preserving actual addresses in edits.
+- Hooks/MCP are disabled, binary attachments are rejected before requests, and
+  private runs leave project memory untouched. Requested text/code is still sent;
+  this is limited host masking, not general secret detection or anonymization.
+- Mocked HTTP tests verify minimal first requests, omitted unrelated Markdown,
+  bounded batch reads, masked payloads and preserved real hosts after editing.
+  Unit checks include Unicode/punycode hosts, URL credentials, idempotence,
+  run-local aliases and attachment handling. A widget check covers the toggle.
+- Full suite: **346 passed, 1 skipped**. Analyzer: **No issues found**.
+
+## Git status cache and mutation notifications — 2026-10-09
+
+- Git tab reopening and app resume reuse a shared workspace status cache; the
+  unconditional 30-second polling timer is removed.
+- Saved document changes and successful agent writes add paths to a pending set.
+  A 600 ms debounce batches updates; a mutation revision forces a follow-up scan
+  when another change happens during an active scan. Concurrent callers share
+  the same refresh future.
+- Unsaved editor changes update the cached Git list without scanning the disk.
+  Manual Refresh is available in the embedded Git panel. Project opening and
+  Git operations still refresh status; external edits require manual refresh.
+- Regression checks cover clean tab reopening, forced refresh, idle periods,
+  saved versus unsaved edits and mutations during a scan.
+- Full suite: **340 passed, 1 skipped**. Analyzer: **No issues found**.
+
 ## Stable background Git refresh — 2026-09-30
 
 - Periodic Git polling now publishes a session update only when status entries, unpublished paths or the status note actually change.

@@ -1,0 +1,77 @@
+{
+  "schemaVersion": 1,
+  "packageVersion": "0.1.0",
+  "id": "kotlin",
+  "name": "Kotlin",
+  "extensions": [
+    ".kt",
+    ".kts"
+  ],
+  "comments": {
+    "line": "//",
+    "block": {
+      "open": "/*",
+      "close": "*/"
+    }
+  },
+  "brackets": [
+    {
+      "open": "(",
+      "close": ")"
+    },
+    {
+      "open": "[",
+      "close": "]"
+    },
+    {
+      "open": "{",
+      "close": "}"
+    }
+  ],
+  "autoClosingPairs": [
+    {
+      "open": "(",
+      "close": ")"
+    },
+    {
+      "open": "[",
+      "close": "]"
+    },
+    {
+      "open": "{",
+      "close": "}"
+    },
+    {
+      "open": "\"",
+      "close": "\""
+    },
+    {
+      "open": "'",
+      "close": "'"
+    }
+  ],
+  "indentation": {
+    "increaseAfter": "{"
+  },
+  "icons": {
+    "symbol": "code"
+  },
+  "adapters": [],
+  "fileTemplates": {
+    "class": {
+      "name": "Kotlin class",
+      "extension": ".kt",
+      "body": "class {{name}} {\n}\n"
+    },
+    "main": {
+      "name": "Kotlin main",
+      "extension": ".kt",
+      "body": "fun main() {\n    println(\"Hello, world!\")\n}\n"
+    },
+    "script": {
+      "name": "Kotlin script",
+      "extension": ".kts",
+      "body": "println(\"Hello, world!\")\n"
+    }
+  }
+}

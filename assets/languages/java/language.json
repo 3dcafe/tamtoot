@@ -1,0 +1,76 @@
+{
+  "schemaVersion": 1,
+  "packageVersion": "0.1.0",
+  "id": "java",
+  "name": "Java",
+  "extensions": [
+    ".java"
+  ],
+  "comments": {
+    "line": "//",
+    "block": {
+      "open": "/*",
+      "close": "*/"
+    }
+  },
+  "brackets": [
+    {
+      "open": "(",
+      "close": ")"
+    },
+    {
+      "open": "[",
+      "close": "]"
+    },
+    {
+      "open": "{",
+      "close": "}"
+    }
+  ],
+  "autoClosingPairs": [
+    {
+      "open": "(",
+      "close": ")"
+    },
+    {
+      "open": "[",
+      "close": "]"
+    },
+    {
+      "open": "{",
+      "close": "}"
+    },
+    {
+      "open": "\"",
+      "close": "\""
+    },
+    {
+      "open": "'",
+      "close": "'"
+    }
+  ],
+  "indentation": {
+    "increaseAfter": "{"
+  },
+  "icons": {
+    "symbol": "code"
+  },
+  "adapters": [],
+  "fileTemplates": {
+    "class": {
+      "name": "Java class",
+      "extension": ".java",
+      "body": "public class {{name}} {\n}\n"
+    },
+    "main": {
+      "name": "Java main class",
+      "extension": ".java",
+      "body": "public class {{name}} {\n    public static void main(String[] args) {\n        System.out.println(\"Hello, world!\");\n    }\n}\n"
+    },
+    "interface": {
+      "name": "Java interface",
+      "extension": ".java",
+      "body": "public interface {{name}} {\n}\n"
+    }
+  }
+}

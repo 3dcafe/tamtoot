@@ -110,7 +110,13 @@ class _NewFileDialogState extends State<NewFileDialog> {
     final body = templates[template]?['body'] as String? ?? '';
     final identifier = name.text.trim().split('.').first;
     if (body.contains('{{name}}') &&
-        (languageId == 'csharp' || languageId == 'dart') &&
+        const {
+          'csharp',
+          'dart',
+          'python',
+          'kotlin',
+          'java',
+        }.contains(languageId) &&
         !RegExp(r'^[A-Za-z_][A-Za-z0-9_]*$').hasMatch(identifier)) {
       throw ArgumentError('Use a valid class name, or choose Empty file');
     }
