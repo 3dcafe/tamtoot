@@ -10,6 +10,10 @@ Tamtoot is a **free code and plain-text editor** and an extensible Flutter IDE f
 
 ## Release notes
 
+[TamToot 0.1.5 — English release notes](docs/releases/0.1.5.en.md) · [TamToot 0.1.5 — изменения на русском](docs/releases/0.1.5.ru.md)
+
+[TamToot 0.1.4 — English release notes](docs/releases/0.1.4.en.md) · [TamToot 0.1.4 — изменения на русском](docs/releases/0.1.4.ru.md)
+
 [TamToot 0.1.3 — English release notes](docs/releases/0.1.3.en.md) · [TamToot 0.1.3 — изменения на русском](docs/releases/0.1.3.ru.md)
 
 [TamToot 0.1.2 — English release notes](docs/releases/0.1.2.en.md) · [TamToot 0.1.2 — изменения на русском](docs/releases/0.1.2.ru.md)
