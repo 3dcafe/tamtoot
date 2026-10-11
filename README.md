@@ -90,7 +90,7 @@ Drag panel dividers to resize. Click folders to expand or collapse them, and fil
 
 Output uses one selectable text surface, so several log lines can be copied at once. Each entry includes its local completion time. Use **Clear** in the Output header to remove the current log.
 
-C# and Dart show code-template suggestions alongside project symbols. Type a template prefix (for example, `prop`, `foreach`, `stateful` or `dispose`) and accept with Tab, Enter or a click. Templates keep the current indentation and also work without an open project. Suggestions are hidden in strings and comments.
+C#, Dart, Java and Kotlin show code-template suggestions alongside project symbols. Type a template prefix (for example, `prop`, `foreach`, `stateful` or `dispose`) and accept with Tab, Enter or a click. Templates keep the current indentation and also work without an open project. Suggestions are hidden in strings and comments.
 
 Use **Edit → Toggle comment** or the editor context menu to comment or uncomment selected lines. `Ctrl/⌘+/` runs the same action. Enter preserves indentation and increases it after a language block opener; typing an opening bracket or quote wraps selected text.
 

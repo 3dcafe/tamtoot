@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "packageVersion": "0.1.0",
+  "packageVersion": "0.2.0",
   "snippets": {
     "fun": {
       "prefix": "fun",
@@ -13,6 +13,66 @@
     "main": {
       "prefix": "main",
       "body": "fun main() {\n    \n}"
+    },
+    "if": {
+      "prefix": "if",
+      "description": "Conditional block",
+      "body": "if (condition) {\n    \n}"
+    },
+    "for": {
+      "prefix": "for",
+      "description": "Iterable loop",
+      "body": "for (item in items) {\n    \n}"
+    },
+    "foreach": {
+      "prefix": "foreach",
+      "description": "Collection iteration",
+      "body": "items.forEach { item ->\n    \n}"
+    },
+    "try": {
+      "prefix": "try",
+      "description": "Try and catch",
+      "body": "try {\n    \n} catch (exception: Exception) {\n    \n}"
+    },
+    "when": {
+      "prefix": "when",
+      "description": "When expression",
+      "body": "val result = when (value) {\n    else -> null\n}"
+    },
+    "data": {
+      "prefix": "data",
+      "description": "Data class",
+      "body": "data class Example(val name: String)"
+    },
+    "interface": {
+      "prefix": "interface",
+      "description": "Interface declaration",
+      "body": "interface Example {\n    fun run()\n}"
+    },
+    "object": {
+      "prefix": "object",
+      "description": "Singleton declaration",
+      "body": "object Example {\n    \n}"
+    },
+    "companion": {
+      "prefix": "companion",
+      "description": "Companion object",
+      "body": "companion object {\n    \n}"
+    },
+    "extension": {
+      "prefix": "extension",
+      "description": "Extension function",
+      "body": "fun String.example(): String {\n    return this\n}"
+    },
+    "suspend": {
+      "prefix": "suspend",
+      "description": "Suspend function",
+      "body": "suspend fun run() {\n    \n}"
+    },
+    "use": {
+      "prefix": "use",
+      "description": "Closeable resource",
+      "body": "resource.use { value ->\n    \n}"
     }
   }
 }

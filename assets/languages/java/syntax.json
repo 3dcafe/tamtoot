@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "packageVersion": "0.1.0",
+  "packageVersion": "0.2.0",
   "rules": [
     {
       "pattern": "//.*$",
@@ -18,7 +18,14 @@
       "escape": "\\\\."
     },
     {
-      "pattern": "\\\"(?:\\\\.|[^\\\"\\\\])*\\\"|'(?:\\\\.|[^'\\\\])*'",
+      "begin": "\"",
+      "end": "\"",
+      "escape": "\\\\.",
+      "scope": "string",
+      "singleLine": true
+    },
+    {
+      "pattern": "'(?:\\\\.|[^'\\\\])*'",
       "scope": "string"
     },
     {
@@ -42,7 +49,11 @@
       "scope": "number"
     },
     {
-      "pattern": "\\b[A-Za-z_$][\\w$]*(?=\\s*\\()",
+      "pattern": "(?<=\\.)[A-Za-z_][\\w]*(?![\\w]|\\s*[(<])",
+      "scope": "property"
+    },
+    {
+      "pattern": "\\b[A-Za-z_$][\\w$]*(?=\\s*(?:<[^()]+>)?\\s*\\()",
       "scope": "function"
     },
     {

@@ -60,10 +60,13 @@ class CompletionSymbol {
 class ProjectCompletionIndex {
   ProjectCompletionIndex(this.store);
 
-  static const cachePath = '.tamtoot/cache/completions-v3.json';
+  static const cachePath = '.tamtoot/cache/completions-v4.json';
   static const _extensions = {
     '.dart': 'dart',
     '.cs': 'csharp',
+    '.java': 'java',
+    '.kt': 'kotlin',
+    '.kts': 'kotlin',
     '.js': 'javascript',
     '.mjs': 'javascript',
     '.cjs': 'javascript',
@@ -255,7 +258,7 @@ class ProjectCompletionIndex {
     if (!await store.exists(cachePath)) return;
     try {
       final json = jsonDecode(await store.readText(cachePath));
-      if (json is! Map || json['version'] != 3 || json['files'] is! Map) return;
+      if (json is! Map || json['version'] != 4 || json['files'] is! Map) return;
       for (final entry in (json['files'] as Map).entries) {
         final value = entry.value;
         if (value is! Map ||
@@ -282,7 +285,7 @@ class ProjectCompletionIndex {
     await store.writeText(
       cachePath,
       jsonEncode({
-        'version': 3,
+        'version': 4,
         'files': {
           for (final entry in _files.entries)
             entry.key: {
@@ -324,13 +327,17 @@ class ProjectCompletionIndex {
         continue;
       }
       final type = RegExp(
-        r'\b(?:class|interface|extension|record(?:\s+struct)?|struct|enum|mixin)\s+([A-Za-z_$][\w$]*)',
+        r'\b(?:class|interface|extension|record(?:\s+struct)?|struct|enum|mixin|object)\s+([A-Za-z_$][\w$]*)',
       ).firstMatch(line);
       if (type != null) {
         owner = type.group(1)!;
         ownerDepth = depth;
       }
-      final match = language == 'javascript'
+      final match = language == 'kotlin'
+          ? RegExp(
+              r'^(?:(?:public|private|protected|internal|override|open|abstract|final|inline|suspend|tailrec|operator|infix|external)\s+)*fun\s+(<[^()]+>\s*)?([A-Za-z_$][\w$]*)\s*\(([^)]*)\)',
+            ).firstMatch(line)
+          : language == 'javascript'
           ? RegExp(
               r'^(?:async\s+)?(?:function\s+)?([A-Za-z_$][\w$]*)(?:<[^()]+>)?\s*\(([^)]*)\)',
             ).firstMatch(line)
@@ -338,11 +345,17 @@ class ProjectCompletionIndex {
               r'^(?:(?:public|private|protected|internal|static|async|virtual|override|final|external|abstract)\s+)*(?:[\w<>,.?\[\]]+\s+)+([A-Za-z_$][\w$]*)(<[^()]+>)?\s*\(([^)]*)\)',
             ).firstMatch(line);
       if (match != null &&
-          !{'if', 'for', 'while', 'switch', 'catch'}.contains(match.group(1))) {
-        final method = match.group(1)!;
+          !{
+            'if',
+            'for',
+            'while',
+            'switch',
+            'catch',
+          }.contains(match.group(language == 'kotlin' ? 2 : 1))) {
+        final method = match.group(language == 'kotlin' ? 2 : 1)!;
         final typeParameters = language == 'javascript'
             ? ''
-            : (match.group(2) ?? '');
+            : (match.group(language == 'kotlin' ? 1 : 2) ?? '').trim();
         final parameters = match
             .group(language == 'javascript' ? 2 : 3)!
             .trim();
@@ -422,6 +435,17 @@ class ProjectCompletionIndex {
     String line,
     String language,
   ) {
+    if (language == 'kotlin') {
+      final match = RegExp(
+        r'^(?:(?:public|private|protected|internal|override|open|final|lateinit|const)\s+)*(val|var)\s+([A-Za-z_$][\w$]*)(?:\s*:\s*([\w<>,.?\[\]]+))?\s*(?:=|$)',
+      ).firstMatch(line);
+      if (match == null) return null;
+      return (
+        name: match.group(2)!,
+        type: match.group(3) ?? '',
+        constant: RegExp(r'\bconst\b').hasMatch(line),
+      );
+    }
     if (language == 'javascript') {
       final match = RegExp(
         r'^(const|let|var)\s+([A-Za-z_$][\w$]*)\s*(?:=|;)',
@@ -468,6 +492,23 @@ class ProjectCompletionIndex {
           .first
           .trim()
           .replaceFirst(RegExp(r'^(?:required|final|ref|out|in|this)\s+'), '');
+      if (language == 'kotlin') {
+        final match = RegExp(
+          r'(?:[\w]+\s+)*([A-Za-z_$][\w$]*)\s*:\s*(.+)',
+        ).firstMatch(parameter);
+        if (match != null) {
+          result.add(
+            CompletionSymbol(
+              name: match.group(1)!,
+              signature: '${match.group(1)}: ${match.group(2)}',
+              language: language,
+              kind: CompletionKind.variable,
+              path: path,
+            ),
+          );
+        }
+        continue;
+      }
       final parts = parameter.split(RegExp(r'\s+'));
       if (parts.isEmpty || parts.last.isEmpty) continue;
       final name = parts.last.replaceAll(RegExp(r'[^A-Za-z0-9_$]'), '');
@@ -491,7 +532,7 @@ class ProjectCompletionIndex {
     var owner = '', depth = 0, ownerDepth = -1;
     for (final raw in const LineSplitter().convert(source)) {
       final match = RegExp(
-        r'\b(?:class|interface|extension|record(?:\s+struct)?|struct|enum|mixin)\s+([A-Za-z_$][\w$]*)',
+        r'\b(?:class|interface|extension|record(?:\s+struct)?|struct|enum|mixin|object)\s+([A-Za-z_$][\w$]*)',
       ).firstMatch(raw);
       if (match != null) {
         owner = match.group(1)!;
@@ -505,15 +546,28 @@ class ProjectCompletionIndex {
 
   String _receiverType(String source, String receiver, String language) {
     final escaped = RegExp.escape(receiver);
+    if (language == 'kotlin') {
+      final typed = RegExp(
+        r'\b' + escaped + r'\s*:\s*([A-Za-z_$][\w$]*)',
+      ).allMatches(source).lastOrNull;
+      if (typed != null) return typed.group(1)!;
+    }
     final typed = RegExp(
       r'([A-Za-z_$][\w$<>.?]*)\s+' + escaped + r'\b',
     ).allMatches(source).lastOrNull;
     if (typed != null &&
-        !{'var', 'final', 'const', 'let', 'return'}.contains(typed.group(1))) {
+        !{
+          'var',
+          'val',
+          'final',
+          'const',
+          'let',
+          'return',
+        }.contains(typed.group(1))) {
       return typed.group(1)!.replaceAll(RegExp(r'[<>?].*$'), '');
     }
     final created = RegExp(
-      r'(?:final|var|const|let)\s+' +
+      r'(?:final|var|val|const|let)\s+' +
           escaped +
           r'\s*=\s*(?:new\s+)?([A-Za-z_$][\w$]*)\s*\(',
     ).allMatches(source).lastOrNull;

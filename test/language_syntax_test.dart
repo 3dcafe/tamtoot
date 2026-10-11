@@ -27,6 +27,26 @@ String? scopeAt(LanguageDefinition language, String source, String needle) {
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+  test(
+    'Java and Kotlin highlight generic calls, properties and string templates',
+    () {
+      for (final language in [loadLanguage('java'), loadLanguage('kotlin')]) {
+        expect(
+          scopeAt(language, 'service.render<String>()', 'render'),
+          'function',
+        );
+        expect(scopeAt(language, 'service.title', 'title'), 'property');
+        expect(language.tokenizeLine('"unfinished').state, isNull);
+      }
+      final kotlin = loadLanguage('kotlin');
+      expect(scopeAt(kotlin, r'"Hello $name"', r'$name'), 'interpolation');
+      expect(scopeAt(kotlin, 'render(count = 3)', 'count'), 'parameter');
+      expect(scopeAt(kotlin, 'val ready = true', 'true'), 'constant');
+      final raw = kotlin.tokenizeLine('"""Hello');
+      final next = kotlin.tokenizeLine(r'$name', raw.state);
+      expect(next.tokens.single.scope, 'interpolation');
+    },
+  );
   test('C# and Dart highlight members, generics and interpolation', () {
     final cs = loadLanguage('csharp');
     expect(scopeAt(cs, 'string name = null;', 'string'), 'type');

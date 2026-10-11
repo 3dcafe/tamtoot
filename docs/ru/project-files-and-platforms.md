@@ -14,7 +14,7 @@ Tamtoot использует проектный каталог для настр
 │   └── models/
 │       └── <profile-id>.json
 ├── cache/
-│   └── completions-v3.json
+│   └── completions-v4.json
 ├── hooks/
 │   └── <HookType>
 ├── requests/

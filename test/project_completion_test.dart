@@ -12,6 +12,44 @@ class _CompletionMemory extends RepositoryMemory {
 
 void main() {
   test(
+    'indexes Java and Kotlin project members, parameters and nullable receivers',
+    () async {
+      final store = _CompletionMemory();
+      await store.writeText(
+        'Service.java',
+        'class Service {\n  public String title;\n  public String render(int count) {}\n}',
+      );
+      await store.writeText(
+        'Service.kt',
+        'class Service {\n  val title: String = "demo"\n  fun <T> render(count: Int): T {}\n}',
+      );
+      final index = ProjectCompletionIndex(store);
+      await index.initialize();
+      for (final language in ['java', 'kotlin']) {
+        final source = language == 'java'
+            ? 'Service service = new Service();\nservice.'
+            : 'val service: Service? = null\nservice?.';
+        final result = index.suggest(
+          source: source,
+          offset: source.length,
+          language: language,
+        );
+        expect(
+          result.map((item) => item.name),
+          containsAll(['title', 'render']),
+        );
+        expect(result.every((item) => item.language == language), isTrue);
+      }
+      const source = 'fun run(count: Int) {\n  cou';
+      final parameters = index.suggest(
+        source: source,
+        offset: source.length,
+        language: 'kotlin',
+      );
+      expect(parameters.single.signature, 'count: Int');
+    },
+  );
+  test(
     'snippets are prefix filtered and never appear in member access',
     () async {
       final index = ProjectCompletionIndex(_CompletionMemory());

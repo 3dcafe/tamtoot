@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "packageVersion": "0.1.0",
+  "packageVersion": "0.2.0",
   "rules": [
     {
       "pattern": "//.*$",
@@ -15,10 +15,51 @@
     {
       "begin": "\"\"\"",
       "end": "\"\"\"",
-      "scope": "string"
+      "scope": "string",
+      "contentRules": [
+        {
+          "pattern": "\\$[A-Za-z_]\\w*",
+          "scope": "interpolation"
+        },
+        {
+          "begin": "\\$\\{",
+          "end": "\\}",
+          "scope": "interpolation",
+          "contentRules": [
+            {
+              "pattern": "\\b\\d+\\b",
+              "scope": "number"
+            }
+          ]
+        }
+      ]
     },
     {
-      "pattern": "\\\"(?:\\\\.|[^\\\"\\\\])*\\\"|'(?:\\\\.|[^'\\\\])*'",
+      "begin": "\"",
+      "end": "\"",
+      "escape": "\\\\.",
+      "scope": "string",
+      "singleLine": true,
+      "contentRules": [
+        {
+          "pattern": "\\$[A-Za-z_]\\w*",
+          "scope": "interpolation"
+        },
+        {
+          "begin": "\\$\\{",
+          "end": "\\}",
+          "scope": "interpolation",
+          "contentRules": [
+            {
+              "pattern": "\\b\\d+\\b",
+              "scope": "number"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "pattern": "'(?:\\\\.|[^'\\\\])*'",
       "scope": "string"
     },
     {
@@ -28,6 +69,14 @@
     {
       "pattern": "`[^`]+`",
       "scope": "foreground"
+    },
+    {
+      "pattern": "(?<=[(,])\\s*[A-Za-z_]\\w*(?=\\s*=(?!=))",
+      "scope": "parameter"
+    },
+    {
+      "pattern": "\\b(?:true|false|null)\\b",
+      "scope": "constant"
     },
     {
       "pattern": "\\b(?:as|break|class|continue|do|else|false|for|fun|if|in|interface|is|null|object|package|return|super|this|throw|true|try|typealias|typeof|val|var|when|while|by|catch|constructor|delegate|dynamic|field|file|finally|get|import|init|param|property|receiver|set|setparam|where|actual|abstract|annotation|companion|const|crossinline|data|enum|expect|external|final|infix|inline|inner|internal|lateinit|noinline|open|operator|out|override|private|protected|public|reified|sealed|suspend|tailrec|vararg|value)\\b",
@@ -42,7 +91,11 @@
       "scope": "number"
     },
     {
-      "pattern": "\\b[A-Za-z_$][\\w$]*(?=\\s*\\()",
+      "pattern": "(?<=\\.)[A-Za-z_][\\w]*(?![\\w]|\\s*[(<])",
+      "scope": "property"
+    },
+    {
+      "pattern": "\\b[A-Za-z_$][\\w$]*(?=\\s*(?:<[^()]+>)?\\s*\\()",
       "scope": "function"
     },
     {

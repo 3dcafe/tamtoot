@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "packageVersion": "0.1.0",
+  "packageVersion": "0.2.0",
   "snippets": {
     "main": {
       "prefix": "main",
@@ -13,6 +13,66 @@
     "print": {
       "prefix": "print",
       "body": "System.out.println();"
+    },
+    "if": {
+      "prefix": "if",
+      "description": "Conditional block",
+      "body": "if (condition) {\n    \n}"
+    },
+    "for": {
+      "prefix": "for",
+      "description": "Counted loop",
+      "body": "for (int i = 0; i < length; i++) {\n    \n}"
+    },
+    "foreach": {
+      "prefix": "foreach",
+      "description": "Enhanced for loop",
+      "body": "for (var item : items) {\n    \n}"
+    },
+    "try": {
+      "prefix": "try",
+      "description": "Try and catch",
+      "body": "try {\n    \n} catch (Exception exception) {\n    \n}"
+    },
+    "trywith": {
+      "prefix": "trywith",
+      "description": "Try with resources",
+      "body": "try (var resource = createResource()) {\n    \n}"
+    },
+    "interface": {
+      "prefix": "interface",
+      "description": "Interface declaration",
+      "body": "public interface Example {\n    void run();\n}"
+    },
+    "record": {
+      "prefix": "record",
+      "description": "Record declaration",
+      "body": "public record Example(String name) {}"
+    },
+    "enum": {
+      "prefix": "enum",
+      "description": "Enum declaration",
+      "body": "public enum Example {\n    FIRST, SECOND\n}"
+    },
+    "switch": {
+      "prefix": "switch",
+      "description": "Switch expression",
+      "body": "var result = switch (value) {\n    default -> null;\n};"
+    },
+    "method": {
+      "prefix": "method",
+      "description": "Method declaration",
+      "body": "public void run() {\n    \n}"
+    },
+    "sout": {
+      "prefix": "sout",
+      "description": "Console output",
+      "body": "System.out.println();"
+    },
+    "override": {
+      "prefix": "override",
+      "description": "Override method",
+      "body": "@Override\npublic String toString() {\n    return super.toString();\n}"
     }
   }
 }
