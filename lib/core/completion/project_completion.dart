@@ -5,7 +5,7 @@ import 'package:crypto/crypto.dart';
 
 import '../git/git_store.dart';
 
-enum CompletionKind { method, variable, field, property, constant }
+enum CompletionKind { method, variable, field, property, constant, snippet }
 
 class CompletionSymbol {
   const CompletionSymbol({
@@ -16,9 +16,16 @@ class CompletionSymbol {
     this.owner = '',
     this.documentation = '',
     this.path = '',
+    this.insertText = '',
   });
 
-  final String name, signature, language, owner, documentation, path;
+  final String name,
+      signature,
+      language,
+      owner,
+      documentation,
+      path,
+      insertText;
   final CompletionKind kind;
   bool get callable => kind == CompletionKind.method;
 
@@ -30,6 +37,7 @@ class CompletionSymbol {
     'owner': owner,
     'documentation': documentation,
     'path': path,
+    'insertText': insertText,
   };
 
   factory CompletionSymbol.fromJson(Map<String, dynamic> json) =>
@@ -45,13 +53,14 @@ class CompletionSymbol {
         owner: json['owner'] as String? ?? '',
         documentation: json['documentation'] as String? ?? '',
         path: json['path'] as String? ?? '',
+        insertText: json['insertText'] as String? ?? '',
       );
 }
 
 class ProjectCompletionIndex {
   ProjectCompletionIndex(this.store);
 
-  static const cachePath = '.tamtoot/cache/completions-v2.json';
+  static const cachePath = '.tamtoot/cache/completions-v3.json';
   static const _extensions = {
     '.dart': 'dart',
     '.cs': 'csharp',
@@ -85,10 +94,11 @@ class ProjectCompletionIndex {
     required int offset,
     required String language,
     int limit = 12,
+    Map<String, dynamic> snippets = const {},
   }) {
     final before = source.substring(0, offset.clamp(0, source.length));
     final access = RegExp(
-      r'([A-Za-z_$][\w$]*)\.([A-Za-z_$][\w$]*)?$',
+      r'([A-Za-z_$][\w$]*)\??\.([A-Za-z_$][\w$]*)?$',
     ).firstMatch(before);
     final word = access == null
         ? RegExp(r'([A-Za-z_$][\w$]*)$').firstMatch(before)
@@ -132,7 +142,20 @@ class ProjectCompletionIndex {
           )
           .toList();
     }
+    if (access == null) {
+      all.addAll(
+        snippetSuggestions(
+          prefix: prefix,
+          language: language,
+          snippets: snippets,
+        ),
+      );
+    }
     all.sort((a, b) {
+      final snippetOrder =
+          (a.kind == CompletionKind.snippet ? 1 : 0) -
+          (b.kind == CompletionKind.snippet ? 1 : 0);
+      if (snippetOrder != 0) return snippetOrder;
       final aOwner = owner.isNotEmpty && a.owner == owner ? 0 : 1;
       final bOwner = owner.isNotEmpty && b.owner == owner ? 0 : 1;
       if (aOwner != bOwner) return aOwner.compareTo(bOwner);
@@ -148,6 +171,35 @@ class ProjectCompletionIndex {
         )
         .take(limit)
         .toList();
+  }
+
+  static List<CompletionSymbol> snippetSuggestions({
+    required String prefix,
+    required String language,
+    required Map<String, dynamic> snippets,
+  }) {
+    if (prefix.isEmpty) return const [];
+    final lowerPrefix = prefix.toLowerCase();
+    final result = <CompletionSymbol>[];
+    for (final entry in snippets.entries) {
+      final value = entry.value;
+      if (value is! Map || value['body'] is! String) continue;
+      final name = value['prefix'] as String? ?? entry.key;
+      if (!name.toLowerCase().startsWith(lowerPrefix)) continue;
+      result.add(
+        CompletionSymbol(
+          name: name,
+          signature: '$name · snippet',
+          language: language,
+          kind: CompletionKind.snippet,
+          documentation:
+              value['description'] as String? ?? 'Insert code template',
+          insertText: value['body'] as String,
+        ),
+      );
+    }
+    result.sort((a, b) => a.name.compareTo(b.name));
+    return result;
   }
 
   Future<void> refreshIfStale() async {
@@ -203,7 +255,7 @@ class ProjectCompletionIndex {
     if (!await store.exists(cachePath)) return;
     try {
       final json = jsonDecode(await store.readText(cachePath));
-      if (json is! Map || json['version'] != 2 || json['files'] is! Map) return;
+      if (json is! Map || json['version'] != 3 || json['files'] is! Map) return;
       for (final entry in (json['files'] as Map).entries) {
         final value = entry.value;
         if (value is! Map ||
@@ -230,7 +282,7 @@ class ProjectCompletionIndex {
     await store.writeText(
       cachePath,
       jsonEncode({
-        'version': 2,
+        'version': 3,
         'files': {
           for (final entry in _files.entries)
             entry.key: {
@@ -272,7 +324,7 @@ class ProjectCompletionIndex {
         continue;
       }
       final type = RegExp(
-        r'\b(?:class|interface|extension)\s+([A-Za-z_$][\w$]*)',
+        r'\b(?:class|interface|extension|record(?:\s+struct)?|struct|enum|mixin)\s+([A-Za-z_$][\w$]*)',
       ).firstMatch(line);
       if (type != null) {
         owner = type.group(1)!;
@@ -280,18 +332,24 @@ class ProjectCompletionIndex {
       }
       final match = language == 'javascript'
           ? RegExp(
-              r'^(?:async\s+)?(?:function\s+)?([A-Za-z_$][\w$]*)\s*\(([^)]*)\)',
+              r'^(?:async\s+)?(?:function\s+)?([A-Za-z_$][\w$]*)(?:<[^()]+>)?\s*\(([^)]*)\)',
             ).firstMatch(line)
           : RegExp(
-              r'^(?:(?:public|private|protected|internal|static|async|virtual|override|final|external|abstract)\s+)*(?:[\w<>,.?\[\]]+\s+)+([A-Za-z_$][\w$]*)\s*\(([^)]*)\)',
+              r'^(?:(?:public|private|protected|internal|static|async|virtual|override|final|external|abstract)\s+)*(?:[\w<>,.?\[\]]+\s+)+([A-Za-z_$][\w$]*)(<[^()]+>)?\s*\(([^)]*)\)',
             ).firstMatch(line);
       if (match != null &&
           !{'if', 'for', 'while', 'switch', 'catch'}.contains(match.group(1))) {
         final method = match.group(1)!;
+        final typeParameters = language == 'javascript'
+            ? ''
+            : (match.group(2) ?? '');
+        final parameters = match
+            .group(language == 'javascript' ? 2 : 3)!
+            .trim();
         symbols.add(
           CompletionSymbol(
             name: method,
-            signature: '$method(${match.group(2)!.trim()})',
+            signature: '$method$typeParameters($parameters)',
             language: language,
             owner: owner,
             documentation: comments.join(' '),
@@ -299,11 +357,7 @@ class ProjectCompletionIndex {
           ),
         );
         if (path == '<current>') {
-          for (final parameter in _parameters(
-            match.group(2)!,
-            path,
-            language,
-          )) {
+          for (final parameter in _parameters(parameters, path, language)) {
             symbols.add(parameter);
           }
         }
@@ -437,7 +491,7 @@ class ProjectCompletionIndex {
     var owner = '', depth = 0, ownerDepth = -1;
     for (final raw in const LineSplitter().convert(source)) {
       final match = RegExp(
-        r'\b(?:class|interface|extension)\s+([A-Za-z_$][\w$]*)',
+        r'\b(?:class|interface|extension|record(?:\s+struct)?|struct|enum|mixin)\s+([A-Za-z_$][\w$]*)',
       ).firstMatch(raw);
       if (match != null) {
         owner = match.group(1)!;

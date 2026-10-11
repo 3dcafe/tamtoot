@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "packageVersion": "0.2.0",
+  "packageVersion": "0.3.0",
   "snippets": {
     "class": {
       "prefix": "class",
@@ -17,6 +17,56 @@
     "widget": {
       "prefix": "widget",
       "body": "class Example extends StatelessWidget {\n  const Example({super.key});\n\n  @override\n  Widget build(BuildContext context) {\n    return const SizedBox();\n  }\n}"
+    },
+    "if": {
+      "prefix": "if",
+      "description": "Conditional block",
+      "body": "if (condition) {\n  \n}"
+    },
+    "for": {
+      "prefix": "for",
+      "description": "Counted loop",
+      "body": "for (var i = 0; i < length; i++) {\n  \n}"
+    },
+    "forin": {
+      "prefix": "forin",
+      "description": "Iterable loop",
+      "body": "for (final item in items) {\n  \n}"
+    },
+    "try": {
+      "prefix": "try",
+      "description": "Try, catch and finally",
+      "body": "try {\n  \n} catch (error, stackTrace) {\n  \n} finally {\n  \n}"
+    },
+    "switch": {
+      "prefix": "switch",
+      "description": "Switch expression",
+      "body": "final result = switch (value) {\n  _ => null,\n};"
+    },
+    "enum": {
+      "prefix": "enum",
+      "description": "Enum declaration",
+      "body": "enum Example { first, second }"
+    },
+    "extension": {
+      "prefix": "extension",
+      "description": "Extension declaration",
+      "body": "extension Example on String {\n  \n}"
+    },
+    "stateful": {
+      "prefix": "stateful",
+      "description": "Flutter StatefulWidget",
+      "body": "class Example extends StatefulWidget {\n  const Example({super.key});\n\n  @override\n  State<Example> createState() => _ExampleState();\n}\n\nclass _ExampleState extends State<Example> {\n  @override\n  Widget build(BuildContext context) {\n    return const SizedBox.shrink();\n  }\n}"
+    },
+    "initState": {
+      "prefix": "initState",
+      "description": "Flutter state initialization",
+      "body": "@override\nvoid initState() {\n  super.initState();\n  \n}"
+    },
+    "dispose": {
+      "prefix": "dispose",
+      "description": "Flutter state cleanup",
+      "body": "@override\nvoid dispose() {\n  \n  super.dispose();\n}"
     }
   }
 }

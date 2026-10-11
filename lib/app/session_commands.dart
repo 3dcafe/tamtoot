@@ -5,6 +5,7 @@ import '../core/filesystem/filesystem.dart';
 import '../workspace/layout/dock_layout.dart';
 import 'ide_session.dart';
 import '../languages/package_service.dart';
+import '../editor/document/editing_actions.dart';
 
 abstract interface class PresentationActions {
   Future<String?> readClipboard();
@@ -25,6 +26,7 @@ abstract interface class PresentationActions {
 }
 
 void registerSessionCommands(IdeSession s, PresentationActions ui) {
+  final editing = EditingActions();
   void add(
     String id,
     String title,
@@ -348,14 +350,33 @@ void registerSessionCommands(IdeSession s, PresentationActions ui) {
     );
   }
   add('editor.backspace', 'Backspace', (_) {
-    s.documents.active!.editor.delete();
+    editing.backspace(
+      s.documents.active!.editor,
+      s.languages.forPath(s.documents.active!.name),
+    );
   }, enabled: editor);
   add('editor.delete', 'Delete', (_) {
     s.documents.active!.editor.delete(backwards: false);
   }, enabled: editor);
   add('editor.newline', 'New line', (_) {
-    s.documents.active!.editor.replaceSelection('\n');
+    editing.newline(
+      s.documents.active!.editor,
+      s.languages.forPath(s.documents.active!.name),
+    );
   }, enabled: editor);
+  add(
+    'editor.toggleComment',
+    'Toggle comment',
+    (_) {
+      editing.toggleComment(
+        s.documents.active!.editor,
+        s.languages.forPath(s.documents.active!.name),
+      );
+    },
+    enabled: () =>
+        editor() &&
+        editing.canComment(s.languages.forPath(s.documents.active!.name)),
+  );
   add('editor.tab', 'Indent', (_) {
     final e = s.documents.active!.editor;
     e.replaceSelection(e.insertSpaces ? ' ' * e.tabSize : '\t');

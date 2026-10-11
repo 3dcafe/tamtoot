@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "packageVersion": "0.2.0",
+  "packageVersion": "0.3.0",
   "id": "csharp",
   "name": "C#",
   "extensions": [
@@ -43,6 +43,10 @@
     {
       "open": "\"",
       "close": "\""
+    },
+    {
+      "open": "'",
+      "close": "'"
     }
   ],
   "indentation": {

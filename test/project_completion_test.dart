@@ -12,6 +12,55 @@ class _CompletionMemory extends RepositoryMemory {
 
 void main() {
   test(
+    'snippets are prefix filtered and never appear in member access',
+    () async {
+      final index = ProjectCompletionIndex(_CompletionMemory());
+      await index.initialize();
+      const snippets = {
+        'prop': {
+          'prefix': 'prop',
+          'body': 'public int Count { get; set; }',
+          'description': 'Auto-property',
+        },
+      };
+      final result = index.suggest(
+        source: 'pr',
+        offset: 2,
+        language: 'csharp',
+        snippets: snippets,
+      );
+      expect(result.single.kind, CompletionKind.snippet);
+      expect(result.single.insertText, contains('Count'));
+      expect(result.single.documentation, 'Auto-property');
+      expect(
+        index.suggest(
+          source: 'item.pr',
+          offset: 7,
+          language: 'csharp',
+          snippets: snippets,
+        ),
+        isEmpty,
+      );
+    },
+  );
+  test(
+    'nullable receivers find generic methods on records and structs',
+    () async {
+      final index = ProjectCompletionIndex(_CompletionMemory());
+      await index.initialize();
+      const source =
+          'public record struct Service\n{\n  public T Convert<T>(T value) {}\n}\nService? service;\nservice?.Con';
+      final result = index.suggest(
+        source: source,
+        offset: source.length,
+        language: 'csharp',
+      );
+      expect(result.single.name, 'Convert');
+      expect(result.single.owner, 'Service');
+      expect(result.single.signature, 'Convert<T>(T value)');
+    },
+  );
+  test(
     'suggests local variables, fields, properties, constants and methods',
     () async {
       final index = ProjectCompletionIndex(_CompletionMemory());

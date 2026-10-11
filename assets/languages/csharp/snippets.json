@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "packageVersion": "0.2.0",
+  "packageVersion": "0.3.0",
   "snippets": {
     "class": {
       "prefix": "class",
@@ -17,6 +17,66 @@
     "property": {
       "prefix": "property",
       "body": "public string Name { get; init; } = string.Empty;"
+    },
+    "if": {
+      "prefix": "if",
+      "description": "Conditional block",
+      "body": "if (condition)\n{\n    \n}"
+    },
+    "foreach": {
+      "prefix": "foreach",
+      "description": "Collection loop",
+      "body": "foreach (var item in items)\n{\n    \n}"
+    },
+    "for": {
+      "prefix": "for",
+      "description": "Counted loop",
+      "body": "for (var i = 0; i < length; i++)\n{\n    \n}"
+    },
+    "try": {
+      "prefix": "try",
+      "description": "Try, catch and finally",
+      "body": "try\n{\n    \n}\ncatch (Exception exception)\n{\n    \n}\nfinally\n{\n    \n}"
+    },
+    "interface": {
+      "prefix": "interface",
+      "description": "Interface declaration",
+      "body": "public interface IExample\n{\n    void Run();\n}"
+    },
+    "namespace": {
+      "prefix": "namespace",
+      "description": "File-scoped namespace",
+      "body": "namespace Example;"
+    },
+    "prop": {
+      "prefix": "prop",
+      "description": "Auto-property",
+      "body": "public string Name { get; set; } = string.Empty;"
+    },
+    "propfull": {
+      "prefix": "propfull",
+      "description": "Property with backing field",
+      "body": "private string _name = string.Empty;\npublic string Name\n{\n    get => _name;\n    set => _name = value;\n}"
+    },
+    "switch": {
+      "prefix": "switch",
+      "description": "Switch expression",
+      "body": "var result = value switch\n{\n    _ => default,\n};"
+    },
+    "using": {
+      "prefix": "using",
+      "description": "Disposable resource",
+      "body": "using var resource = CreateResource();"
+    },
+    "ctor": {
+      "prefix": "ctor",
+      "description": "Constructor",
+      "body": "public Example()\n{\n    \n}"
+    },
+    "cw": {
+      "prefix": "cw",
+      "description": "Console output",
+      "body": "Console.WriteLine();"
     }
   }
 }

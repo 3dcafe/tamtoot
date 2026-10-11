@@ -13,6 +13,7 @@ import 'package:tamtoot/core/git/git_service.dart';
 import 'package:tamtoot/languages/language_registry.dart';
 import 'explorer_test.dart' show IndicatorGit, RepositoryMemory;
 import 'support.dart';
+import 'language_syntax_test.dart' show loadLanguage;
 import 'package:tamtoot/core/filesystem/filesystem.dart';
 
 void main() {
@@ -170,6 +171,103 @@ void main() {
     await tester.runAsync(session.dispose);
     await tester.binding.setSurfaceSize(null);
   });
+  testWidgets(
+    'IME pairs delimiters, handles backspace and preserves composition',
+    (tester) async {
+      final session = await testSession();
+      session.languages.register(loadLanguage('dart'));
+      final document = session.documents.create('typing.dart', '');
+      session.observe(document);
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [sessionProvider.overrideWithValue(session)],
+          child: const TamtootApp(),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.byType(CodeEditor));
+      await tester.pump(const Duration(milliseconds: 350));
+      void input(
+        String text,
+        int cursor, {
+        TextRange composing = TextRange.empty,
+      }) {
+        tester.testTextInput.updateEditingValue(
+          TextEditingValue(
+            text: text,
+            selection: TextSelection.collapsed(offset: cursor),
+            composing: composing,
+          ),
+        );
+      }
+
+      input('(', 1);
+      expect(document.editor.text, '()');
+      expect(document.editor.selection.extent, 1);
+      input(')', 0);
+      expect(document.editor.text, '');
+      input('(', 1);
+      input('())', 2);
+      expect(document.editor.text, '()');
+      expect(document.editor.selection.extent, 2);
+      document.editor.select(0, 2);
+      input('x', 1, composing: const TextRange(start: 0, end: 1));
+      input('(', 1, composing: const TextRange(start: 0, end: 1));
+      expect(document.editor.text, '(');
+      input('(', 1);
+      expect(document.editor.text, '(');
+      await tester.pumpWidget(const SizedBox());
+      await tester.pumpAndSettle();
+      await tester.runAsync(session.dispose);
+    },
+  );
+  testWidgets(
+    'standalone snippets retain indentation, undo and hide in comments',
+    (tester) async {
+      final session = await testSession();
+      session.languages.register(loadLanguage('csharp'));
+      final document = session.documents.create('snippet.cs', '  ');
+      document.editor.select(2, 2);
+      session.observe(document);
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [sessionProvider.overrideWithValue(session)],
+          child: const TamtootApp(),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.byType(CodeEditor));
+      await tester.pump(const Duration(milliseconds: 350));
+      document.editor.select(2, 2);
+      tester.testTextInput.updateEditingValue(
+        const TextEditingValue(
+          text: '  forea',
+          selection: TextSelection.collapsed(offset: 7),
+        ),
+      );
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(find.text('foreach · snippet'), findsOneWidget);
+      await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+      await tester.pump();
+      expect(
+        document.editor.text,
+        '  foreach (var item in items)\n  {\n      \n  }',
+      );
+      document.editor.undo();
+      expect(document.editor.text, '  forea');
+      document.editor.select(0, document.editor.text.length);
+      document.editor.replaceSelection('// forea');
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(find.text('foreach · snippet'), findsNothing);
+      document.editor.select(0, document.editor.text.length);
+      document.editor.replaceSelection('"forea');
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(find.text('foreach · snippet'), findsNothing);
+      await tester.pumpWidget(const SizedBox());
+      await tester.pumpAndSettle();
+      await tester.runAsync(session.dispose);
+    },
+  );
   testWidgets('text input reconnects after switching editor tabs', (
     tester,
   ) async {

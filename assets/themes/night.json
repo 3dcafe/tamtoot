@@ -34,6 +34,9 @@
     "operator": "#D6DFED",
     "tag": "#77BDD9",
     "attribute": "#B6CDEA",
-    "constant": "#EBC48D"
+    "constant": "#EBC48D",
+    "property": "#9CDCFE",
+    "parameter": "#9CDCFE",
+    "interpolation": "#DCDCAA"
   }
 }

@@ -30,6 +30,7 @@ class SyntaxRule {
     String? end,
     String? escape,
     this.nested = false,
+    this.singleLine = false,
     this.endCapture,
     this.contentRules = const [],
   }) : expression = RegExp(pattern),
@@ -38,7 +39,7 @@ class SyntaxRule {
   final RegExp expression;
   final String scope;
   final RegExp? end, escape;
-  final bool nested;
+  final bool nested, singleLine;
   final int? endCapture;
   final List<SyntaxRule> contentRules;
 }
@@ -190,6 +191,10 @@ class LanguageDefinition {
       position = earliest.end;
       state = enter(rule, earliest);
     }
+    // Ordinary strings must not leak their scope into the next source line.
+    for (var current = state; current != null; current = current.parent) {
+      if (current.rule.singleLine) state = current.parent;
+    }
     return SyntaxLine(tokens, state);
   }
 }
@@ -229,11 +234,15 @@ class LanguagePackageLoader {
                 capture != null ||
                 raw['escape'] != null ||
                 raw['nested'] != null ||
+                raw['singleLine'] != null ||
                 raw['contentRules'] != null)) {
           throw const SchemaException('Region options require begin');
         }
         if (raw['nested'] != null && raw['nested'] is! bool) {
           throw const SchemaException('nested must be boolean');
+        }
+        if (raw['singleLine'] != null && raw['singleLine'] is! bool) {
+          throw const SchemaException('singleLine must be boolean');
         }
         final children = raw['contentRules'] ?? [];
         if (children is! List) {
@@ -245,6 +254,7 @@ class LanguagePackageLoader {
           end: raw['end'] == null ? null : requiredString(raw, 'end'),
           escape: raw['escape'] == null ? null : requiredString(raw, 'escape'),
           nested: raw['nested'] == true,
+          singleLine: raw['singleLine'] == true,
           endCapture: capture as int?,
           contentRules: [
             for (final child in children) parseRule(child, depth + 1),

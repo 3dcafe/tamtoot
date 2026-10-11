@@ -27,6 +27,23 @@ String? scopeAt(LanguageDefinition language, String source, String needle) {
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+  test('C# and Dart highlight members, generics and interpolation', () {
+    final cs = loadLanguage('csharp');
+    expect(scopeAt(cs, 'string name = null;', 'string'), 'type');
+    expect(scopeAt(cs, 'string name = null;', 'null'), 'constant');
+    expect(scopeAt(cs, 'service.GetValue<int>();', 'GetValue'), 'function');
+    expect(scopeAt(cs, 'service.Name', 'Name'), 'property');
+    expect(scopeAt(cs, r'$"Hello {name}"', 'name'), 'interpolation');
+    expect(scopeAt(cs, r'$"{{literal}} {42}"', '42'), 'number');
+    expect(scopeAt(cs, r'$"{{literal}} {42}"', 'literal'), 'string');
+    final dart = loadLanguage('dart');
+    expect(scopeAt(dart, 'items.map<String>();', 'map'), 'function');
+    expect(scopeAt(dart, 'widget.title', 'title'), 'property');
+    expect(scopeAt(dart, 'Widget(key: value)', 'key'), 'parameter');
+    expect(scopeAt(dart, r'"Hello $name"', r'$name'), 'interpolation');
+    final line = dart.tokenizeLine('"unfinished');
+    expect(line.state, isNull);
+  });
   test('all language packages are bundled in application assets', () async {
     for (final id in bundledLanguageIds) {
       final base = 'assets/languages/$id';

@@ -10,6 +10,8 @@ Tamtoot is a **free code and plain-text editor** and an extensible Flutter IDE f
 
 ## Release notes
 
+[TamToot 0.1.6 — English release notes](docs/releases/0.1.6.en.md) · [TamToot 0.1.6 — изменения на русском](docs/releases/0.1.6.ru.md)
+
 [TamToot 0.1.5 — English release notes](docs/releases/0.1.5.en.md) · [TamToot 0.1.5 — изменения на русском](docs/releases/0.1.5.ru.md)
 
 [TamToot 0.1.4 — English release notes](docs/releases/0.1.4.en.md) · [TamToot 0.1.4 — изменения на русском](docs/releases/0.1.4.ru.md)
@@ -20,7 +22,7 @@ Tamtoot is a **free code and plain-text editor** and an extensible Flutter IDE f
 
 ## Features
 
-- A custom Canvas-based editor with syntax highlighting, selection, code folding, undo/redo, search and replace, keyboard shortcuts, mouse selection, and touch input.
+- A custom Canvas-based editor with syntax highlighting, selection, automatic indentation, bracket and quote pairing, language-aware comment toggling, code folding, undo/redo, search and replace, keyboard shortcuts, mouse selection, and touch input.
 - Create project files and folders from the Solution **+** menu. Language packages provide file templates (C# classes/interfaces, Dart classes, Flutter widgets and other formats); filenames and extensions remain editable. [File template format](docs/file-templates.md).
 - Multiple document tabs and recovery of unsaved documents between sessions.
 - A project tree that expands directories **in place**. Opening a child folder keeps the project root and sibling folders visible. Directory contents load on demand.
@@ -87,6 +89,10 @@ The existing Windows workflows remain available separately.
 Drag panel dividers to resize. Click folders to expand or collapse them, and files to open them. Tap in the editor to position the cursor; double-click selects a complete word, and long-press and drag selects text on touch devices. Click the triangle beside a class or method line to collapse or expand its body. Ordinary touch dragging scrolls the document.
 
 Output uses one selectable text surface, so several log lines can be copied at once. Each entry includes its local completion time. Use **Clear** in the Output header to remove the current log.
+
+C# and Dart show code-template suggestions alongside project symbols. Type a template prefix (for example, `prop`, `foreach`, `stateful` or `dispose`) and accept with Tab, Enter or a click. Templates keep the current indentation and also work without an open project. Suggestions are hidden in strings and comments.
+
+Use **Edit → Toggle comment** or the editor context menu to comment or uncomment selected lines. `Ctrl/⌘+/` runs the same action. Enter preserves indentation and increases it after a language block opener; typing an opening bracket or quote wraps selected text.
 
 Common shortcuts: `Ctrl/⌘+S` saves, `Ctrl/⌘+Z` undoes, `Ctrl/⌘+Shift+Z` redoes, `Ctrl/⌘+F` finds, and `Ctrl/⌘+Shift+P` opens commands.
 

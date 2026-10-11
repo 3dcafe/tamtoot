@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "packageVersion": "0.2.0",
+  "packageVersion": "0.3.0",
   "rules": [
     {
       "pattern": "//.*$",
@@ -17,14 +17,67 @@
       "scope": "string"
     },
     {
-      "begin": "\\$?@\"|@\\$\"",
+      "begin": "\\$@\"|@\\$\"",
+      "end": "\"",
+      "scope": "string",
+      "escape": "\"\"|\\{\\{|\\}\\}",
+      "contentRules": [
+        {
+          "begin": "\\{",
+          "end": "\\}",
+          "scope": "interpolation",
+          "nested": true,
+          "contentRules": [
+            {
+              "pattern": "\"(?:\\\\.|[^\"\\\\])*\"",
+              "scope": "string"
+            },
+            {
+              "pattern": "\\b\\d+\\b",
+              "scope": "number"
+            },
+            {
+              "pattern": "\\b(?:true|false|null)\\b",
+              "scope": "constant"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "begin": "@\"",
       "end": "\"",
       "scope": "string",
       "escape": "\"\""
     },
     {
-      "pattern": "\\$\"(?:\\\\.|[^\"\\\\])*\"",
-      "scope": "string"
+      "begin": "\\$\"",
+      "end": "\"",
+      "scope": "string",
+      "escape": "\\\\.|\\{\\{|\\}\\}",
+      "singleLine": true,
+      "contentRules": [
+        {
+          "begin": "\\{",
+          "end": "\\}",
+          "scope": "interpolation",
+          "nested": true,
+          "contentRules": [
+            {
+              "pattern": "\"(?:\\\\.|[^\"\\\\])*\"",
+              "scope": "string"
+            },
+            {
+              "pattern": "\\b\\d+\\b",
+              "scope": "number"
+            },
+            {
+              "pattern": "\\b(?:true|false|null)\\b",
+              "scope": "constant"
+            }
+          ]
+        }
+      ]
     },
     {
       "pattern": "\"(?:\\\\.|[^\"\\\\])*\"|\\x27(?:\\\\.|[^\\x27\\\\])*\\x27",
@@ -43,6 +96,14 @@
       "scope": "annotation"
     },
     {
+      "pattern": "\\b(?:true|false|null)\\b",
+      "scope": "constant"
+    },
+    {
+      "pattern": "\\b(?:bool|byte|char|decimal|double|float|int|long|nint|nuint|object|sbyte|short|string|uint|ulong|ushort|void)\\b",
+      "scope": "type"
+    },
+    {
       "pattern": "\\b(?:abstract|add|alias|and|ascending|by|descending|equals|field|file|from|get|global|group|init|into|join|let|managed|nameof|nint|not|notnull|nuint|on|or|orderby|partial|remove|required|scoped|select|set|unmanaged|value|when|where|with|yield|as|async|await|base|bool|break|byte|case|catch|char|checked|class|const|continue|decimal|default|delegate|do|double|else|enum|event|explicit|extern|false|finally|fixed|float|for|foreach|goto|if|implicit|in|int|interface|internal|is|lock|long|namespace|new|null|object|operator|out|override|params|private|protected|public|readonly|record|ref|return|sbyte|sealed|short|sizeof|stackalloc|static|string|struct|switch|this|throw|true|try|typeof|uint|ulong|unchecked|unsafe|ushort|using|var|virtual|void|volatile|while)\\b",
       "scope": "keyword"
     },
@@ -51,7 +112,11 @@
       "scope": "number"
     },
     {
-      "pattern": "\\b[A-Za-z_$][\\w$]*(?=\\s*\\()",
+      "pattern": "(?<=\\.)[A-Za-z_][\\w]*(?![\\w]|\\s*[(<])",
+      "scope": "property"
+    },
+    {
+      "pattern": "\\b[A-Za-z_$][\\w$]*(?=\\s*(?:<[^()]+>)?\\s*\\()",
       "scope": "function"
     },
     {

@@ -324,3 +324,11 @@ The expanded test suite passes **57 tests**, including folder collapse/reopen, s
   remain unverified; own cryptography still requires an independent audit.
 - Stages 1–5 implement the primary client flow. Stage 6 features remain optional
   extensions. Scope, recovery procedure and limits: [SSH stage 5](ssh-stage-5.ru.md).
+
+## 0.1.6 · редактор и языки C#/Dart · 11 октября 2026
+
+- `flutter analyze` — **No issues found**.
+- `flutter test` — **358 passed, 1 skipped**.
+- Проверены пары скобок и кавычек, экранирование, отступы, комментарии, IME и восстановление выделения через Undo/Redo.
+- Проверены generic-методы, record struct, доступ через `?.`, фильтрация шаблонов, подсветка свойств, аргументов и интерполяции. Widget-тест проверяет подсказки без проекта, вставку через Tab с отступом, Undo и скрытие списка в строках и комментариях.
+- Новых зависимостей нет; версия остаётся `0.1.6+6`. Нативные сборки и ручная проверка на устройствах в этом прогоне не выполнялись.

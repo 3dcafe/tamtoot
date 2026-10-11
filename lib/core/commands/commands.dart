@@ -102,6 +102,10 @@ class KeybindingRegistry {
     'delete': 'editor.delete',
     'enter': 'editor.newline',
     'tab': 'editor.tab',
+    'ctrl+/': 'editor.toggleComment',
+    'meta+/': 'editor.toggleComment',
+    'ctrl+slash': 'editor.toggleComment',
+    'meta+slash': 'editor.toggleComment',
   };
   final Map<String, String> bindings;
   String? resolve(String chord) => bindings[chord.toLowerCase()];

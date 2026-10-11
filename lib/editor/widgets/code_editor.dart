@@ -8,6 +8,7 @@ import '../../app/ide_session.dart';
 import '../../core/completion/project_completion.dart';
 import '../../languages/language_registry.dart';
 import '../../languages/document_syntax.dart';
+import '../document/editing_actions.dart';
 import '../buffer/text_buffer.dart';
 import '../document/editor_controller.dart';
 import '../viewport/editor_viewport.dart';
@@ -161,6 +162,7 @@ class _CodeEditorState extends State<CodeEditor> implements TextInputClient {
   bool _revealScheduled = false;
   TextEditingValue _ime = TextEditingValue.empty;
   bool _receiving = false;
+  final _editing = EditingActions();
   double _height = 400;
   int? _dragAnchor;
   Timer? _completionTimer;
@@ -282,18 +284,38 @@ class _CodeEditorState extends State<CodeEditor> implements TextInputClient {
 
   void _updateCompletions() {
     if (!mounted || !_focus.hasFocus || widget.language == null) return;
+    final scope = _editing.scopeAtCaret(_editor, widget.language);
+    final protected =
+        scope == 'string' ||
+        scope == 'comment' ||
+        (_ime.composing.isValid && !_ime.composing.isCollapsed);
+    if (protected || !_editor.selection.isCollapsed || _editor.readOnly) {
+      setState(() => _completions = const []);
+      return;
+    }
     final index = widget.session.completionIndex;
-    if (index == null) return;
-    final suggestions = index.suggest(
-      source: _editor.text,
-      offset: _editor.selection.extent,
-      language: widget.language!.id,
-    );
+    final before = _editor.text.substring(0, _editor.selection.extent);
+    final word = RegExp(
+      r'(?<![\w$.])[A-Za-z_$][\w$]*$',
+    ).firstMatch(before)?.group(0);
+    final suggestions = index == null
+        ? ProjectCompletionIndex.snippetSuggestions(
+            prefix: word ?? '',
+            language: widget.language!.id,
+            snippets: widget.language!.snippets,
+          ).take(12).toList()
+        : index.suggest(
+            source: _editor.text,
+            offset: _editor.selection.extent,
+            language: widget.language!.id,
+            snippets: widget.language!.snippets,
+          );
     setState(() {
       _completions = suggestions;
       _completionSelection = 0;
     });
     if (suggestions.isEmpty &&
+        index != null &&
         index.refreshing &&
         RegExp(
           r'\.([A-Za-z_$][\w$]*)?$',
@@ -311,7 +333,18 @@ class _CodeEditorState extends State<CodeEditor> implements TextInputClient {
     final prefix =
         RegExp(r'[A-Za-z_$][\w$]*$').firstMatch(before)?.group(0) ?? '';
     _editor.select(cursor - prefix.length, cursor);
-    final insertion = item.callable ? '${item.name}()' : item.name;
+    var insertion = item.insertText.isNotEmpty
+        ? item.insertText
+        : item.callable
+        ? '${item.name}()'
+        : item.name;
+    if (item.kind == CompletionKind.snippet) {
+      final line = _editor.buffer.getLine(
+        _editor.buffer.positionAt(cursor).line,
+      );
+      final indent = RegExp(r'^[ \t]*').firstMatch(line)!.group(0)!;
+      insertion = insertion.replaceAll('\n', '\n$indent');
+    }
     _editor.replaceSelection(insertion);
     if (item.callable && item.signature != '${item.name}()') {
       final inside = cursor - prefix.length + item.name.length + 1;
@@ -554,7 +587,7 @@ class _CodeEditorState extends State<CodeEditor> implements TextInputClient {
         character != null &&
         character.isNotEmpty &&
         !character.runes.any((rune) => rune < 0x20 || rune == 0x7f)) {
-      _editor.replaceSelection(character);
+      _editing.type(_editor, widget.language, character);
       return KeyEventResult.handled;
     }
     // Printable text is delivered only by IME (avoids duplicate text events).
@@ -641,6 +674,8 @@ class _CodeEditorState extends State<CodeEditor> implements TextInputClient {
           'editor.cut': 'Cut',
           'editor.paste': 'Paste',
           'editor.selectAll': 'Select all',
+          if (!_editor.readOnly && _editing.canComment(widget.language))
+            'editor.toggleComment': 'Toggle comment',
         }.entries)
           PopupMenuItem(value: entry.key, child: Text(entry.value)),
       ],
@@ -921,6 +956,7 @@ class _CodeEditorState extends State<CodeEditor> implements TextInputClient {
                   CompletionKind.field => Icons.view_headline_outlined,
                   CompletionKind.property => Icons.tune,
                   CompletionKind.constant => Icons.lock_outline,
+                  CompletionKind.snippet => Icons.code,
                 }, size: 17),
                 title: Text(item.signature, maxLines: 1),
                 subtitle: Text(
@@ -953,8 +989,12 @@ class _CodeEditorState extends State<CodeEditor> implements TextInputClient {
       return;
     }
     _receiving = true;
+    var assisted = false;
     try {
       final old = _editor.text;
+      final composing =
+          (value.composing.isValid && !value.composing.isCollapsed) ||
+          (_ime.composing.isValid && !_ime.composing.isCollapsed);
       if (old != value.text) {
         var start = 0;
         while (start < old.length &&
@@ -969,11 +1009,48 @@ class _CodeEditorState extends State<CodeEditor> implements TextInputClient {
           a--;
           b--;
         }
+        // Prefer the actual selection when repeated delimiters make a diff ambiguous.
+        final prior = _editor.selection;
+        final insertedLength =
+            value.text.length - old.length + prior.end - prior.start;
+        if (!composing &&
+            insertedLength >= 0 &&
+            value.text.length >= prior.start + insertedLength &&
+            old.substring(0, prior.start) ==
+                value.text.substring(0, prior.start) &&
+            old.substring(prior.end) ==
+                value.text.substring(prior.start + insertedLength)) {
+          start = prior.start;
+          a = prior.end;
+          b = prior.start + insertedLength;
+        }
         // Apply the platform edit to the controller owned by this editor.
-        _editor.select(start, a);
-        _editor.replaceSelection(value.text.substring(start, b));
+        final insertion = value.text.substring(start, b);
+        final previous = _editor.selection;
+        final typed =
+            !composing &&
+            insertion.length == 1 &&
+            (previous.start == start && previous.end == a);
+        final backspace =
+            !composing &&
+            insertion.isEmpty &&
+            a == start + 1 &&
+            previous.isCollapsed &&
+            previous.end == a;
+        if (backspace) {
+          _editing.backspace(_editor, widget.language);
+          assisted = true;
+        } else {
+          _editor.select(start, a);
+          if (typed) {
+            _editing.type(_editor, widget.language, insertion);
+            assisted = true;
+          } else {
+            _editor.replaceSelection(insertion);
+          }
+        }
       }
-      if (value.selection.isValid) {
+      if (!assisted && value.selection.isValid) {
         _editor.select(
           value.selection.baseOffset,
           value.selection.extentOffset,
@@ -983,6 +1060,7 @@ class _CodeEditorState extends State<CodeEditor> implements TextInputClient {
     } finally {
       _receiving = false;
     }
+    if (assisted) _syncIme();
     _repaint();
   }
 

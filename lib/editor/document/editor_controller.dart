@@ -64,7 +64,7 @@ class EditorController {
   ]);
 
   /// Edits use original coordinates and must be non-overlapping.
-  void transact(List<BufferEdit> edits) {
+  void transact(List<BufferEdit> edits, {EditorSelection? selectionAfter}) {
     if (readOnly || edits.isEmpty) return;
     final ordered = [...edits]..sort((a, b) => a.start.compareTo(b.start));
     var previousEnd = -1;
@@ -94,7 +94,7 @@ class EditorController {
       buffer.applyEdit(e);
     }
     final last = inverse.last;
-    final after = EditorSelection(last.end, last.end);
+    final after = selectionAfter ?? EditorSelection(last.end, last.end);
     _undo.add(_Transaction(ordered, inverse, before, after));
     _redo.clear();
     selections = [after];

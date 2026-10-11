@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "packageVersion": "0.2.0",
+  "packageVersion": "0.3.0",
   "rules": [
     {
       "pattern": "//.*$",
@@ -26,25 +26,93 @@
       "begin": "\"\"\"",
       "end": "\"\"\"",
       "scope": "string",
-      "escape": "\\\\."
+      "escape": "\\\\.",
+      "contentRules": [
+        {
+          "pattern": "\\$[A-Za-z_]\\w*",
+          "scope": "interpolation"
+        }
+      ]
     },
     {
       "begin": "'''",
       "end": "'''",
       "scope": "string",
-      "escape": "\\\\."
+      "escape": "\\\\.",
+      "contentRules": [
+        {
+          "pattern": "\\$[A-Za-z_]\\w*",
+          "scope": "interpolation"
+        }
+      ]
     },
     {
       "pattern": "r\"[^\"]*\"|r\\x27[^\\x27]*\\x27",
       "scope": "string"
     },
     {
-      "pattern": "\"(?:\\\\.|[^\"\\\\])*\"|\\x27(?:\\\\.|[^\\x27\\\\])*\\x27",
-      "scope": "string"
+      "begin": "\"",
+      "end": "\"",
+      "escape": "\\\\.",
+      "scope": "string",
+      "contentRules": [
+        {
+          "pattern": "\\$[A-Za-z_]\\w*",
+          "scope": "interpolation"
+        },
+        {
+          "begin": "\\$\\{",
+          "end": "\\}",
+          "scope": "interpolation",
+          "rules": [
+            {
+              "pattern": "\\b\\d+\\b",
+              "scope": "number"
+            },
+            {
+              "pattern": "\\b(?:true|false|null)\\b",
+              "scope": "constant"
+            }
+          ]
+        }
+      ],
+      "singleLine": true
+    },
+    {
+      "begin": "'",
+      "end": "'",
+      "escape": "\\\\.",
+      "scope": "string",
+      "contentRules": [
+        {
+          "pattern": "\\$[A-Za-z_]\\w*",
+          "scope": "interpolation"
+        },
+        {
+          "begin": "\\$\\{",
+          "end": "\\}",
+          "scope": "interpolation",
+          "rules": [
+            {
+              "pattern": "\\b\\d+\\b",
+              "scope": "number"
+            },
+            {
+              "pattern": "\\b(?:true|false|null)\\b",
+              "scope": "constant"
+            }
+          ]
+        }
+      ],
+      "singleLine": true
     },
     {
       "pattern": "@[A-Za-z_]\\w*(?:\\.[A-Za-z_]\\w*)*",
       "scope": "annotation"
+    },
+    {
+      "pattern": "\\b(?:true|false|null)\\b",
+      "scope": "constant"
     },
     {
       "pattern": "\\b(?:abstract|augment|base|covariant|as|assert|async|await|break|case|catch|class|const|continue|default|deferred|do|dynamic|else|enum|export|extends|extension|type|external|factory|false|final|finally|for|Function|get|hide|if|implements|import|in|interface|is|late|library|mixin|new|null|on|operator|part|required|rethrow|return|sealed|set|show|static|super|switch|sync|this|throw|true|try|typedef|var|void|when|while|with|yield)\\b",
@@ -59,7 +127,15 @@
       "scope": "number"
     },
     {
-      "pattern": "\\b[A-Za-z_$][\\w$]*(?=\\s*\\()",
+      "pattern": "\\b[A-Za-z_]\\w*(?=\\s*:(?!:))",
+      "scope": "parameter"
+    },
+    {
+      "pattern": "(?<=\\.)[A-Za-z_][\\w]*(?![\\w]|\\s*[(<])",
+      "scope": "property"
+    },
+    {
+      "pattern": "\\b[A-Za-z_$][\\w$]*(?=\\s*(?:<[^()]+>)?\\s*\\()",
       "scope": "function"
     },
     {

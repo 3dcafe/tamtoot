@@ -10,6 +10,9 @@ class DocumentSyntax {
   final _text = <String>[];
   final _lines = <SyntaxLine>[];
 
+  SyntaxState? stateAfterLine(int line) =>
+      line >= 0 && line < _lines.length ? _lines[line].state : null;
+
   List<SyntaxToken> tokensFor({
     required Object source,
     required int revision,

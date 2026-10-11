@@ -163,6 +163,7 @@ class _IdeShellState extends ConsumerState<IdeShell> {
       'editor.copy',
       'editor.cut',
       'editor.paste',
+      'editor.toggleComment',
       'editor.find',
       'workspace.search',
       'editor.replace',
