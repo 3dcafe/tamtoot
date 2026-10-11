@@ -1,5 +1,66 @@
 {
   "schemaVersion": 1,
-  "packageVersion": "0.1.0",
-  "snippets": {}
+  "packageVersion": "0.2.0",
+  "snippets": {
+    "interface": {
+      "prefix": "interface",
+      "description": "Interface declaration",
+      "body": "export interface Example {\n  name: string;\n}"
+    },
+    "class": {
+      "prefix": "class",
+      "description": "Class declaration",
+      "body": "export class Example {\n  \n}"
+    },
+    "type": {
+      "prefix": "type",
+      "description": "Type alias",
+      "body": "type Example = {\n  name: string;\n};"
+    },
+    "enum": {
+      "prefix": "enum",
+      "description": "Enum declaration",
+      "body": "enum Example {\n  First, Second\n}"
+    },
+    "function": {
+      "prefix": "function",
+      "description": "Typed function",
+      "body": "function run(value: string): void {\n  \n}"
+    },
+    "async": {
+      "prefix": "async",
+      "description": "Async function",
+      "body": "async function run(): Promise<void> {\n  \n}"
+    },
+    "arrow": {
+      "prefix": "arrow",
+      "description": "Typed arrow function",
+      "body": "const run = (value: string): void => {\n  \n};"
+    },
+    "if": {
+      "prefix": "if",
+      "description": "Conditional block",
+      "body": "if (condition) {\n  \n}"
+    },
+    "forof": {
+      "prefix": "forof",
+      "description": "Iterable loop",
+      "body": "for (const item of items) {\n  \n}"
+    },
+    "try": {
+      "prefix": "try",
+      "description": "Try and catch",
+      "body": "try {\n  \n} catch (error) {\n  \n}"
+    },
+    "switch": {
+      "prefix": "switch",
+      "description": "Switch statement",
+      "body": "switch (value) {\n  default:\n    break;\n}"
+    },
+    "log": {
+      "prefix": "log",
+      "description": "Console output",
+      "body": "console.log();"
+    }
+  }
 }

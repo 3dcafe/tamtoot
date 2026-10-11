@@ -6,11 +6,12 @@ import '../../languages/document_syntax.dart';
 import '../buffer/text_buffer.dart';
 import '../document/editor_controller.dart';
 import '../viewport/editor_viewport.dart';
-import 'expanded_line.dart';
+import 'line_layout_cache.dart';
 
 class CodePainter extends CustomPainter {
   CodePainter({
     required this.editor,
+    required this.layouts,
     required this.syntax,
     required this.language,
     required this.theme,
@@ -25,6 +26,7 @@ class CodePainter extends CustomPainter {
     required this.collapsedFolds,
   });
   final EditorController editor;
+  final LineLayoutCache layouts;
   final DocumentSyntax syntax;
   final LanguageDefinition? language;
   final IdeTheme theme;
@@ -60,49 +62,24 @@ class CodePainter extends CustomPainter {
         );
       }
       final raw = editor.buffer.getLine(line);
-      final expanded = ExpandedLine(raw, editor.tabSize);
-      final spans = <TextSpan>[];
-      var position = 0;
-      for (final token in syntax.tokensFor(
+      final tokens = syntax.tokensFor(
         source: editor.buffer,
         revision: editor.revision,
         language: language,
         lineCount: editor.buffer.lineCount,
         readLine: editor.buffer.getLine,
         line: line,
-      )) {
-        if (token.start > position) {
-          spans.add(
-            TextSpan(
-              text: expanded.text.substring(
-                expanded.displayOffset(position),
-                expanded.displayOffset(token.start),
-              ),
-            ),
-          );
-        }
-        spans.add(
-          TextSpan(
-            text: expanded.text.substring(
-              expanded.displayOffset(token.start),
-              expanded.displayOffset(token.end),
-            ),
-            style: TextStyle(color: Color(theme.color(token.scope))),
-          ),
-        );
-        position = token.end;
-      }
-      if (position < raw.length) {
-        spans.add(
-          TextSpan(
-            text: expanded.text.substring(expanded.displayOffset(position)),
-          ),
-        );
-      }
-      final painter = TextPainter(
-        text: TextSpan(style: style, children: spans),
-        textDirection: TextDirection.ltr,
-      )..layout();
+        firstChangedLineSince: (revision) =>
+            editor.changedLinesSince(revision).first,
+      );
+      final layout = layouts.get(
+        raw: raw,
+        tokens: tokens,
+        style: style,
+        theme: theme,
+        tabSize: editor.tabSize,
+      );
+      final expanded = layout.expanded, painter = layout.painter;
       final start = editor.buffer.offsetAt(TextPoint(line, 0));
       final origin = Offset(64 - scrollX, y);
       double x(int offset) =>
@@ -167,20 +144,20 @@ class CodePainter extends CustomPainter {
         );
       }
       canvas.restore();
-      painter.dispose();
-      final number = TextPainter(
-        text: TextSpan(
-          text: '${line + 1}',
-          style: style.copyWith(
-            color: Color(
-              theme.color(line == current.line ? 'accent' : 'muted'),
+      final number = layouts
+          .get(
+            raw: '${line + 1}',
+            tokens: const [],
+            style: style.copyWith(
+              color: Color(
+                theme.color(line == current.line ? 'accent' : 'muted'),
+              ),
             ),
-          ),
-        ),
-        textDirection: TextDirection.ltr,
-      )..layout();
+            theme: theme,
+            tabSize: editor.tabSize,
+          )
+          .painter;
       number.paint(canvas, Offset(47 - number.width, y));
-      number.dispose();
       if (foldRegions.any((region) => region.startLine == line)) {
         final collapsed = collapsedFolds.contains(line);
         final marker = Path();

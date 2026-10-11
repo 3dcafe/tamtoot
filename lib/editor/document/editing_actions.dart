@@ -17,6 +17,7 @@ class EditingActions {
       lineCount: e.buffer.lineCount,
       readLine: e.buffer.getLine,
       line: point.line,
+      firstChangedLineSince: (revision) => e.changedLinesSince(revision).first,
     );
     for (final token in tokens) {
       if (token.start < point.column && token.end > point.column) {
@@ -84,11 +85,12 @@ class EditingActions {
     ) {
       slashes++;
     }
-    final escapedQuote = (text == '"' || text == "'") && slashes.isOdd;
+    final escapedQuote =
+        (text == '"' || text == "'" || text == '`') && slashes.isOdd;
     if (selection.isCollapsed &&
         scope != 'comment' &&
         !escapedQuote &&
-        (scope != 'string' || text == '"' || text == "'") &&
+        (scope != 'string' || text == '"' || text == "'" || text == '`') &&
         next == text &&
         pairs.values.contains(text)) {
       e.select(selection.end + 1, selection.end + 1);

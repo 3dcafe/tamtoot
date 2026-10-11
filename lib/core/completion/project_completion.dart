@@ -4,6 +4,9 @@ import 'dart:convert';
 import 'package:crypto/crypto.dart';
 
 import '../git/git_store.dart';
+import '../../editor/document/editor_controller.dart';
+import 'angular_completions.dart';
+import 'react_completions.dart';
 
 enum CompletionKind { method, variable, field, property, constant, snippet }
 
@@ -57,12 +60,49 @@ class CompletionSymbol {
       );
 }
 
+class _ParseContext {
+  String owner = '';
+  int depth = 0, ownerDepth = -1;
+  bool blockComment = false;
+  final comments = <String>[];
+  _ParseContext copy() => _ParseContext()
+    ..owner = owner
+    ..depth = depth
+    ..ownerDepth = ownerDepth
+    ..blockComment = blockComment
+    ..comments.addAll(comments);
+  bool same(_ParseContext other) =>
+      owner == other.owner &&
+      depth == other.depth &&
+      ownerDepth == other.ownerDepth &&
+      blockComment == other.blockComment &&
+      comments.length == other.comments.length &&
+      List.generate(
+        comments.length,
+        (i) => comments[i] == other.comments[i],
+      ).every((equal) => equal);
+}
+
+class _CompletionLine {
+  _CompletionLine(this.after, this.symbols);
+  final _ParseContext after;
+  final List<CompletionSymbol> symbols;
+}
+
 class ProjectCompletionIndex {
   ProjectCompletionIndex(this.store);
 
-  static const cachePath = '.tamtoot/cache/completions-v4.json';
+  static const cachePath = '.tamtoot/cache/completions-v6.json';
   static const _extensions = {
     '.dart': 'dart',
+    '.php': 'php',
+    '.phtml': 'php',
+    '.php8': 'php',
+    '.jsx': 'javascript',
+    '.ts': 'typescript',
+    '.tsx': 'typescript',
+    '.mts': 'typescript',
+    '.cts': 'typescript',
     '.cs': 'csharp',
     '.java': 'java',
     '.kt': 'kotlin',
@@ -79,6 +119,14 @@ class ProjectCompletionIndex {
   Future<void>? _loading;
   String _activeSource = '', _activeLanguage = '';
   List<CompletionSymbol> _activeSymbols = const [];
+
+  EditorController? _activeDocument;
+  int _activeRevision = -1;
+  List<_CompletionLine> _activeLines = [];
+  int activeLinesParsed = 0;
+
+  bool angularDetected = false;
+  bool reactDetected = false;
 
   bool get refreshing => _refreshing != null;
 
@@ -98,10 +146,13 @@ class ProjectCompletionIndex {
     required String language,
     int limit = 12,
     Map<String, dynamic> snippets = const {},
+    EditorController? document,
   }) {
     final before = source.substring(0, offset.clamp(0, source.length));
     final access = RegExp(
-      r'([A-Za-z_$][\w$]*)\??\.([A-Za-z_$][\w$]*)?$',
+      language == 'php'
+          ? r'([A-Za-z_$][\w$]*)(?:\?->|->|::)([A-Za-z_$][\w$]*)?$'
+          : r'([A-Za-z_$][\w$]*)\??\.([A-Za-z_$][\w$]*)?$',
     ).firstMatch(before);
     final word = access == null
         ? RegExp(r'([A-Za-z_$][\w$]*)$').firstMatch(before)
@@ -110,14 +161,23 @@ class ProjectCompletionIndex {
     unawaited(refreshIfStale().catchError((_) {}));
     final receiver = access?.group(1) ?? '';
     final prefix = access == null ? word!.group(1)! : (access.group(2) ?? '');
-    final owner = receiver == 'this'
-        ? _enclosingType(before)
-        : _receiverType(before, receiver, language);
-    if (_activeSource != source || _activeLanguage != language) {
+    if (document != null) {
+      _updateActiveDocument(document, language);
+    } else if (_activeSource != source ||
+        _activeLanguage != language ||
+        _activeDocument != null) {
+      _activeDocument = null;
       _activeSource = source;
       _activeLanguage = language;
       _activeSymbols = _parse('<current>', source, language);
     }
+    final owner = (receiver == 'this' || receiver == r'$this')
+        ? document != null && _activeLines.isNotEmpty
+              ? _activeLines[document.buffer.positionAt(offset).line]
+                    .after
+                    .owner
+              : _enclosingType(before)
+        : _receiverType(before, receiver, language);
     final lowerPrefix = prefix.toLowerCase();
     var all =
         [..._files.values.expand((file) => file.symbols), ..._activeSymbols]
@@ -150,7 +210,11 @@ class ProjectCompletionIndex {
         snippetSuggestions(
           prefix: prefix,
           language: language,
-          snippets: snippets,
+          snippets: {
+            ...snippets,
+            if (angularDetected) ...angularSnippetsFor(language),
+            if (reactDetected) ...reactSnippetsFor(language),
+          },
         ),
       );
     }
@@ -174,6 +238,42 @@ class ProjectCompletionIndex {
         )
         .take(limit)
         .toList();
+  }
+
+  void _updateActiveDocument(EditorController document, String language) {
+    final sameDocument =
+        _activeDocument == document && _activeLanguage == language;
+    if (sameDocument && _activeRevision == document.revision) return;
+    final range = sameDocument
+        ? document.changedLinesSince(_activeRevision)
+        : (first: 0, last: document.buffer.lineCount - 1);
+    final old = sameDocument ? _activeLines : <_CompletionLine>[];
+    final first = range.first.clamp(0, old.length);
+    final next = old.take(first).toList();
+    var context = first == 0 ? _ParseContext() : old[first - 1].after.copy();
+    for (var line = first; line < document.buffer.lineCount; line++) {
+      // Text beyond the reported range is unchanged. Stop once parser state agrees.
+      if (line > range.last &&
+          old.length == document.buffer.lineCount &&
+          context.same(old[line - 1].after)) {
+        next.addAll(old.skip(line));
+        break;
+      }
+      final symbols = _parse(
+        '<current>',
+        document.buffer.getLine(line),
+        language,
+        context,
+      );
+      activeLinesParsed++;
+      next.add(_CompletionLine(context.copy(), symbols));
+    }
+    _activeLines = next;
+    _activeDocument = document;
+    _activeRevision = document.revision;
+    _activeLanguage = language;
+    _activeSource = '';
+    _activeSymbols = next.expand((line) => line.symbols).toList();
   }
 
   static List<CompletionSymbol> snippetSuggestions({
@@ -219,6 +319,8 @@ class ProjectCompletionIndex {
   Future<void> _refresh() async {
     await _loadCache();
     _checkedAt = DateTime.now();
+    angularDetected = await _detectAngular();
+    reactDetected = await _detectReact();
     final paths = (await store.listFiles(''))
         .where((path) => _language(path) != null)
         .where((path) => !path.startsWith('.tamtoot/'))
@@ -252,13 +354,52 @@ class ProjectCompletionIndex {
     if (changed) await _saveCache();
   }
 
+  Future<bool> _detectAngular() async {
+    for (final path in ['angular.json', 'package.json']) {
+      try {
+        if (!await store.exists(path)) continue;
+        final text = await store.readText(path);
+        if (text.length > 262144) continue;
+        final config = jsonDecode(text);
+        if (config is! Map) continue;
+        if (path == 'angular.json' && config['projects'] is Map) return true;
+        for (final key in ['dependencies', 'devDependencies']) {
+          final dependencies = config[key];
+          if (dependencies is Map && dependencies['@angular/core'] is String) {
+            return true;
+          }
+        }
+      } catch (_) {
+        // Invalid/unreadable manifests do not prevent ordinary completion.
+      }
+    }
+    return false;
+  }
+
+  Future<bool> _detectReact() async {
+    try {
+      if (!await store.exists('package.json')) return false;
+      final text = await store.readText('package.json');
+      if (text.length > 262144) return false;
+      final config = jsonDecode(text);
+      if (config is! Map) return false;
+      for (final key in ['dependencies', 'devDependencies']) {
+        final dependencies = config[key];
+        if (dependencies is Map && dependencies['react'] is String) return true;
+      }
+    } catch (_) {
+      // An invalid manifest must not break ordinary completion.
+    }
+    return false;
+  }
+
   Future<void> _loadCache() => _loading ??= _readCache();
 
   Future<void> _readCache() async {
     if (!await store.exists(cachePath)) return;
     try {
       final json = jsonDecode(await store.readText(cachePath));
-      if (json is! Map || json['version'] != 4 || json['files'] is! Map) return;
+      if (json is! Map || json['version'] != 6 || json['files'] is! Map) return;
       for (final entry in (json['files'] as Map).entries) {
         final value = entry.value;
         if (value is! Map ||
@@ -285,7 +426,7 @@ class ProjectCompletionIndex {
     await store.writeText(
       cachePath,
       jsonEncode({
-        'version': 4,
+        'version': 6,
         'files': {
           for (final entry in _files.entries)
             entry.key: {
@@ -307,11 +448,20 @@ class ProjectCompletionIndex {
     return null;
   }
 
-  List<CompletionSymbol> _parse(String path, String source, String language) {
+  List<CompletionSymbol> _parse(
+    String path,
+    String source,
+    String language, [
+    _ParseContext? context,
+  ]) {
+    if (language == 'php') return _parsePhp(path, source, context);
     final symbols = <CompletionSymbol>[];
     final lines = const LineSplitter().convert(source);
-    var owner = '', depth = 0, ownerDepth = -1, blockComment = false;
-    final comments = <String>[];
+    var owner = context?.owner ?? '',
+        depth = context?.depth ?? 0,
+        ownerDepth = context?.ownerDepth ?? -1,
+        blockComment = context?.blockComment ?? false;
+    final comments = context?.comments ?? <String>[];
     for (final raw in lines) {
       final line = raw.trim();
       if (line.startsWith('/*')) blockComment = true;
@@ -323,6 +473,7 @@ class ProjectCompletionIndex {
             .replaceFirst(RegExp(r'\*/$'), '')
             .trim();
         if (cleaned.isNotEmpty) comments.add(cleaned);
+        if (comments.length > 32) comments.removeAt(0);
         if (line.endsWith('*/')) blockComment = false;
         continue;
       }
@@ -333,7 +484,11 @@ class ProjectCompletionIndex {
         owner = type.group(1)!;
         ownerDepth = depth;
       }
-      final match = language == 'kotlin'
+      final match = language == 'typescript'
+          ? RegExp(
+              r'^(?:(?:export|default|public|private|protected|static|abstract|override|async|declare)\s+)*(?:function\s+)?([A-Za-z_$][\w$]*)(<[^()]+>)?\s*\(([^)]*)\)',
+            ).firstMatch(line)
+          : language == 'kotlin'
           ? RegExp(
               r'^(?:(?:public|private|protected|internal|override|open|abstract|final|inline|suspend|tailrec|operator|infix|external)\s+)*fun\s+(<[^()]+>\s*)?([A-Za-z_$][\w$]*)\s*\(([^)]*)\)',
             ).firstMatch(line)
@@ -428,6 +583,12 @@ class ProjectCompletionIndex {
         ownerDepth = -1;
       }
     }
+    if (context != null) {
+      context.owner = owner;
+      context.depth = depth;
+      context.ownerDepth = ownerDepth;
+      context.blockComment = blockComment;
+    }
     return symbols;
   }
 
@@ -435,6 +596,31 @@ class ProjectCompletionIndex {
     String line,
     String language,
   ) {
+    if (language == 'typescript') {
+      final match = RegExp(
+        r'^(?:(?:export|public|private|protected|static|declare|readonly)\s+)*(?:(const|let|var)\s+)?([A-Za-z_$][\w$]*)(?:[!?])?(?:\s*:\s*([\w<>,.?\[\]|]+))?\s*(?:=|;|$)',
+      ).firstMatch(line);
+      if (match == null ||
+          {
+            'return',
+            'throw',
+            'break',
+            'continue',
+            'import',
+          }.contains(match.group(2))) {
+        return null;
+      }
+      if (match.group(1) == null &&
+          match.group(3) == null &&
+          !RegExp(r'[=;]').hasMatch(line)) {
+        return null;
+      }
+      return (
+        name: match.group(2)!,
+        type: match.group(3) ?? '',
+        constant: match.group(1) == 'const',
+      );
+    }
     if (language == 'kotlin') {
       final match = RegExp(
         r'^(?:(?:public|private|protected|internal|override|open|final|lateinit|const)\s+)*(val|var)\s+([A-Za-z_$][\w$]*)(?:\s*:\s*([\w<>,.?\[\]]+))?\s*(?:=|$)',
@@ -492,9 +678,9 @@ class ProjectCompletionIndex {
           .first
           .trim()
           .replaceFirst(RegExp(r'^(?:required|final|ref|out|in|this)\s+'), '');
-      if (language == 'kotlin') {
+      if (language == 'kotlin' || language == 'typescript') {
         final match = RegExp(
-          r'(?:[\w]+\s+)*([A-Za-z_$][\w$]*)\s*:\s*(.+)',
+          r'(?:[\w]+\s+)*([A-Za-z_$][\w$]*)\??\s*:\s*(.+)',
         ).firstMatch(parameter);
         if (match != null) {
           result.add(
@@ -528,6 +714,85 @@ class ProjectCompletionIndex {
     return result;
   }
 
+  List<CompletionSymbol> _parsePhp(
+    String path,
+    String source, [
+    _ParseContext? context,
+  ]) {
+    final symbols = <CompletionSymbol>[];
+    var owner = context?.owner ?? '',
+        depth = context?.depth ?? 0,
+        ownerDepth = context?.ownerDepth ?? -1,
+        blockComment = context?.blockComment ?? false;
+    for (final raw in const LineSplitter().convert(source)) {
+      final line = raw.trim();
+      if (line.startsWith('/*')) blockComment = true;
+      if (blockComment || line.startsWith('//') || line.startsWith('#')) {
+        if (line.endsWith('*/')) blockComment = false;
+        continue;
+      }
+      final type = RegExp(
+        r'\b(?:class|interface|trait|enum)\s+([A-Za-z_]\w*)',
+      ).firstMatch(line);
+      if (type != null) {
+        owner = type.group(1)!;
+        ownerDepth = depth;
+      }
+      final method = RegExp(
+        r'^(?:(?:public|private|protected|static|final|abstract)\s+)*function\s+&?\s*([A-Za-z_]\w*)\s*\(([^)]*)\)',
+      ).firstMatch(line);
+      if (method != null) {
+        symbols.add(
+          CompletionSymbol(
+            name: method.group(1)!,
+            signature: '${method.group(1)}(${method.group(2)})',
+            language: 'php',
+            owner: owner,
+            path: path,
+          ),
+        );
+        if (path == '<current>') {
+          symbols.addAll(_parameters(method.group(2)!, path, 'php'));
+        }
+      } else if (type == null) {
+        final variable = RegExp(
+          r'^(?:(?:public|private|protected|static|readonly|var)\s+)*(?:([\w\\?|]+)\s+)?(\$[A-Za-z_]\w*)\s*(?:=|;)',
+        ).firstMatch(line);
+        if (variable != null) {
+          final member = owner.isNotEmpty && depth == ownerDepth + 1;
+          final name = member
+              ? variable.group(2)!.substring(1)
+              : variable.group(2)!;
+          symbols.add(
+            CompletionSymbol(
+              name: name,
+              signature: '$name: ${variable.group(1) ?? 'mixed'}',
+              language: 'php',
+              kind: member ? CompletionKind.field : CompletionKind.variable,
+              owner: member ? owner : '',
+              path: path,
+            ),
+          );
+        }
+      }
+      depth += '{'.allMatches(raw).length - '}'.allMatches(raw).length;
+      if (owner.isNotEmpty &&
+          depth <= ownerDepth &&
+          type == null &&
+          line == '}') {
+        owner = '';
+        ownerDepth = -1;
+      }
+    }
+    if (context != null) {
+      context.owner = owner;
+      context.depth = depth;
+      context.ownerDepth = ownerDepth;
+      context.blockComment = blockComment;
+    }
+    return symbols;
+  }
+
   String _enclosingType(String source) {
     var owner = '', depth = 0, ownerDepth = -1;
     for (final raw in const LineSplitter().convert(source)) {
@@ -546,7 +811,13 @@ class ProjectCompletionIndex {
 
   String _receiverType(String source, String receiver, String language) {
     final escaped = RegExp.escape(receiver);
-    if (language == 'kotlin') {
+    if (language == 'php') {
+      final created = RegExp(
+        escaped + r'\s*=\s*new\s+([A-Za-z_]\w*)',
+      ).allMatches(source).lastOrNull;
+      return created?.group(1) ?? receiver;
+    }
+    if (language == 'kotlin' || language == 'typescript') {
       final typed = RegExp(
         r'\b' + escaped + r'\s*:\s*([A-Za-z_$][\w$]*)',
       ).allMatches(source).lastOrNull;

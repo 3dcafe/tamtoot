@@ -1,0 +1,69 @@
+{
+  "schemaVersion": 1,
+  "packageVersion": "0.1.0",
+  "id": "php",
+  "name": "PHP",
+  "extensions": [
+    ".php",
+    ".phtml",
+    ".php8"
+  ],
+  "comments": {
+    "line": "//",
+    "block": {
+      "open": "/*",
+      "close": "*/"
+    }
+  },
+  "brackets": [
+    {
+      "open": "(",
+      "close": ")"
+    },
+    {
+      "open": "[",
+      "close": "]"
+    },
+    {
+      "open": "{",
+      "close": "}"
+    }
+  ],
+  "autoClosingPairs": [
+    {
+      "open": "(",
+      "close": ")"
+    },
+    {
+      "open": "[",
+      "close": "]"
+    },
+    {
+      "open": "{",
+      "close": "}"
+    },
+    {
+      "open": "\"",
+      "close": "\""
+    },
+    {
+      "open": "'",
+      "close": "'"
+    }
+  ],
+  "indentation": {
+    "increaseAfter": "{"
+  },
+  "fileTemplates": {
+    "class": {
+      "name": "PHP class",
+      "extension": ".php",
+      "body": "<?php\n\ndeclare(strict_types=1);\n\nclass {{name}}\n{\n}\n"
+    },
+    "script": {
+      "name": "PHP script",
+      "extension": ".php",
+      "body": "<?php\n\ndeclare(strict_types=1);\n\n"
+    }
+  }
+}

@@ -268,6 +268,83 @@ void main() {
       await tester.runAsync(session.dispose);
     },
   );
+  testWidgets('detected Angular offers and inserts TypeScript templates', (
+    tester,
+  ) async {
+    final session = await testSession();
+    session.languages.register(loadLanguage('typescript'));
+    final store = RepositoryMemory();
+    await store.writeText('angular.json', '{"projects":{"app":{}}}');
+    session.completionIndex = ProjectCompletionIndex(store);
+    await session.completionIndex!.initialize();
+    final document = session.documents.create('app.ts', '');
+    session.observe(document);
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [sessionProvider.overrideWithValue(session)],
+        child: const TamtootApp(),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byType(CodeEditor));
+    await tester.pump(const Duration(milliseconds: 350));
+    tester.testTextInput.updateEditingValue(
+      const TextEditingValue(
+        text: 'ngsignal',
+        selection: TextSelection.collapsed(offset: 8),
+      ),
+    );
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(find.text('ngsignal · snippet'), findsOneWidget);
+    await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+    await tester.pump();
+    expect(document.editor.text, 'readonly count = signal(0);');
+    document.editor.undo();
+    expect(document.editor.text, 'ngsignal');
+    await tester.pumpWidget(const SizedBox());
+    await tester.pumpAndSettle();
+    await tester.runAsync(session.dispose);
+  });
+  testWidgets('detected React offers JSX hooks and inserts them with Undo', (
+    tester,
+  ) async {
+    final session = await testSession();
+    session.languages.register(loadLanguage('javascript'));
+    final store = RepositoryMemory();
+    await store.writeText(
+      'package.json',
+      '{"dependencies":{"react":"^19.0.0"}}',
+    );
+    session.completionIndex = ProjectCompletionIndex(store);
+    await session.completionIndex!.initialize();
+    final document = session.documents.create('Example.jsx', '');
+    session.observe(document);
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [sessionProvider.overrideWithValue(session)],
+        child: const TamtootApp(),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byType(CodeEditor));
+    await tester.pump(const Duration(milliseconds: 350));
+    tester.testTextInput.updateEditingValue(
+      const TextEditingValue(
+        text: 'rcstate',
+        selection: TextSelection.collapsed(offset: 7),
+      ),
+    );
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(find.text('rcstate · snippet'), findsOneWidget);
+    await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+    await tester.pump();
+    expect(document.editor.text, 'const [count, setCount] = useState(0);');
+    document.editor.undo();
+    expect(document.editor.text, 'rcstate');
+    await tester.pumpWidget(const SizedBox());
+    await tester.pumpAndSettle();
+    await tester.runAsync(session.dispose);
+  });
   testWidgets('text input reconnects after switching editor tabs', (
     tester,
   ) async {

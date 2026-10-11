@@ -1,0 +1,77 @@
+{
+  "schemaVersion": 1,
+  "packageVersion": "0.1.0",
+  "rules": [
+    {
+      "pattern": "<\\?(?:php|=)?|\\?>",
+      "scope": "directive"
+    },
+    {
+      "pattern": "//.*$|#(?!\\[).*$",
+      "scope": "comment"
+    },
+    {
+      "begin": "/\\*",
+      "end": "\\*/",
+      "scope": "comment"
+    },
+    {
+      "pattern": "#\\[[A-Za-z_][\\w\\\\]*",
+      "scope": "annotation"
+    },
+    {
+      "begin": "\"",
+      "end": "\"",
+      "escape": "\\\\.",
+      "scope": "string",
+      "contentRules": [
+        {
+          "pattern": "\\$[A-Za-z_]\\w*",
+          "scope": "interpolation"
+        }
+      ]
+    },
+    {
+      "begin": "'",
+      "end": "'",
+      "escape": "\\\\.",
+      "scope": "string"
+    },
+    {
+      "pattern": "\\b(?:true|false|null)\\b",
+      "scope": "constant"
+    },
+    {
+      "pattern": "\\b(?:int|float|string|bool|array|object|mixed|never|void|iterable|callable)\\b",
+      "scope": "type"
+    },
+    {
+      "pattern": "\\b(?:abstract|and|as|break|case|catch|class|clone|const|continue|declare|default|do|echo|else|elseif|empty|endfor|endforeach|endif|endswitch|endwhile|enum|extends|final|finally|fn|for|foreach|function|global|if|implements|include|include_once|instanceof|interface|isset|list|match|namespace|new|or|private|protected|public|readonly|require|require_once|return|static|switch|throw|trait|try|unset|use|var|while|xor|yield)\\b",
+      "scope": "keyword"
+    },
+    {
+      "pattern": "\\b(?:0[xX][\\da-fA-F_]+|0[bB][01_]+|\\d[\\d_]*(?:\\.\\d[\\d_]*)?(?:[eE][+-]?\\d+)?)\\b",
+      "scope": "number"
+    },
+    {
+      "pattern": "(?<=->)[A-Za-z_]\\w*(?!\\w|\\s*\\()",
+      "scope": "property"
+    },
+    {
+      "pattern": "\\$[A-Za-z_]\\w*",
+      "scope": "parameter"
+    },
+    {
+      "pattern": "\\b[A-Za-z_]\\w*(?=\\s*\\()",
+      "scope": "function"
+    },
+    {
+      "pattern": "\\b[A-Z][A-Za-z_\\d]*\\b",
+      "scope": "type"
+    },
+    {
+      "pattern": "\\?->|->|::|=>|\\?\\?=?|===?|!==?|&&|\\|\\||[+*/%.~^!<>=&|?:-]=?",
+      "scope": "operator"
+    }
+  ]
+}

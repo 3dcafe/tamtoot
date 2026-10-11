@@ -1,3 +1,4 @@
+import '../rendering/line_layout_cache.dart';
 import 'dart:async';
 import 'dart:math' as math;
 import 'package:flutter/foundation.dart';
@@ -153,6 +154,7 @@ class CodeEditor extends StatefulWidget {
 
 class _CodeEditorState extends State<CodeEditor> implements TextInputClient {
   final _syntax = DocumentSyntax();
+  final _layouts = LineLayoutCache();
   final _focus = FocusNode(debugLabel: 'Code editor');
   final _scroll = ScrollController();
   final _horizontal = ScrollController();
@@ -204,6 +206,7 @@ class _CodeEditorState extends State<CodeEditor> implements TextInputClient {
       _subscription?.cancel();
       _subscription = _editor.changes.listen((_) => _onChange());
       _collapsedFolds.clear();
+      _layouts.clear();
       _scheduleReveal();
       _completions = const [];
       if (_focus.hasFocus) _attach();
@@ -309,6 +312,7 @@ class _CodeEditorState extends State<CodeEditor> implements TextInputClient {
             offset: _editor.selection.extent,
             language: widget.language!.id,
             snippets: widget.language!.snippets,
+            document: _editor,
           );
     setState(() {
       _completions = suggestions;
@@ -468,17 +472,42 @@ class _CodeEditorState extends State<CodeEditor> implements TextInputClient {
     }
   }
 
+  EditorController? _foldSource;
+  LanguageDefinition? _foldLanguage;
+  int _foldRevision = -1;
+  List<FoldingRegion> _cachedRegions = const [];
+  List<int> _cachedVisible = const [];
+  Set<int> _visibleCollapsed = {};
+  int _visibleRevision = -1;
+
   List<FoldingRegion> _foldRegions() {
+    if (_foldSource == _editor &&
+        _foldRevision == _editor.revision &&
+        _foldLanguage == widget.language) {
+      return _cachedRegions;
+    }
+    _foldSource = _editor;
+    _foldRevision = _editor.revision;
+    _foldLanguage = widget.language;
+    _visibleRevision = -1;
     final lines = [
       for (var line = 0; line < _editor.buffer.lineCount; line++)
         _editor.buffer.getLine(line),
     ];
-    return {'typescript', 'javascript'}.contains(widget.language?.id)
+    return _cachedRegions =
+        {'typescript', 'javascript'}.contains(widget.language?.id)
         ? scriptFoldingRegions(lines)
         : foldingRegionsForLines(lines);
   }
 
   List<int> _visibleLines(List<FoldingRegion> regions) {
+    if (_visibleRevision == _foldRevision &&
+        _visibleCollapsed.length == _collapsedFolds.length &&
+        _visibleCollapsed.containsAll(_collapsedFolds)) {
+      return _cachedVisible;
+    }
+    _visibleRevision = _foldRevision;
+    _visibleCollapsed = {..._collapsedFolds};
     final collapsed = {
       for (final region in regions)
         if (_collapsedFolds.contains(region.startLine))
@@ -490,7 +519,7 @@ class _CodeEditorState extends State<CodeEditor> implements TextInputClient {
       final region = collapsed[line];
       line = region == null ? line + 1 : region.endLine + 1;
     }
-    return lines;
+    return _cachedVisible = lines;
   }
 
   int _displayLine(
@@ -498,8 +527,16 @@ class _CodeEditorState extends State<CodeEditor> implements TextInputClient {
     List<int> visible,
     List<FoldingRegion> regions,
   ) {
-    final exact = visible.indexOf(sourceLine);
-    if (exact >= 0) return exact;
+    var low = 0, high = visible.length;
+    while (low < high) {
+      final middle = (low + high) ~/ 2;
+      if (visible[middle] < sourceLine) {
+        low = middle + 1;
+      } else {
+        high = middle;
+      }
+    }
+    if (low < visible.length && visible[low] == sourceLine) return low;
     for (final region in regions) {
       if (_collapsedFolds.contains(region.startLine) &&
           sourceLine > region.startLine &&
@@ -870,6 +907,7 @@ class _CodeEditorState extends State<CodeEditor> implements TextInputClient {
                             child: CustomPaint(
                               painter: CodePainter(
                                 editor: _editor,
+                                layouts: _layouts,
                                 syntax: _syntax,
                                 language: widget.language,
                                 theme: widget.session.theme,
@@ -1106,6 +1144,7 @@ class _CodeEditorState extends State<CodeEditor> implements TextInputClient {
   ) {}
   @override
   void dispose() {
+    _layouts.clear();
     _completionTimer?.cancel();
     _subscription?.cancel();
     _connection?.close();

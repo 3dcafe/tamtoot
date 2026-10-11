@@ -20,6 +20,7 @@ class DocumentSyntax {
     required int lineCount,
     required String Function(int) readLine,
     required int line,
+    int Function(int)? firstChangedLineSince,
   }) {
     if (source != _source || language != _language) {
       _source = source;
@@ -30,8 +31,11 @@ class DocumentSyntax {
     }
     if (language == null) return const [];
     if (revision != _revision) {
-      var common = 0;
-      while (common < _text.length &&
+      var common = firstChangedLineSince != null && _revision >= 0
+          ? firstChangedLineSince(_revision).clamp(0, _text.length)
+          : 0;
+      while (firstChangedLineSince == null &&
+          common < _text.length &&
           common < lineCount &&
           _text[common] == readLine(common)) {
         common++;

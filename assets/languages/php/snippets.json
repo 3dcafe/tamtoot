@@ -1,0 +1,66 @@
+{
+  "schemaVersion": 1,
+  "packageVersion": "0.1.0",
+  "snippets": {
+    "class": {
+      "prefix": "class",
+      "description": "PHP class",
+      "body": "class Example\n{\n    \n}"
+    },
+    "interface": {
+      "prefix": "interface",
+      "description": "PHP interface",
+      "body": "interface Example\n{\n    public function run(): void;\n}"
+    },
+    "trait": {
+      "prefix": "trait",
+      "description": "PHP trait",
+      "body": "trait Example\n{\n    \n}"
+    },
+    "function": {
+      "prefix": "function",
+      "description": "Typed PHP function",
+      "body": "function run(string $value): void\n{\n    \n}"
+    },
+    "method": {
+      "prefix": "method",
+      "description": "Typed public method",
+      "body": "public function run(string $value): void\n{\n    \n}"
+    },
+    "ctor": {
+      "prefix": "ctor",
+      "description": "PHP constructor",
+      "body": "public function __construct()\n{\n    \n}"
+    },
+    "property": {
+      "prefix": "property",
+      "description": "Typed PHP property",
+      "body": "private string $name = \"\";"
+    },
+    "foreach": {
+      "prefix": "foreach",
+      "description": "PHP foreach loop",
+      "body": "foreach ($items as $item) {\n    \n}"
+    },
+    "if": {
+      "prefix": "if",
+      "description": "PHP conditional block",
+      "body": "if ($condition) {\n    \n}"
+    },
+    "try": {
+      "prefix": "try",
+      "description": "PHP exception handling",
+      "body": "try {\n    \n} catch (Throwable $exception) {\n    \n}"
+    },
+    "match": {
+      "prefix": "match",
+      "description": "PHP match expression",
+      "body": "$result = match ($value) {\n    default => null,\n};"
+    },
+    "echo": {
+      "prefix": "echo",
+      "description": "PHP output",
+      "body": "echo $value;"
+    }
+  }
+}

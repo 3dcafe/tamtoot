@@ -12,6 +12,138 @@ class _CompletionMemory extends RepositoryMemory {
 
 void main() {
   test(
+    'PHP indexes methods, properties and dollar-prefixed parameters',
+    () async {
+      final store = _CompletionMemory();
+      await store.writeText('Service.php', r'''<?php
+class Service {
+  public string $title = "demo";
+  public function render(int $count): string {}
+}
+''');
+      final index = ProjectCompletionIndex(store);
+      await index.initialize();
+      const source = r'$service = new Service(); $service?->';
+      final result = index.suggest(
+        source: source,
+        offset: source.length,
+        language: 'php',
+      );
+      expect(result.map((item) => item.name), containsAll(['title', 'render']));
+      const local = r'function run(int $count) { $cou';
+      expect(
+        index
+            .suggest(source: local, offset: local.length, language: 'php')
+            .single
+            .name,
+        r'$count',
+      );
+    },
+  );
+  test(
+    'React detection gates JS and TS templates and resets after removal',
+    () async {
+      final store = _CompletionMemory();
+      final react = ProjectCompletionIndex(store);
+      await react.initialize();
+      List<CompletionSymbol> suggestions(String language) =>
+          react.suggest(source: 'rcstate', offset: 7, language: language);
+      expect(suggestions('typescript'), isEmpty);
+      await store.writeText(
+        'package.json',
+        '{"devDependencies":{"react":"^19.0.0"}}',
+      );
+      await react.refresh();
+      expect(react.reactDetected, isTrue);
+      expect(react.angularDetected, isFalse);
+      for (final language in ['javascript', 'typescript']) {
+        expect(suggestions(language).single.insertText, contains('useState'));
+      }
+      expect(suggestions('php'), isEmpty);
+      await store.writeText(
+        'package.json',
+        '{"dependencies":{"react-dom":"*"}}',
+      );
+      await react.refresh();
+      expect(react.reactDetected, isFalse);
+      expect(suggestions('javascript'), isEmpty);
+      await store.writeText('package.json', '{invalid');
+      await react.refresh();
+      expect(react.reactDetected, isFalse);
+    },
+  );
+  test(
+    'TypeScript indexes typed members, parameters and generic functions',
+    () async {
+      final store = _CompletionMemory();
+      await store.writeText(
+        'service.ts',
+        'export class Service {\n  readonly title: string = "Demo";\n  render<T>(count: number): T {}\n}',
+      );
+      final index = ProjectCompletionIndex(store);
+      await index.initialize();
+      const source = 'const service: Service = new Service();\nservice?.';
+      final members = index.suggest(
+        source: source,
+        offset: source.length,
+        language: 'typescript',
+      );
+      expect(
+        members.map((item) => item.name),
+        containsAll(['title', 'render']),
+      );
+      expect(
+        members.firstWhere((item) => item.name == 'render').signature,
+        'render<T>(count: number)',
+      );
+      const local = 'export function run(count: number) {\n cou';
+      expect(
+        index
+            .suggest(
+              source: local,
+              offset: local.length,
+              language: 'typescript',
+            )
+            .single
+            .signature,
+        'count: number',
+      );
+    },
+  );
+  test(
+    'Angular templates require valid root manifests and clear after removal',
+    () async {
+      final store = _CompletionMemory();
+      final index = ProjectCompletionIndex(store);
+      await index.initialize();
+      List<CompletionSymbol> templates(String language, String prefix) => index
+          .suggest(source: prefix, offset: prefix.length, language: language);
+      expect(templates('typescript', 'ngcomponent'), isEmpty);
+      await store.writeText(
+        'package.json',
+        '{"dependencies":{"@angular/core":"^20.0.0"}}',
+      );
+      await index.refresh();
+      expect(index.angularDetected, isTrue);
+      expect(
+        templates('typescript', 'ngcomponent').single.insertText,
+        contains('@Component'),
+      );
+      expect(templates('html', 'ngfor').single.insertText, contains('@for'));
+      expect(templates('java', 'ngcomponent'), isEmpty);
+      await store.writeText('package.json', '{"name":"ordinary-project"}');
+      await index.refresh();
+      expect(index.angularDetected, isFalse);
+      expect(templates('typescript', 'ngcomponent'), isEmpty);
+      await store.writeText('angular.json', '{invalid');
+      await index.refresh();
+      expect(index.angularDetected, isFalse);
+      await store.writeText('angular.json', '{"projects":{"app":{}}}');
+      await index.refresh();
+      expect(index.angularDetected, isTrue);
+    },
+  );
+  test(
     'indexes Java and Kotlin project members, parameters and nullable receivers',
     () async {
       final store = _CompletionMemory();

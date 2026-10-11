@@ -37,6 +37,47 @@ class EditorController {
   final _changes = StreamController<void>.broadcast(sync: true);
   Stream<void> get changes => _changes.stream;
   int revision = 0;
+  final _dirty = <({int revision, int first, int last, int delta})>[];
+
+  /// Bounded edit history; selection-only changes do not invalidate text caches.
+  ({int first, int last}) changedLinesSince(int oldRevision) {
+    if (oldRevision == revision) return (first: buffer.lineCount, last: -1);
+    if (_dirty.isEmpty || oldRevision < _dirty.first.revision - 1) {
+      return (first: 0, last: buffer.lineCount - 1);
+    }
+    var first = buffer.lineCount, last = -1, shifted = false;
+    for (final change in _dirty) {
+      if (change.revision <= oldRevision) continue;
+      if (change.first < first) first = change.first;
+      if (change.last > last) last = change.last;
+      shifted |= change.delta != 0;
+    }
+    return (
+      first: first.clamp(0, buffer.lineCount - 1),
+      last: shifted
+          ? buffer.lineCount - 1
+          : last.clamp(0, buffer.lineCount - 1),
+    );
+  }
+
+  void _applyEdits(List<BufferEdit> edits) {
+    final first = buffer.positionAt(edits.first.start).line;
+    final oldCount = buffer.lineCount;
+    var delta = 0;
+    for (final edit in edits.reversed) {
+      buffer.applyEdit(edit);
+      delta += edit.text.length - (edit.end - edit.start);
+    }
+    revision++;
+    _dirty.add((
+      revision: revision,
+      first: first,
+      last: buffer.positionAt(edits.last.end + delta).line,
+      delta: buffer.lineCount - oldCount,
+    ));
+    if (_dirty.length > 64) _dirty.removeAt(0);
+  }
+
   bool readOnly = false;
   int tabSize = 2;
   bool insertSpaces = true;
@@ -90,51 +131,39 @@ class EditorController {
       );
       delta += e.text.length - (e.end - e.start);
     }
-    for (final e in ordered.reversed) {
-      buffer.applyEdit(e);
-    }
+    _applyEdits(ordered);
     final last = inverse.last;
     final after = selectionAfter ?? EditorSelection(last.end, last.end);
     _undo.add(_Transaction(ordered, inverse, before, after));
     _redo.clear();
     selections = [after];
-    revision++;
     notify();
   }
 
   /// Synchronize an explicitly restored disk version, including read-only views.
   void reloadFromDisk(String text) {
-    buffer.applyEdit(
-      BufferEdit(0, buffer.length, text.replaceAll('\r\n', '\n')),
-    );
+    _applyEdits([BufferEdit(0, buffer.length, text.replaceAll('\r\n', '\n'))]);
     _undo.clear();
     _redo.clear();
     selections = [const EditorSelection(0, 0)];
-    revision++;
     notify();
   }
 
   void undo() {
     if (!canUndo) return;
     final t = _undo.removeLast();
-    for (final e in t.inverse.reversed) {
-      buffer.applyEdit(e);
-    }
+    _applyEdits(t.inverse);
     _redo.add(t);
     selections = [t.before];
-    revision++;
     notify();
   }
 
   void redo() {
     if (!canRedo) return;
     final t = _redo.removeLast();
-    for (final e in t.edits.reversed) {
-      buffer.applyEdit(e);
-    }
+    _applyEdits(t.edits);
     _undo.add(t);
     selections = [t.after];
-    revision++;
     notify();
   }
 

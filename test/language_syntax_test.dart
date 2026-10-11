@@ -28,6 +28,42 @@ String? scopeAt(LanguageDefinition language, String source, String needle) {
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   test(
+    'PHP highlights tags, variables, attributes, types and interpolation',
+    () {
+      final php = loadLanguage('php');
+      expect(scopeAt(php, '<?php', '<?php'), 'directive');
+      expect(scopeAt(php, r'public string $name;', 'string'), 'type');
+      expect(scopeAt(php, r'public string $name;', r'$name'), 'parameter');
+      expect(scopeAt(php, r'"Hello $name"', r'$name'), 'interpolation');
+      expect(scopeAt(php, '#[Example]', '#[Example'), 'annotation');
+      expect(scopeAt(php, r'$service->title', 'title'), 'property');
+      expect(php.snippets.length, 12);
+      final registry = LanguageRegistry()
+        ..register(php)
+        ..register(loadLanguage('javascript'));
+      expect(registry.forPath('page.phtml')?.id, 'php');
+      expect(registry.forPath('component.jsx')?.id, 'javascript');
+    },
+  );
+  test(
+    'TypeScript highlights types, properties, generics and template expressions',
+    () {
+      final language = loadLanguage('typescript');
+      expect(
+        scopeAt(language, 'const value: string = "demo"', 'string'),
+        'type',
+      );
+      expect(
+        scopeAt(language, 'service.render<string>()', 'render'),
+        'function',
+      );
+      expect(scopeAt(language, 'service.title', 'title'), 'property');
+      expect(scopeAt(language, r'`Hello ${name}`', 'name'), 'interpolation');
+      expect(language.tokenizeLine('"unfinished').state, isNull);
+      expect(language.snippets.length, 12);
+    },
+  );
+  test(
     'Java and Kotlin highlight generic calls, properties and string templates',
     () {
       for (final language in [loadLanguage('java'), loadLanguage('kotlin')]) {

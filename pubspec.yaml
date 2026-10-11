@@ -106,6 +106,7 @@ flutter:
     - assets/languages/dart/
     - assets/languages/csharp/
     - assets/languages/python/
+    - assets/languages/php/
     - assets/languages/kotlin/
     - assets/languages/java/
     - assets/languages/xml/

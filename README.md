@@ -32,7 +32,7 @@ Tamtoot is a **free code and plain-text editor** and an extensible Flutter IDE f
   - `?` — a new, untracked file;
   - `↑` — changes in commits not reachable from the locally known upstream.
 - Git clone/fetch/pull/push and local repository operations through the existing pure-Dart Smart HTTP client.
-- Versioned Dart, C#, Python, Kotlin, Java, HTML, JavaScript, TypeScript, XML, Razor, CSS, SCSS, Markdown and configuration language packages, plus declarative language package installation.
+- Versioned Dart, C#, Python, PHP, Kotlin, Java, HTML, JavaScript, TypeScript, XML, Razor, CSS, SCSS, Markdown and configuration language packages, plus declarative language package installation.
 - Live Markdown preview and syntax-aware TypeScript folding.
 - Angular project detection and a resizable interactive website preview beside the editor, using native system WebViews. [Preview setup and platform requirements](docs/angular-preview.md).
 - Git file context actions, including **Add to .gitignore**; private saved credentials and a repository access test.
@@ -90,7 +90,13 @@ Drag panel dividers to resize. Click folders to expand or collapse them, and fil
 
 Output uses one selectable text surface, so several log lines can be copied at once. Each entry includes its local completion time. Use **Clear** in the Output header to remove the current log.
 
-C#, Dart, Java and Kotlin show code-template suggestions alongside project symbols. Type a template prefix (for example, `prop`, `foreach`, `stateful` or `dispose`) and accept with Tab, Enter or a click. Templates keep the current indentation and also work without an open project. Suggestions are hidden in strings and comments.
+C#, Dart, Java, Kotlin, PHP and TypeScript show code-template suggestions alongside project symbols. Type a template prefix (for example, `prop`, `foreach`, `stateful` or `dispose`) and accept with Tab, Enter or a click. Templates keep the current indentation and also work without an open project. Suggestions are hidden in strings and comments.
+
+Angular projects detected from root `angular.json` or an `@angular/core` dependency in root `package.json` also offer `ngcomponent`, `ngservice`, `ngsignal` and other framework templates in TypeScript, plus `ngif`, `ngfor` and bindings in HTML. Modern Angular APIs/control-flow templates require a compatible installed Angular version; individual API snippets describe required imports.
+
+React projects detected from a `react` dependency in root `package.json` offer `rccomponent`, `rcstate`, `rceffect` and other JSX/hooks templates in JavaScript and TypeScript. Hook descriptions list required imports; imports are not added automatically. PHP provides class/script file templates and project member suggestions after `->`, `?->` and `::`.
+
+Editor performance: folding regions and visible-line maps are reused until the document or folding state changes. A bounded cache reuses native text layouts while moving the cursor and scrolling. Syntax caches receive changed-line ranges; active-file completion reparses affected lines and stops when parser state converges. Structural or line-count changes can require rescanning the remaining suffix.
 
 Use **Edit → Toggle comment** or the editor context menu to comment or uncomment selected lines. `Ctrl/⌘+/` runs the same action. Enter preserves indentation and increases it after a language block opener; typing an opening bracket or quote wraps selected text.
 
@@ -110,14 +116,16 @@ The application saves session data after a 450 ms idle period and when it moves 
 
 Use **Edit → Find in project** or **Ctrl+Shift+F** (**⌘Shift+F** on macOS) to search the open project. Results show file paths, line numbers and text previews; tap a result to open and select the occurrence. Search supports case matching and uses unsaved contents of open files. It skips dependency/build folders and `.tamtoot`, ignores binary or oversized text (over two million characters), and caps results at 500. Unreadable entries are counted as skipped. Search starts after a short typing delay and cancels when the query changes or the dialog closes. No additional dependencies are required.
 
-Bundled language packages are versioned independently (currently 0.2.0). File extensions are matched without case sensitivity:
+Bundled language packages are versioned independently; their manifests record the package versions. File extensions are matched without case sensitivity:
 
 | Language | Extensions | Highlighting |
 | --- | --- | --- |
 | HTML | `.html`, `.htm` | Tags, attributes, quoted values, entities, doctype, multiline comments and CDATA |
-| JavaScript | `.js`, `.mjs`, `.cjs` | Module/async keywords, built-ins, calls, operators, numeric literals including BigInt, strings, multiline templates and comments |
+| JavaScript | `.js`, `.jsx`, `.mjs`, `.cjs` | Module/async keywords, built-ins, calls, operators, numeric literals including BigInt, strings, multiline templates and comments |
 | Dart | `.dart` | Expanded keywords and built-in types, annotations, calls, hexadecimal/exponent numbers, raw/triple-quoted strings and nested block comments |
 | C# | `.cs` | Contextual keywords, attributes, directives, escaped identifiers, numeric suffixes, verbatim/interpolated/raw strings and block comments |
+| TypeScript | `.ts`, `.tsx`, `.mts`, `.cts` | Types, generics, properties, decorators and template interpolation |
+| PHP | `.php`, `.phtml`, `.php8` | Tags, variables, types, attributes, methods, properties, strings and comments |
 | Python | `.py`, `.pyw`, `.pyi` | Keywords, built-in types, decorators, calls, numbers, prefixed/triple-quoted strings and line comments |
 | Kotlin | `.kt`, `.kts` | Keywords, built-in types, annotations, escaped identifiers, calls, raw strings and nested block comments |
 | Java | `.java` | Keywords, primitive types, annotations, calls, numeric suffixes, text blocks and block comments |
@@ -126,9 +134,9 @@ Multiline states remain correct when scrolling into the middle of a document. Ed
 
 Python, Kotlin and Java also provide templates in **New file…**: Python modules/classes, Kotlin classes/main functions/scripts, and Java classes/main classes/interfaces. Their support covers editing and syntax coloring; dedicated execution, debugging and semantic completion are not included.
 
-This is syntax coloring, not semantic analysis. Interpolated expressions inside strings/templates use the string color; JavaScript regular-expression detection is heuristic. Embedded JavaScript/CSS in HTML, JSX/TypeScript, live preview and code execution are not implemented by these packages. Snippet definitions are supplied as package data; an interactive snippet insertion UI remains future work.
+This is syntax coloring, not semantic analysis. Selected language packages distinguish string interpolation; JavaScript regular-expression detection remains heuristic. Full embedded-language/JSX parsing, compiler diagnostics and code execution are not supplied by these packages. Code templates appear in the editor suggestion list and support indentation and Undo.
 
-For Dart, C# and JavaScript files, typing an identifier or `.` after a variable opens lightweight project-aware suggestions. The list includes local variables, parameters, methods, fields, properties and constants. Each item shows its signature or type and the nearest preceding line or block comment, so API documentation remains visible while writing code. Tamtoot prioritizes members whose declaring type matches a local variable declaration or constructor expression. This index is lexical rather than a full compiler or LSP, so scope and type inference are intentionally limited.
+For Dart, C#, Java, Kotlin, PHP, TypeScript and JavaScript files, typing an identifier or `.` after a variable opens lightweight project-aware suggestions. The list includes local variables, parameters, methods, fields, properties and constants. Each item shows its signature or type and the nearest preceding line or block comment, so API documentation remains visible while writing code. Tamtoot prioritizes members whose declaring type matches a local variable declaration or constructor expression. This index is lexical rather than a full compiler or LSP, so scope and type inference are intentionally limited.
 
 Press `Tab` or `Enter` to accept the highlighted completion. `Escape` closes the list and the arrow keys change the selected item.
 

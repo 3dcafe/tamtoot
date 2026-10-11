@@ -4,6 +4,7 @@ const bundledLanguageIds = [
   'dart',
   'csharp',
   'python',
+  'php',
   'kotlin',
   'java',
   'html',

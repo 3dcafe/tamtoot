@@ -4,6 +4,17 @@ import 'package:tamtoot/editor/document/editing_actions.dart';
 import 'language_syntax_test.dart' show loadLanguage;
 
 void main() {
+  test('TypeScript backticks pair and skip the existing closer', () {
+    final e = EditorController(''), actions = EditingActions();
+    addTearDown(e.dispose);
+    final language = loadLanguage('typescript');
+    actions.type(e, language, '`');
+    expect(e.text, '``');
+    expect(e.selection.extent, 1);
+    actions.type(e, language, '`');
+    expect(e.text, '``');
+    expect(e.selection.extent, 2);
+  });
   test('pairs wrap backwards selections and undo/redo preserve the cursor', () {
     final e = EditorController('value'), actions = EditingActions();
     addTearDown(e.dispose);
