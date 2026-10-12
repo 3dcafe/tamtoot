@@ -6,6 +6,7 @@ import '../workspace/layout/dock_layout.dart';
 import 'ide_session.dart';
 import '../languages/package_service.dart';
 import '../editor/document/editing_actions.dart';
+import '../editor/document/flutter_widget_actions.dart';
 
 abstract interface class PresentationActions {
   Future<String?> readClipboard();
@@ -376,6 +377,31 @@ void registerSessionCommands(IdeSession s, PresentationActions ui) {
     enabled: () =>
         editor() &&
         editing.canComment(s.languages.forPath(s.documents.active!.name)),
+  );
+  final widgets = FlutterWidgetActions();
+  bool flutterWidgetsVisible() =>
+      editor() &&
+      s.languages.forPath(s.documents.active!.name)?.id == 'dart' &&
+      widgets.available(s.documents.active!.editor);
+  for (final wrapper in FlutterWidgetActions.wrappers) {
+    add(
+      'editor.flutter.wrap$wrapper',
+      'Wrap with $wrapper',
+      (_) => widgets.wrap(s.documents.active!.editor, wrapper),
+      visible: flutterWidgetsVisible,
+      enabled: () =>
+          flutterWidgetsVisible() &&
+          widgets.canWrap(s.documents.active!.editor),
+    );
+  }
+  add(
+    'editor.flutter.unwrap',
+    'Remove widget wrapper',
+    (_) => widgets.unwrap(s.documents.active!.editor),
+    visible: flutterWidgetsVisible,
+    enabled: () =>
+        flutterWidgetsVisible() &&
+        widgets.canUnwrap(s.documents.active!.editor),
   );
   add('editor.tab', 'Indent', (_) {
     final e = s.documents.active!.editor;

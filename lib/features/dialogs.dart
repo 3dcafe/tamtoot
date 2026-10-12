@@ -1,4 +1,5 @@
 import 'model_profiles_dialog.dart';
+import 'naming_settings.dart';
 import 'ssh_profiles_settings.dart';
 import 'project_search_dialog.dart';
 import 'agent_dialog.dart';
@@ -298,6 +299,7 @@ class _SettingsDialogState extends State<SettingsDialog> {
   Map<String, String> get sections => {
     'appearance': 'Appearance',
     'editor': 'Editor',
+    'naming': 'Project naming',
     'keymap': 'Keymap',
     'agents': 'Agents',
     'mcp': 'MCP servers',
@@ -376,6 +378,8 @@ class _SettingsDialogState extends State<SettingsDialog> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
+                        if (section == 'naming')
+                          NamingSettings(session: widget.session),
                         if (section == 'ssh')
                           SshProfilesSettings(session: widget.session),
                         if (section == 'flutter')

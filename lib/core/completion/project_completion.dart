@@ -7,6 +7,8 @@ import '../git/git_store.dart';
 import '../../editor/document/editor_controller.dart';
 import 'angular_completions.dart';
 import 'react_completions.dart';
+import 'dart_arguments.dart';
+import 'flutter_values.dart';
 
 enum CompletionKind { method, variable, field, property, constant, snippet }
 
@@ -20,6 +22,7 @@ class CompletionSymbol {
     this.documentation = '',
     this.path = '',
     this.insertText = '',
+    this.replacementLength,
   });
 
   final String name,
@@ -29,6 +32,7 @@ class CompletionSymbol {
       documentation,
       path,
       insertText;
+  final int? replacementLength;
   final CompletionKind kind;
   bool get callable => kind == CompletionKind.method;
 
@@ -41,6 +45,7 @@ class CompletionSymbol {
     'documentation': documentation,
     'path': path,
     'insertText': insertText,
+    if (replacementLength != null) 'replacementLength': replacementLength,
   };
 
   factory CompletionSymbol.fromJson(Map<String, dynamic> json) =>
@@ -57,22 +62,26 @@ class CompletionSymbol {
         documentation: json['documentation'] as String? ?? '',
         path: json['path'] as String? ?? '',
         insertText: json['insertText'] as String? ?? '',
+        replacementLength: json['replacementLength'] as int?,
       );
 }
 
 class _ParseContext {
   String owner = '';
+  String dartPending = '';
   int depth = 0, ownerDepth = -1;
   bool blockComment = false;
   final comments = <String>[];
   _ParseContext copy() => _ParseContext()
     ..owner = owner
+    ..dartPending = dartPending
     ..depth = depth
     ..ownerDepth = ownerDepth
     ..blockComment = blockComment
     ..comments.addAll(comments);
   bool same(_ParseContext other) =>
       owner == other.owner &&
+      dartPending == other.dartPending &&
       depth == other.depth &&
       ownerDepth == other.ownerDepth &&
       blockComment == other.blockComment &&
@@ -92,7 +101,7 @@ class _CompletionLine {
 class ProjectCompletionIndex {
   ProjectCompletionIndex(this.store);
 
-  static const cachePath = '.tamtoot/cache/completions-v6.json';
+  static const cachePath = '.tamtoot/cache/completions-v7.json';
   static const _extensions = {
     '.dart': 'dart',
     '.php': 'php',
@@ -147,6 +156,7 @@ class ProjectCompletionIndex {
     int limit = 12,
     Map<String, dynamic> snippets = const {},
     EditorController? document,
+    bool explicit = false,
   }) {
     final before = source.substring(0, offset.clamp(0, source.length));
     final access = RegExp(
@@ -157,10 +167,15 @@ class ProjectCompletionIndex {
     final word = access == null
         ? RegExp(r'([A-Za-z_$][\w$]*)$').firstMatch(before)
         : null;
-    if (access == null && word == null) return const [];
+    final argument = language == 'dart' ? dartArgumentContext(before) : null;
+    if (access == null && word == null && argument == null && !explicit) {
+      return const [];
+    }
     unawaited(refreshIfStale().catchError((_) {}));
     final receiver = access?.group(1) ?? '';
-    final prefix = access == null ? word!.group(1)! : (access.group(2) ?? '');
+    final prefix = access == null
+        ? (word?.group(1) ?? '')
+        : (access.group(2) ?? '');
     if (document != null) {
       _updateActiveDocument(document, language);
     } else if (_activeSource != source ||
@@ -171,6 +186,16 @@ class ProjectCompletionIndex {
       _activeLanguage = language;
       _activeSymbols = _parse('<current>', source, language);
     }
+    if (argument != null) {
+      final named = dartArgumentSuggestions(
+        source: source,
+        offset: offset,
+        symbols: [..._activeSymbols, ..._files.values.expand((f) => f.symbols)],
+        limit: limit,
+      );
+      if (named != null) return named;
+    }
+    if (access == null && word == null && !explicit) return const [];
     final owner = (receiver == 'this' || receiver == r'$this')
         ? document != null && _activeLines.isNotEmpty
               ? _activeLines[document.buffer.positionAt(offset).line]
@@ -274,6 +299,107 @@ class ProjectCompletionIndex {
     _activeLanguage = language;
     _activeSource = '';
     _activeSymbols = next.expand((line) => line.symbols).toList();
+  }
+
+  static List<CompletionSymbol>? dartArgumentSuggestions({
+    required String source,
+    required int offset,
+    Iterable<CompletionSymbol> symbols = const [],
+    int limit = 12,
+  }) {
+    final argument = dartArgumentContext(
+      source.substring(0, offset.clamp(0, source.length)),
+    );
+    if (argument != null) {
+      if (argument.parameter != null) {
+        if (!flutterUiImport(source)) return null;
+        final declarations = flutterNamedArguments[argument.call];
+        if (declarations == null) return null;
+        final parameter = dartNamedParameters(
+          declarations,
+        ).where((p) => p.name == argument.parameter).firstOrNull;
+        if (parameter == null) return null;
+        final type = parameter.declaration
+            .replaceFirst('required ', '')
+            .split(' ')
+            .first
+            .replaceAll('?', '');
+        final values = flutterArgumentValues[type];
+        if (values == null) return null;
+        final material =
+            type == 'Color' && flutterUiImport(source, materialOnly: true);
+        return values
+            .where(
+              (v) =>
+                  v
+                      .replaceFirst('const ', '')
+                      .toLowerCase()
+                      .startsWith(argument.prefix.toLowerCase()) ||
+                  v
+                      .split('.')
+                      .last
+                      .toLowerCase()
+                      .startsWith(argument.prefix.toLowerCase()),
+            )
+            .where((v) => !v.startsWith('Colors.') || material)
+            .take(limit)
+            .map(
+              (v) => CompletionSymbol(
+                name: v,
+                signature: v,
+                language: 'dart',
+                kind: CompletionKind.constant,
+                insertText: v,
+                replacementLength: argument.prefix.length,
+                documentation:
+                    '$type value for ${argument.call}.${argument.parameter}${v.contains('(8)') || v.contains(': 8') ? '; adjust the example spacing' : ''}',
+              ),
+            )
+            .toList();
+      }
+      final parameters = <String>[];
+      for (final symbol in symbols) {
+        if (symbol.language != 'dart' ||
+            symbol.name != argument.call &&
+                symbol.name != argument.call.split('.').last) {
+          continue;
+        }
+        final start = symbol.signature.indexOf('{');
+        final end = symbol.signature.lastIndexOf('}');
+        if (start >= 0 && end > start) {
+          parameters.add(symbol.signature.substring(start + 1, end));
+        }
+      }
+      if (importsFlutter(source) &&
+          flutterNamedArguments.containsKey(argument.call)) {
+        parameters.add(flutterNamedArguments[argument.call]!);
+      }
+      if (parameters.isNotEmpty) {
+        final seen = <String>{};
+        return parameters
+            .expand(dartNamedParameters)
+            .where(
+              (p) =>
+                  p.name.startsWith(argument.prefix) &&
+                  !argument.used.contains(p.name) &&
+                  seen.add(p.name),
+            )
+            .map(
+              (p) => CompletionSymbol(
+                name: p.name,
+                signature: p.declaration,
+                language: 'dart',
+                kind: CompletionKind.property,
+                insertText: '${p.name}: ',
+                documentation: 'Named argument of ${argument.call}',
+                owner: argument.call,
+              ),
+            )
+            .take(limit)
+            .toList();
+      }
+    }
+    return null;
   }
 
   static List<CompletionSymbol> snippetSuggestions({
@@ -399,7 +525,7 @@ class ProjectCompletionIndex {
     if (!await store.exists(cachePath)) return;
     try {
       final json = jsonDecode(await store.readText(cachePath));
-      if (json is! Map || json['version'] != 6 || json['files'] is! Map) return;
+      if (json is! Map || json['version'] != 7 || json['files'] is! Map) return;
       for (final entry in (json['files'] as Map).entries) {
         final value = entry.value;
         if (value is! Map ||
@@ -426,7 +552,7 @@ class ProjectCompletionIndex {
     await store.writeText(
       cachePath,
       jsonEncode({
-        'version': 6,
+        'version': 7,
         'files': {
           for (final entry in _files.entries)
             entry.key: {
@@ -461,21 +587,41 @@ class ProjectCompletionIndex {
         depth = context?.depth ?? 0,
         ownerDepth = context?.ownerDepth ?? -1,
         blockComment = context?.blockComment ?? false;
+    var dartPending = context?.dartPending ?? '';
     final comments = context?.comments ?? <String>[];
     for (final raw in lines) {
-      final line = raw.trim();
-      if (line.startsWith('/*')) blockComment = true;
-      if (blockComment || line.startsWith('//')) {
+      var line = raw.trim();
+      if (dartPending.isEmpty && line.startsWith('/*')) blockComment = true;
+      if (dartPending.isEmpty && (blockComment || line.startsWith('//'))) {
         final cleaned = line
             .replaceFirst(RegExp(r'^/\*+'), '')
             .replaceFirst(RegExp(r'^//+'), '')
             .replaceFirst(RegExp(r'^\*'), '')
             .replaceFirst(RegExp(r'\*/$'), '')
             .trim();
-        if (cleaned.isNotEmpty) comments.add(cleaned);
+        if (cleaned.isNotEmpty && dartPending.isEmpty) comments.add(cleaned);
         if (comments.length > 32) comments.removeAt(0);
         if (line.endsWith('*/')) blockComment = false;
         continue;
+      }
+      RegExpMatch? dartHeader;
+      int dartEnd = -1;
+      if (language == 'dart') {
+        if (dartPending.isNotEmpty) {
+          line = '$dartPending\n$line';
+        }
+        if (dartPending.isNotEmpty ||
+            (owner.isEmpty ? depth == 0 : depth == ownerDepth + 1)) {
+          dartHeader = dartDeclarationHeader(line, owner);
+        }
+        if (dartHeader != null) {
+          dartEnd = dartDeclarationEnd(line, dartHeader.end - 1);
+          if (dartEnd < 0 && line.length <= 16384) {
+            dartPending = line;
+            continue;
+          }
+        }
+        dartPending = '';
       }
       final type = RegExp(
         r'\b(?:class|interface|extension|record(?:\s+struct)?|struct|enum|mixin|object)\s+([A-Za-z_$][\w$]*)',
@@ -484,7 +630,9 @@ class ProjectCompletionIndex {
         owner = type.group(1)!;
         ownerDepth = depth;
       }
-      final match = language == 'typescript'
+      final match = language == 'dart'
+          ? null
+          : language == 'typescript'
           ? RegExp(
               r'^(?:(?:export|default|public|private|protected|static|abstract|override|async|declare)\s+)*(?:function\s+)?([A-Za-z_$][\w$]*)(<[^()]+>)?\s*\(([^)]*)\)',
             ).firstMatch(line)
@@ -499,25 +647,28 @@ class ProjectCompletionIndex {
           : RegExp(
               r'^(?:(?:public|private|protected|internal|static|async|virtual|override|final|external|abstract)\s+)*(?:[\w<>,.?\[\]]+\s+)+([A-Za-z_$][\w$]*)(<[^()]+>)?\s*\(([^)]*)\)',
             ).firstMatch(line);
-      if (match != null &&
-          !{
-            'if',
-            'for',
-            'while',
-            'switch',
-            'catch',
-          }.contains(match.group(language == 'kotlin' ? 2 : 1))) {
-        final method = match.group(language == 'kotlin' ? 2 : 1)!;
+      if ((dartHeader != null && dartEnd >= 0 || match != null) &&
+          !{'if', 'for', 'while', 'switch', 'catch'}.contains(
+            dartHeader?.group(1) ?? match!.group(language == 'kotlin' ? 2 : 1),
+          )) {
+        final declarationName =
+            dartHeader?.group(1) ?? match!.group(language == 'kotlin' ? 2 : 1)!;
+        final method = declarationName.split('.').last;
         final typeParameters = language == 'javascript'
             ? ''
-            : (match.group(language == 'kotlin' ? 1 : 2) ?? '').trim();
-        final parameters = match
-            .group(language == 'javascript' ? 2 : 3)!
-            .trim();
+            : (dartHeader?.group(2) ??
+                      match?.group(language == 'kotlin' ? 1 : 2) ??
+                      '')
+                  .trim();
+        final parameters = dartHeader != null && dartEnd >= 0
+            ? dartWithoutComments(
+                line.substring(dartHeader.end, dartEnd),
+              ).replaceAll(RegExp(r'\s+'), ' ').trim()
+            : match!.group(language == 'javascript' ? 2 : 3)!.trim();
         symbols.add(
           CompletionSymbol(
             name: method,
-            signature: '$method$typeParameters($parameters)',
+            signature: '$declarationName$typeParameters($parameters)',
             language: language,
             owner: owner,
             documentation: comments.join(' '),
@@ -574,7 +725,7 @@ class ProjectCompletionIndex {
         }
       }
       if (line.isNotEmpty) comments.clear();
-      depth += '{'.allMatches(raw).length - '}'.allMatches(raw).length;
+      depth += '{'.allMatches(line).length - '}'.allMatches(line).length;
       if (owner.isNotEmpty &&
           depth <= ownerDepth &&
           type == null &&
@@ -584,6 +735,7 @@ class ProjectCompletionIndex {
       }
     }
     if (context != null) {
+      context.dartPending = dartPending;
       context.owner = owner;
       context.depth = depth;
       context.ownerDepth = ownerDepth;

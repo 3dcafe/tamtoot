@@ -3,13 +3,16 @@ import 'dart:async';
 import 'dart:math' as math;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
-import 'package:flutter/material.dart';
+import 'package:flutter/material.dart' hide Decoration;
 import 'package:flutter/services.dart';
 import '../../app/ide_session.dart';
 import '../../core/completion/project_completion.dart';
 import '../../languages/language_registry.dart';
 import '../../languages/document_syntax.dart';
 import '../document/editing_actions.dart';
+import '../document/flutter_widget_actions.dart';
+import '../../core/naming/naming_diagnostics.dart';
+import '../../core/naming/naming_rules.dart';
 import '../buffer/text_buffer.dart';
 import '../document/editor_controller.dart';
 import '../viewport/editor_viewport.dart';
@@ -174,6 +177,33 @@ class _CodeEditorState extends State<CodeEditor> implements TextInputClient {
   int _completionSelection = 0;
   double get _fontSize => widget.session.settings.fontSize;
   double get _lineHeight => _fontSize * 1.6;
+  final _naming = NamingDiagnostics();
+  Timer? _namingTimer;
+  Object? _namingSource;
+  String _namingKey = '';
+  List<Decoration> _namingDecorations = [];
+
+  void _scheduleNaming() {
+    final profile = NamingProfile.forProject(
+      widget.session.settings,
+      widget.session.workspaceRoot,
+      widget.language?.id ?? '',
+    );
+    final key =
+        '${_editor.revision}:${widget.language?.id}:${widget.session.workspaceRoot}:${profile.key}';
+    if (identical(_namingSource, _editor) && _namingKey == key) return;
+    _namingSource = _editor;
+    _namingKey = key;
+    _namingTimer?.cancel();
+    _namingDecorations = [];
+    if (!profile.enabled) return;
+    _namingTimer = Timer(const Duration(milliseconds: 180), () {
+      if (!mounted) return;
+      _namingDecorations = _naming.analyze(_editor, widget.language, profile);
+      _repaint();
+    });
+  }
+
   EditorController get _editor => widget.controller;
   TextStyle get _style => TextStyle(
     fontFamily: widget.session.settings.get('fontFamily') as String,
@@ -285,7 +315,7 @@ class _CodeEditorState extends State<CodeEditor> implements TextInputClient {
     );
   }
 
-  void _updateCompletions() {
+  void _updateCompletions({bool explicit = false}) {
     if (!mounted || !_focus.hasFocus || widget.language == null) return;
     final scope = _editing.scopeAtCaret(_editor, widget.language);
     final protected =
@@ -302,17 +332,24 @@ class _CodeEditorState extends State<CodeEditor> implements TextInputClient {
       r'(?<![\w$.])[A-Za-z_$][\w$]*$',
     ).firstMatch(before)?.group(0);
     final suggestions = index == null
-        ? ProjectCompletionIndex.snippetSuggestions(
-            prefix: word ?? '',
-            language: widget.language!.id,
-            snippets: widget.language!.snippets,
-          ).take(12).toList()
+        ? (widget.language!.id == 'dart'
+                  ? ProjectCompletionIndex.dartArgumentSuggestions(
+                      source: _editor.text,
+                      offset: _editor.selection.extent,
+                    )
+                  : null) ??
+              ProjectCompletionIndex.snippetSuggestions(
+                prefix: word ?? '',
+                language: widget.language!.id,
+                snippets: widget.language!.snippets,
+              ).take(12).toList()
         : index.suggest(
             source: _editor.text,
             offset: _editor.selection.extent,
             language: widget.language!.id,
             snippets: widget.language!.snippets,
             document: _editor,
+            explicit: explicit,
           );
     setState(() {
       _completions = suggestions;
@@ -334,10 +371,20 @@ class _CodeEditorState extends State<CodeEditor> implements TextInputClient {
   void _acceptCompletion(CompletionSymbol item) {
     final cursor = _editor.selection.extent;
     final before = _editor.text.substring(0, cursor);
-    final prefix =
-        RegExp(r'[A-Za-z_$][\w$]*$').firstMatch(before)?.group(0) ?? '';
+    final prefix = item.replacementLength != null
+        ? before.substring(
+            before.length - item.replacementLength!.clamp(0, before.length),
+          )
+        : RegExp(r'[A-Za-z_$][\w$]*$').firstMatch(before)?.group(0) ?? '';
     _editor.select(cursor - prefix.length, cursor);
-    var insertion = item.insertText.isNotEmpty
+    final existingCall =
+        widget.language?.id == 'dart' &&
+        item.callable &&
+        item.insertText.isEmpty &&
+        _editor.text.substring(cursor).startsWith('(');
+    var insertion = existingCall
+        ? item.name
+        : item.insertText.isNotEmpty
         ? item.insertText
         : item.callable
         ? '${item.name}()'
@@ -350,7 +397,7 @@ class _CodeEditorState extends State<CodeEditor> implements TextInputClient {
       insertion = insertion.replaceAll('\n', '\n$indent');
     }
     _editor.replaceSelection(insertion);
-    if (item.callable && item.signature != '${item.name}()') {
+    if (item.callable && (existingCall || item.signature != '${item.name}()')) {
       final inside = cursor - prefix.length + item.name.length + 1;
       _editor.select(inside, inside);
     }
@@ -577,6 +624,11 @@ class _CodeEditorState extends State<CodeEditor> implements TextInputClient {
     if (event is! KeyDownEvent && event is! KeyRepeatEvent) {
       return KeyEventResult.ignored;
     }
+    if (event.logicalKey == LogicalKeyboardKey.space &&
+        HardwareKeyboard.instance.isControlPressed) {
+      _updateCompletions(explicit: true);
+      return KeyEventResult.handled;
+    }
     if (_completions.isNotEmpty) {
       if (event.logicalKey == LogicalKeyboardKey.arrowDown) {
         setState(() {
@@ -706,6 +758,15 @@ class _CodeEditorState extends State<CodeEditor> implements TextInputClient {
         Offset.zero & overlay.size,
       ),
       items: [
+        for (final diagnostic in _namingDecorations.where(
+          (d) =>
+              d.start <= _editor.selection.extent &&
+              d.end >= _editor.selection.extent,
+        ))
+          PopupMenuItem<String>(
+            enabled: false,
+            child: Text(diagnostic.message ?? 'Naming convention'),
+          ),
         for (final entry in {
           'editor.copy': 'Copy',
           'editor.cut': 'Cut',
@@ -713,6 +774,13 @@ class _CodeEditorState extends State<CodeEditor> implements TextInputClient {
           'editor.selectAll': 'Select all',
           if (!_editor.readOnly && _editing.canComment(widget.language))
             'editor.toggleComment': 'Toggle comment',
+          if (widget.language?.id == 'dart' &&
+              FlutterWidgetActions().canWrap(_editor))
+            for (final wrapper in FlutterWidgetActions.wrappers)
+              'editor.flutter.wrap$wrapper': 'Wrap with $wrapper',
+          if (widget.language?.id == 'dart' &&
+              FlutterWidgetActions().canUnwrap(_editor))
+            'editor.flutter.unwrap': 'Remove widget wrapper',
         }.entries)
           PopupMenuItem(value: entry.key, child: Text(entry.value)),
       ],
@@ -779,6 +847,7 @@ class _CodeEditorState extends State<CodeEditor> implements TextInputClient {
 
   @override
   Widget build(BuildContext context) {
+    _scheduleNaming();
     final keyboardVisible = MediaQuery.viewInsetsOf(context).bottom > 0;
     final showDismiss =
         _isTouchPlatform &&
@@ -907,6 +976,7 @@ class _CodeEditorState extends State<CodeEditor> implements TextInputClient {
                             child: CustomPaint(
                               painter: CodePainter(
                                 editor: _editor,
+                                namingDecorations: _namingDecorations,
                                 layouts: _layouts,
                                 syntax: _syntax,
                                 language: widget.language,
@@ -1144,6 +1214,7 @@ class _CodeEditorState extends State<CodeEditor> implements TextInputClient {
   ) {}
   @override
   void dispose() {
+    _namingTimer?.cancel();
     _layouts.clear();
     _completionTimer?.cancel();
     _subscription?.cancel();

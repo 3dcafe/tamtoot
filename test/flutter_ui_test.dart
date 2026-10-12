@@ -112,7 +112,13 @@ void main() {
           await tester.pumpAndSettle();
           expect(find.byKey(const ValueKey('flutter-sdk-path')), findsNothing);
           if (desktop) {
+            await tester.ensureVisible(find.text('SDK'));
+            await tester.pumpAndSettle();
             await tester.tap(find.text('SDK'));
+            await tester.pumpAndSettle();
+            await tester.ensureVisible(
+              find.byKey(const ValueKey('settings-section-flutter')),
+            );
             await tester.pumpAndSettle();
             await tester.tap(
               find.byKey(const ValueKey('settings-section-flutter')),

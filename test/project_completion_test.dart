@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:tamtoot/editor/document/editor_controller.dart';
 import 'package:tamtoot/core/completion/project_completion.dart';
 
 import 'explorer_test.dart' show RepositoryMemory;
@@ -11,6 +12,207 @@ class _CompletionMemory extends RepositoryMemory {
 }
 
 void main() {
+  test('Flutter values use argument type and replace qualified prefixes', () {
+    const header = "import 'package:flutter/material.dart';\n";
+    List<CompletionSymbol> hints(String text) =>
+        ProjectCompletionIndex.dartArgumentSuggestions(
+          source: text,
+          offset: text.length,
+        ) ??
+        [];
+    final alignment = hints(
+      '${header}Row(mainAxisAlignment: MainAxisAlignment.ce',
+    ).single;
+    expect(alignment.insertText, 'MainAxisAlignment.center');
+    expect(alignment.replacementLength, 'MainAxisAlignment.ce'.length);
+    expect(
+      hints('${header}Container(padding: Ed').map((s) => s.insertText),
+      contains('const EdgeInsets.all(8)'),
+    );
+    expect(
+      hints('${header}Container(color: Colors.blu').single.insertText,
+      'Colors.blue',
+    );
+    expect(
+      hints('${header}Text(textAlign: ').map((s) => s.name),
+      contains('TextAlign.center'),
+    );
+    expect(hints('${header}Text(softWrap: f').single.insertText, 'false');
+    expect(hints('${header}Container(width: Colors.'), isEmpty);
+    expect(hints('Container(color: Colors.'), isEmpty);
+    expect(
+      hints(
+        "import 'package:flutter/material.dart' as f;\nContainer(color: Colors.blu",
+      ),
+      isEmpty,
+    );
+    expect(
+      hints('${header}Row(mainAxisAlignment: ce').single.insertText,
+      'MainAxisAlignment.center',
+    );
+    expect(
+      hints(
+        "import 'package:flutter/widgets.dart';\nContainer(color: Colors.blu",
+      ),
+      isEmpty,
+    );
+    expect(hints('$header// Container(color: Colors.blu'), isEmpty);
+    expect(hints('${header}Container(color: compute(Colors.blu'), isEmpty);
+  });
+
+  test(
+    'Dart multiline functions and constructors include nested callback parameters',
+    () async {
+      final store = _CompletionMemory();
+      await store.writeText('model.dart', """
+class Model {
+  /// Creates the model.
+  const Model({
+    required this.title,
+    this.count = 0,
+  });
+  factory Model.named({
+    required String title,
+  }) => Model(title: title);
+  final String title;
+  final int count;
+}
+/// Sends data.
+Future<void> send<T>(
+  T data, {
+  required Map<String, int> headers, // Request metadata.
+  void Function(int, String)? onDone,
+  /* displayed label */ String label = 'a,b',
+}) async {}
+""");
+      final index = ProjectCompletionIndex(store);
+      await index.initialize();
+      List<CompletionSymbol> hints(String text) =>
+          index.suggest(source: text, offset: text.length, language: 'dart');
+      expect(hints('Model(ti').single.insertText, 'title: ');
+      expect(hints('Model.named(ti').single.insertText, 'title: ');
+      expect(
+        hints('send<String>(data, he').single.signature,
+        'required Map<String, int> headers',
+      );
+      expect(
+        hints('send(data, on').single.signature,
+        'void Function(int, String)? onDone',
+      );
+      expect(hints('send(data, la').single.insertText, 'label: ');
+      final constructor = hints('Mod').firstWhere((s) => s.name == 'Model');
+      expect(constructor.documentation, 'Creates the model.');
+      expect(hints('send').first.documentation, 'Sends data.');
+    },
+  );
+  test(
+    'Dart incremental multiline signatures converge after edits and Undo',
+    () async {
+      final editor = EditorController(
+        'void send({\n  required String title,\n  int count = 0,\n}) {}\n${List.generate(1000, (i) => 'final value$i = $i;').join('\n')}\nsend(ti',
+      );
+      addTearDown(editor.dispose);
+      final index = ProjectCompletionIndex(_CompletionMemory());
+      await index.initialize();
+      List<String> query({bool incremental = true}) => index
+          .suggest(
+            source: editor.text,
+            offset: editor.text.length,
+            language: 'dart',
+            document: incremental ? editor : null,
+          )
+          .map((s) => s.signature)
+          .toList();
+      expect(query().single, 'required String title');
+      var count = index.activeLinesParsed;
+      final position = editor.text.indexOf('String title');
+      editor.select(position, position + 6);
+      editor.replaceSelection('int');
+      final incremental = query();
+      expect(incremental.single, 'required int title');
+      expect(index.activeLinesParsed - count, lessThan(6));
+      expect(incremental, query(incremental: false));
+      query();
+      editor.undo();
+      expect(query().single, 'required String title');
+    },
+  );
+
+  test(
+    'Dart named arguments filter prefix and omit supplied arguments',
+    () async {
+      final store = _CompletionMemory();
+      await store.writeText(
+        'api.dart',
+        'void greet({required String title, int count = 0}) {}',
+      );
+      final index = ProjectCompletionIndex(store);
+      await index.initialize();
+      List<CompletionSymbol> hints(String source) => index.suggest(
+        source: source,
+        offset: source.length,
+        language: 'dart',
+      );
+      expect(hints('greet(ti').single.insertText, 'title: ');
+      expect(hints('greet(title: "x", co').single.insertText, 'count: ');
+      expect(hints('greet(title: "x", ti'), isEmpty);
+      expect(
+        hints('greet(title: ti').where((s) => s.insertText == 'title: '),
+        isEmpty,
+      );
+      expect(
+        hints('greet(').map((s) => s.name),
+        containsAll(['title', 'count']),
+      );
+    },
+  );
+  test('Flutter argument hints require an import and handle nested values', () {
+    final index = ProjectCompletionIndex(_CompletionMemory());
+    List<CompletionSymbol> hints(String source) =>
+        index.suggest(source: source, offset: source.length, language: 'dart');
+    const header = "import 'package:flutter/material.dart';\n";
+    expect(
+      hints(
+        '${header}Container(child: Foo(width: 1, padding: 2), pa',
+      ).single.name,
+      'padding',
+    );
+    expect(hints('${header}unknown('), isEmpty);
+    expect(hints('Container(pa'), isEmpty);
+    expect(hints('${header}Container(pa').single.insertText, 'padding: ');
+    expect(
+      hints('${header}Container(child: Text("a,b"), pa').single.name,
+      'padding',
+    );
+    expect(hints('${header}Container(child: Text("a"), ch'), isEmpty);
+    expect(
+      hints(
+        '${header}Padding(',
+      ).firstWhere((s) => s.name == 'padding').signature,
+      contains('required'),
+    );
+    expect(hints('$header// Container(pa'), isEmpty);
+  });
+  test('Explicit completion works without an identifier prefix', () {
+    final index = ProjectCompletionIndex(_CompletionMemory());
+    const source = 'void run() {}\n';
+    expect(
+      index.suggest(source: source, offset: source.length, language: 'dart'),
+      isEmpty,
+    );
+    expect(
+      index
+          .suggest(
+            source: source,
+            offset: source.length,
+            language: 'dart',
+            explicit: true,
+          )
+          .map((s) => s.name),
+      contains('run'),
+    );
+  });
+
   test(
     'PHP indexes methods, properties and dollar-prefixed parameters',
     () async {

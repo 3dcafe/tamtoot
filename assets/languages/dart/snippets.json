@@ -67,6 +67,41 @@
       "prefix": "dispose",
       "description": "Flutter state cleanup",
       "body": "@override\nvoid dispose() {\n  \n  super.dispose();\n}"
+    },
+    "constructor": {
+      "prefix": "constructor",
+      "description": "Dart constructor with required named field",
+      "body": "const Example({required this.value});"
+    },
+    "copyWith": {
+      "prefix": "copyWith",
+      "description": "Immutable model copy",
+      "body": "Example copyWith({String? value}) {\n  return Example(value: value ?? this.value);\n}"
+    },
+    "toJson": {
+      "prefix": "toJson",
+      "description": "Serialize model fields",
+      "body": "Map<String, dynamic> toJson() => {\n  'value': value,\n};"
+    },
+    "fromJson": {
+      "prefix": "fromJson",
+      "description": "Deserialize model fields",
+      "body": "factory Example.fromJson(Map<String, dynamic> json) {\n  return Example(value: json['value'] as String);\n}"
+    },
+    "futureBuilder": {
+      "prefix": "futureBuilder",
+      "description": "Flutter asynchronous UI; requires Flutter widgets import",
+      "body": "FutureBuilder<String>(\n  future: future,\n  builder: (context, snapshot) {\n    if (snapshot.hasError) return Text(\"${snapshot.error}\");\n    if (!snapshot.hasData) return const CircularProgressIndicator();\n    return Text(snapshot.data!);\n  },\n)"
+    },
+    "layoutBuilder": {
+      "prefix": "layoutBuilder",
+      "description": "Flutter responsive layout; requires Flutter widgets import",
+      "body": "LayoutBuilder(\n  builder: (context, constraints) {\n    return const SizedBox();\n  },\n)"
+    },
+    "setState": {
+      "prefix": "setState",
+      "description": "Update Flutter State synchronously",
+      "body": "setState(() {\n  \n});"
     }
   }
 }

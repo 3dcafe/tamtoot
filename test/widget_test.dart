@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -268,6 +269,160 @@ void main() {
       await tester.runAsync(session.dispose);
     },
   );
+
+  testWidgets(
+    'Flutter context menu wraps and removes selected widget with Undo',
+    (tester) async {
+      final session = await testSession();
+      session.languages.register(loadLanguage('dart'));
+      const header = "import 'package:flutter/material.dart';\n";
+      const source = "${header}Text('hello')";
+      final document = session.documents.create('main.dart', source);
+      session.observe(document);
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [sessionProvider.overrideWithValue(session)],
+          child: const TamtootApp(),
+        ),
+      );
+      await tester.pumpAndSettle();
+      document.editor.select(header.length, source.length);
+      await tester.tap(find.byType(CodeEditor), buttons: kSecondaryMouseButton);
+      await tester.pumpAndSettle();
+      expect(find.text('Wrap with Padding'), findsOneWidget);
+      await tester.tap(find.text('Wrap with Padding'));
+      await tester.pumpAndSettle();
+      expect(
+        document.editor.text,
+        contains('padding: const EdgeInsets.all(8)'),
+      );
+      expect(document.editor.text, contains("child: Text('hello')"));
+      await tester.tap(find.byType(CodeEditor), buttons: kSecondaryMouseButton);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Remove widget wrapper'));
+      await tester.pumpAndSettle();
+      expect(document.editor.text, source);
+      document.editor.undo();
+      expect(document.editor.text, contains('Padding('));
+      document.editor.undo();
+      expect(document.editor.text, source);
+      await tester.pumpWidget(const SizedBox());
+      await tester.pumpAndSettle();
+      await tester.runAsync(session.dispose);
+    },
+  );
+  testWidgets(
+    'Flutter value completion replaces Colors prefix and supports Undo',
+    (tester) async {
+      final session = await testSession();
+      session.languages.register(loadLanguage('dart'));
+      const source =
+          "import 'package:flutter/material.dart';\nContainer(color: Colors.blu";
+      final document = session.documents.create('main.dart', source);
+      session.observe(document);
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [sessionProvider.overrideWithValue(session)],
+          child: const TamtootApp(),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.byType(CodeEditor));
+      await tester.pump(const Duration(milliseconds: 350));
+      document.editor.select(source.length, source.length);
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+      await tester.sendKeyEvent(LogicalKeyboardKey.space);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(find.text('Colors.blue'), findsOneWidget);
+      await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+      await tester.pump();
+      expect(
+        document.editor.text,
+        "import 'package:flutter/material.dart';\nContainer(color: Colors.blue",
+      );
+      document.editor.undo();
+      expect(document.editor.text, source);
+      await tester.pumpWidget(const SizedBox());
+      await tester.pumpAndSettle();
+      await tester.runAsync(session.dispose);
+    },
+  );
+  testWidgets('Dart completion preserves existing parentheses and Undo', (
+    tester,
+  ) async {
+    final session = await testSession();
+    session.languages.register(loadLanguage('dart'));
+    final store = RepositoryMemory();
+    await store.writeText(
+      'api.dart',
+      'void render({required String title}) {}',
+    );
+    session.completionIndex = ProjectCompletionIndex(store);
+    await session.completionIndex!.initialize();
+    final document = session.documents.create('main.dart', 'ren()');
+    session.observe(document);
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [sessionProvider.overrideWithValue(session)],
+        child: const TamtootApp(),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byType(CodeEditor));
+    await tester.pump(const Duration(milliseconds: 350));
+    document.editor.select(3, 3);
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.space);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(find.text('render({required String title})'), findsOneWidget);
+    await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+    await tester.pump();
+    expect(document.editor.text, 'render()');
+    expect(document.editor.selection.extent, 7);
+    document.editor.undo();
+    expect(document.editor.text, 'ren()');
+    await tester.pumpWidget(const SizedBox());
+    await tester.pumpAndSettle();
+    await tester.runAsync(session.dispose);
+  });
+  testWidgets('standalone Flutter named argument insertion and undo', (
+    tester,
+  ) async {
+    final session = await testSession();
+    session.languages.register(loadLanguage('dart'));
+    const source = "import 'package:flutter/material.dart';\nContainer(pa";
+    final document = session.documents.create('widget.dart', source);
+    document.editor.select(source.length, source.length);
+    session.observe(document);
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [sessionProvider.overrideWithValue(session)],
+        child: const TamtootApp(),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byType(CodeEditor));
+    await tester.pump(const Duration(milliseconds: 350));
+    document.editor.select(source.length, source.length);
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.space);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(find.text('EdgeInsetsGeometry? padding'), findsOneWidget);
+    await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+    await tester.pump();
+    expect(
+      document.editor.text,
+      "import 'package:flutter/material.dart';\nContainer(padding: ",
+    );
+    document.editor.undo();
+    expect(document.editor.text, source);
+    await tester.pumpWidget(const SizedBox());
+    await tester.pumpAndSettle();
+    await tester.runAsync(session.dispose);
+  });
   testWidgets('detected Angular offers and inserts TypeScript templates', (
     tester,
   ) async {

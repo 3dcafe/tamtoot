@@ -4,6 +4,7 @@ import '../persistence/schema.dart';
 class SettingsService {
   static const defaults = <String, Object>{
     'theme': 'night',
+    'projectNaming': <String, Object>{},
     'fontFamily': 'JetBrainsMono',
     'fontSize': 14.0,
     'tabSize': 2,
@@ -34,6 +35,7 @@ class SettingsService {
   static void _validate(String key, Object value) {
     if (!defaults.containsKey(key)) return;
     final valid = switch (key) {
+      'projectNaming' => _validNaming(value),
       'dotnetPath' ||
       'flutterSdkPath' ||
       'flutterDeviceId' ||
@@ -44,6 +46,51 @@ class SettingsService {
       _ => value is String && value.isNotEmpty,
     };
     if (!valid) throw SchemaException('Invalid setting $key: $value');
+  }
+
+  static bool _validNaming(Object value) {
+    if (value is! Map) return false;
+    const languages = {
+      'dart',
+      'csharp',
+      'python',
+      'java',
+      'kotlin',
+      'php',
+      'javascript',
+      'typescript',
+    };
+    const kinds = {'type', 'function', 'variable', 'property', 'constant'};
+    const styles = {
+      'any',
+      'camel',
+      'pascal',
+      'snake',
+      'upperSnake',
+      'camelOrPascal',
+      'camelOrUpperSnake',
+    };
+    for (final entry in value.entries) {
+      if (entry.key is! String || entry.value is! Map) return false;
+      final project = entry.value as Map;
+      if (project['enabled'] != null && project['enabled'] is! bool) {
+        return false;
+      }
+      final rules = project['languages'];
+      if (rules == null) continue;
+      if (rules is! Map) return false;
+      for (final language in rules.entries) {
+        if (!languages.contains(language.key) || language.value is! Map) {
+          return false;
+        }
+        for (final rule in (language.value as Map).entries) {
+          if (!kinds.contains(rule.key) || !styles.contains(rule.value)) {
+            return false;
+          }
+        }
+      }
+    }
+    return true;
   }
 
   void restore(String source) {

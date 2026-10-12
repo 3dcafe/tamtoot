@@ -1,5 +1,5 @@
 import 'dart:math' as math;
-import 'package:flutter/material.dart';
+import 'package:flutter/material.dart' hide Decoration;
 import '../../core/themes/ide_theme.dart';
 import '../../languages/language_registry.dart';
 import '../../languages/document_syntax.dart';
@@ -11,6 +11,7 @@ import 'line_layout_cache.dart';
 class CodePainter extends CustomPainter {
   CodePainter({
     required this.editor,
+    this.namingDecorations = const [],
     required this.layouts,
     required this.syntax,
     required this.language,
@@ -26,6 +27,7 @@ class CodePainter extends CustomPainter {
     required this.collapsedFolds,
   });
   final EditorController editor;
+  final List<Decoration> namingDecorations;
   final LineLayoutCache layouts;
   final DocumentSyntax syntax;
   final LanguageDefinition? language;
@@ -37,6 +39,25 @@ class CodePainter extends CustomPainter {
   final List<int> visibleLines;
   final List<FoldingRegion> foldRegions;
   final Set<int> collapsedFolds;
+  Iterable<Decoration> _namingAt(int start, int end) sync* {
+    var low = 0, high = namingDecorations.length;
+    while (low < high) {
+      final mid = (low + high) ~/ 2;
+      if (namingDecorations[mid].end < start) {
+        low = mid + 1;
+      } else {
+        high = mid;
+      }
+    }
+    for (
+      var i = low;
+      i < namingDecorations.length && namingDecorations[i].start <= end;
+      i++
+    ) {
+      yield namingDecorations[i];
+    }
+  }
+
   @override
   void paint(Canvas canvas, Size size) {
     canvas.save();
@@ -113,7 +134,10 @@ class CodePainter extends CustomPainter {
           paint..color = Color(theme.color('accent')),
         );
       }
-      for (final d in editor.decorations) {
+      for (final d in [
+        ...editor.decorations,
+        ..._namingAt(start, start + raw.length),
+      ]) {
         if (d.end >= start && d.start <= start + raw.length) {
           canvas.drawLine(
             Offset(
@@ -122,7 +146,13 @@ class CodePainter extends CustomPainter {
             ),
             Offset(x((d.end - start).clamp(0, raw.length)), y + lineHeight - 2),
             paint
-              ..color = Color(theme.color('error'))
+              ..color = d.kind == 'naming'
+                  ? Color(
+                      Color(theme.color('background')).computeLuminance() < 0.5
+                          ? 0xff6acb83
+                          : 0xff237a3b,
+                    )
+                  : Color(theme.color('error'))
               ..strokeWidth = 1,
           );
         }
