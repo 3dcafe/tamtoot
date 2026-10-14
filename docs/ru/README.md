@@ -41,6 +41,8 @@ Angular определяется по `angular.json`. **Pin preview** закре
 
 ## История обновлений
 
+[Tamtoot 0.1.7 — что нового (дополняется)](../releases/0.1.7.ru.md) · [English release notes](../releases/0.1.7.en.md)
+
 [TamToot 0.1.6 — патч-ноты на русском](../releases/0.1.6.ru.md) · [English release notes](../releases/0.1.6.en.md)
 
 [TamToot 0.1.3 — патч-ноты на русском](../releases/0.1.3.ru.md) · [English release notes](../releases/0.1.3.en.md)

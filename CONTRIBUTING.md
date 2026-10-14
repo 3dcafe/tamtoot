@@ -42,6 +42,17 @@ Do not commit secrets, signing keys, API tokens, or personal credentials.
 - Use the bug or feature templates when possible.
 - Include OS, Flutter version, and steps to reproduce for bugs.
 - Search existing issues before opening a duplicate.
+- Accessibility barriers can be reported with the accessibility template or a
+  plain issue. See the [accessibility statement](ACCESSIBILITY.md) for current
+  limitations and reporting guidance.
+
+## Accessibility in contributions
+
+For interface and documentation changes, follow the
+[accessibility contribution guidance](ACCESSIBILITY.md#contribution-and-assessment).
+Describe keyboard and assistive technology checks in the pull request, including
+any checks you could not perform. Automated functional tests alone do not verify
+accessibility.
 
 ## License
 

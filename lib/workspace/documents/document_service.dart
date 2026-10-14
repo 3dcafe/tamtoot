@@ -35,8 +35,22 @@ class OpenDocument {
   bool get isMediaPreview =>
       kind == DocumentKind.image || kind == DocumentKind.svg;
 
-  bool get dirty =>
-      kind == DocumentKind.image ? false : editor.text != savedText;
+  int _dirtyRevision = -1;
+  String? _dirtySavedText;
+  bool _dirty = false;
+
+  bool get dirty {
+    if (kind == DocumentKind.image) return false;
+    // Cursor movement and UI rebuilds do not change the text. Compare large
+    // strings once per revision or saved snapshot, rather than on every read.
+    if (_dirtyRevision != editor.revision ||
+        !identical(_dirtySavedText, savedText)) {
+      _dirty = editor.text != savedText;
+      _dirtyRevision = editor.revision;
+      _dirtySavedText = savedText;
+    }
+    return _dirty;
+  }
 }
 
 class DocumentService {

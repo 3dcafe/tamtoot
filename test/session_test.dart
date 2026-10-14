@@ -28,11 +28,37 @@ class DelayedFiles extends MemoryFileSystem {
 
 void main() {
   test(
+    'dirty cache follows edits, cursor changes, snapshots and disk reload',
+    () async {
+      final docs = DocumentService(MemoryFileSystem(), FakeDialogs());
+      final doc = docs.create('cache.dart', 'saved', savedText: 'saved');
+      expect(doc.dirty, false);
+      doc.editor.select(2, 2);
+      expect(doc.dirty, false);
+      doc.editor.replaceSelection('x');
+      expect(doc.dirty, true);
+      doc.editor.undo();
+      expect(doc.dirty, false);
+      doc.editor.redo();
+      expect(doc.dirty, true);
+      doc.savedText = doc.editor.text;
+      expect(doc.dirty, false);
+      doc.savedText = null;
+      expect(doc.dirty, true);
+      doc.editor.reloadFromDisk('disk');
+      doc.savedText = 'disk';
+      expect(doc.dirty, false);
+      await doc.editor.dispose();
+    },
+  );
+  test(
     'forgetting a project persists its removal without closing documents',
     () async {
       final store = MemoryStore();
       final session = await testSession(store: store);
-      final directory = await Directory.systemTemp.createTemp('tamtoot-forget-');
+      final directory = await Directory.systemTemp.createTemp(
+        'tamtoot-forget-',
+      );
       addTearDown(() => directory.delete(recursive: true));
       final root = directory.uri;
       session.recentWorkspaces.add(root.toString());

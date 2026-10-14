@@ -8,7 +8,11 @@ Tamtoot is a **free code and plain-text editor** and an extensible Flutter IDE f
 
 [Privacy Policy / Политика конфиденциальности](https://3dcafe.github.io/tamtoot/privacy/)
 
+[Accessibility statement and reporting barriers](ACCESSIBILITY.md)
+
 ## Release notes
+
+[Tamtoot 0.1.7 — English release notes (in progress)](docs/releases/0.1.7.en.md) · [Tamtoot 0.1.7 — что нового (дополняется)](docs/releases/0.1.7.ru.md)
 
 [TamToot 0.1.6 — English release notes](docs/releases/0.1.6.en.md) · [TamToot 0.1.6 — изменения на русском](docs/releases/0.1.6.ru.md)
 
