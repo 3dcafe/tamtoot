@@ -70,6 +70,17 @@ void main() {
           ),
         );
         expect(fileMenu.popUpAnimationStyle, AnimationStyle.noAnimation);
+        await tester.tap(find.text('Run'));
+        await tester.pumpAndSettle();
+        expect(find.byType(PopupMenuItem<String>), findsOneWidget);
+        await tester.tap(find.text('Configure project run…'));
+        await tester.pumpAndSettle();
+        final flutterSection = tester.widget<ListTile>(
+          find.byKey(const ValueKey('settings-section-flutter')),
+        );
+        expect(flutterSection.selected, true);
+        await tester.tap(find.text('Close'));
+        await tester.pumpAndSettle();
         await tester.tap(find.text('Tools'));
         await tester.pumpAndSettle();
         await tester.tap(find.text('SSH connections…'));

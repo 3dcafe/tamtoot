@@ -20,6 +20,7 @@ import 'media_document_view.dart';
 import 'markdown_document_view.dart';
 import 'flutter_debug_panel.dart';
 import '../core/flutter/flutter_runner.dart';
+import '../core/projects/project_detection.dart';
 import 'project_launch_bar.dart';
 import 'new_file_dialog.dart';
 import 'explorer_context_menu.dart';
@@ -218,6 +219,19 @@ class _IdeShellState extends ConsumerState<IdeShell> {
   };
 
   Iterable<MapEntry<String, List<String>>> get _menuEntries => _menus.entries
+      .map(
+        (menu) =>
+            menu.key == 'Run' &&
+                !session.flutter.active &&
+                !session.dotnet.active &&
+                (session.launchTarget?.runnable != true ||
+                    session.launchTarget?.kind == ProjectKind.flutter &&
+                        (session.settings.get('flutterSdkPath') as String)
+                            .trim()
+                            .isEmpty)
+            ? const MapEntry('Run', ['project.configure'])
+            : menu,
+      )
       .where((menu) => menu.value.any(session.commands.isVisible));
 
   bool get _nativeMenu =>

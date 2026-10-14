@@ -137,6 +137,16 @@ void registerSessionCommands(IdeSession s, PresentationActions ui) {
     visible: () => supportsFlutterTools,
   );
   add(
+    'project.configure',
+    'Configure project run…',
+    (_) => ui.showSettings(
+      initialSection: s.launchTarget?.kind == ProjectKind.dotnet
+          ? 'dotnet'
+          : 'flutter',
+    ),
+    visible: () => supportsFlutterTools,
+  );
+  add(
     'project.run',
     'Run selected project',
     (_) => s.launchTarget?.kind == ProjectKind.flutter

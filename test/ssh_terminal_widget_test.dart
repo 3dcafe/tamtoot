@@ -82,6 +82,246 @@ TerminalScreen model(WidgetTester tester) =>
             .screen
         as TerminalScreen;
 void main() {
+  testWidgets('shell exit disconnects SSH and returns to the previous route', (
+    tester,
+  ) async {
+    final fixture = TerminalFixture();
+    await fixture.start();
+    addTearDown(() async {
+      await tester.pumpWidget(const SizedBox());
+      await fixture.client.close();
+    });
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Builder(
+          builder: (context) => Scaffold(
+            body: TextButton(
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) =>
+                      SshTerminalView(client: fixture.client, title: 'Remote'),
+                ),
+              ),
+              child: const Text('Connection'),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('Connection'));
+    await tester.pumpAndSettle();
+    fixture.output('logout\r\n');
+    await tester.pumpAndSettle();
+    expect(find.byType(SshTerminalView), findsOneWidget);
+    fixture.wire.emit(
+      (SshWriter()
+            ..byte(98)
+            ..uint32(0)
+            ..text('exit-status')
+            ..byte(0)
+            ..uint32(0))
+          .take(),
+    );
+    fixture.wire.emit(
+      (SshWriter()
+            ..byte(97)
+            ..uint32(0))
+          .take(),
+    );
+    await tester.pumpAndSettle();
+    expect(fixture.wire.closed, true);
+    expect(find.byType(SshTerminalView), findsNothing);
+    expect(find.text('Connection'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+  testWidgets(
+    'macOS terminal handles native text, composition, Command paste and toolbar focus',
+    (tester) async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+      addTearDown(() => debugDefaultTargetPlatformOverride = null);
+      final fixture = TerminalFixture();
+      await fixture.start();
+      addTearDown(() async {
+        await tester.pumpWidget(const SizedBox());
+        await fixture.client.close();
+      });
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        SystemChannels.platform,
+        (call) async =>
+            call.method == 'Clipboard.getData' ? {'text': 'whoami'} : null,
+      );
+      addTearDown(
+        () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+          SystemChannels.platform,
+          null,
+        ),
+      );
+      await tester.pumpWidget(
+        MaterialApp(
+          home: SshTerminalView(client: fixture.client, title: 'macOS'),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final input = find.byKey(const Key('ssh-terminal-input'));
+      expect(tester.widget<TextField>(input).focusNode!.hasFocus, true);
+      // macOS sends printable text through its native text input connection.
+      await tester.sendKeyEvent(LogicalKeyboardKey.keyL, character: 'l');
+      expect(fixture.inputs, isEmpty);
+      tester.testTextInput.updateEditingValue(
+        const TextEditingValue(
+          text: ' l',
+          selection: TextSelection.collapsed(offset: 2),
+        ),
+      );
+      tester.testTextInput.updateEditingValue(
+        const TextEditingValue(
+          text: ' s',
+          selection: TextSelection.collapsed(offset: 2),
+        ),
+      );
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pumpAndSettle();
+      expect(
+        utf8.decode(fixture.inputs.expand((bytes) => bytes).toList()),
+        'ls\r',
+      );
+      fixture.inputs.clear();
+      tester.testTextInput.updateEditingValue(
+        const TextEditingValue(
+          text: ' я',
+          selection: TextSelection.collapsed(offset: 2),
+          composing: TextRange(start: 1, end: 2),
+        ),
+      );
+      expect(fixture.inputs, isEmpty);
+      tester.testTextInput.updateEditingValue(
+        const TextEditingValue(
+          text: ' я',
+          selection: TextSelection.collapsed(offset: 2),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(
+        utf8.decode(fixture.inputs.expand((bytes) => bytes).toList()),
+        'я',
+      );
+      fixture.inputs.clear();
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+      await tester.sendKeyEvent(LogicalKeyboardKey.keyV);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+      await tester.pumpAndSettle();
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pumpAndSettle();
+      expect(
+        utf8.decode(fixture.inputs.expand((bytes) => bytes).toList()),
+        'whoami\r',
+      );
+      fixture.inputs.clear();
+      await tester.tap(find.byTooltip('Paste'));
+      await tester.pumpAndSettle();
+      expect(tester.widget<TextField>(input).focusNode!.hasFocus, true);
+      tester.testTextInput.updateEditingValue(
+        const TextEditingValue(
+          text: ' x',
+          selection: TextSelection.collapsed(offset: 2),
+        ),
+      );
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pumpAndSettle();
+      expect(
+        utf8.decode(fixture.inputs.expand((bytes) => bytes).toList()),
+        'whoamix\r',
+      );
+      debugDefaultTargetPlatformOverride = null;
+    },
+  );
+  testWidgets(
+    'Windows terminal accepts physical typing and paste after toolbar focus',
+    (tester) async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.windows;
+      addTearDown(() => debugDefaultTargetPlatformOverride = null);
+      final fixture = TerminalFixture();
+      await fixture.start();
+      addTearDown(() async {
+        await tester.pumpWidget(const SizedBox());
+        await fixture.client.close();
+      });
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        SystemChannels.platform,
+        (call) async =>
+            call.method == 'Clipboard.getData' ? {'text': 'whoami'} : null,
+      );
+      addTearDown(
+        () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+          SystemChannels.platform,
+          null,
+        ),
+      );
+      await tester.pumpWidget(
+        MaterialApp(
+          home: SshTerminalView(client: fixture.client, title: 'Windows'),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('ssh-terminal-screen')));
+      await tester.sendKeyEvent(LogicalKeyboardKey.keyL, character: 'l');
+      await tester.sendKeyEvent(LogicalKeyboardKey.keyS, character: 's');
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pumpAndSettle();
+      expect(
+        utf8.decode(fixture.inputs.expand((bytes) => bytes).toList()),
+        'ls\r',
+      );
+      fixture.inputs.clear();
+      await tester.tap(find.byTooltip('Paste'));
+      await tester.pumpAndSettle();
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pumpAndSettle();
+      expect(
+        utf8.decode(fixture.inputs.expand((bytes) => bytes).toList()),
+        'whoami\r',
+      );
+      fixture.inputs.clear();
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+      await tester.sendKeyEvent(LogicalKeyboardKey.keyV);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+      await tester.pumpAndSettle();
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pumpAndSettle();
+      expect(
+        utf8.decode(fixture.inputs.expand((bytes) => bytes).toList()),
+        'whoami\r',
+      );
+      fixture.inputs.clear();
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.shiftLeft);
+      await tester.sendKeyEvent(LogicalKeyboardKey.insert);
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.shiftLeft);
+      await tester.pumpAndSettle();
+      expect(
+        utf8.decode(fixture.inputs.expand((bytes) => bytes).toList()),
+        'whoami',
+      );
+      fixture.inputs.clear();
+      await tester.tap(find.text('Tab'));
+      await tester.pumpAndSettle();
+      await tester.sendKeyEvent(LogicalKeyboardKey.keyZ, character: 'я');
+      await tester.sendKeyEvent(LogicalKeyboardKey.space, character: ' ');
+      await tester.pumpAndSettle();
+      expect(
+        utf8.decode(fixture.inputs.expand((bytes) => bytes).toList()),
+        '\tя ',
+      );
+      fixture.inputs.clear();
+      await tester.tap(find.text('Ctrl'));
+      await tester.pumpAndSettle();
+      await tester.sendKeyEvent(LogicalKeyboardKey.keyC, character: 'c');
+      await tester.pumpAndSettle();
+      expect(fixture.inputs, [
+        [3],
+      ]);
+      debugDefaultTargetPlatformOverride = null;
+    },
+  );
   testWidgets(
     'phone terminal: text, special keys, paste, selection, resize and exit',
     (tester) async {

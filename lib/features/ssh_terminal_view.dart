@@ -55,6 +55,7 @@ class _SshTerminalViewState extends State<SshTerminalView>
       onBell: () {},
     );
     _input.selection = const TextSelection.collapsed(offset: 1);
+    _input.addListener(_inputChanged);
   }
 
   void _redraw() {
@@ -116,6 +117,7 @@ class _SshTerminalViewState extends State<SshTerminalView>
                   ? 'Terminal closed'
                   : 'Shell exited: ${result.exitStatus}';
             });
+            unawaited(_disconnectAndReturn());
           },
           onError: (Object e) {
             if (mounted) {
@@ -175,6 +177,16 @@ class _SshTerminalViewState extends State<SshTerminalView>
     });
   }
 
+  Future<void> _disconnectAndReturn() async {
+    final closing = widget.client.close();
+    if (!mounted) return;
+    final route = ModalRoute.of(context);
+    if (route?.isCurrent == true && Navigator.of(context).canPop()) {
+      Navigator.of(context).pop();
+    }
+    await closing;
+  }
+
   void _send(List<int> bytes) {
     if (_channel == null || _closed || bytes.isEmpty) return;
     _scroll = 0;
@@ -200,6 +212,10 @@ class _SshTerminalViewState extends State<SshTerminalView>
       );
     }
   }
+
+  // Composition can finish without changing the text, so onChanged alone
+  // misses the commit. Observe the complete editing value instead.
+  void _inputChanged() => _text(_input.text);
 
   void _text(String text) {
     if (_resetting ||
@@ -245,6 +261,10 @@ class _SshTerminalViewState extends State<SshTerminalView>
       return KeyEventResult.ignored;
     }
     final key = event.logicalKey, keyboard = HardwareKeyboard.instance;
+    if (keyboard.isShiftPressed && key == LogicalKeyboardKey.insert) {
+      _paste();
+      return KeyEventResult.handled;
+    }
     if ((keyboard.isControlPressed || keyboard.isMetaPressed) &&
         keyboard.isShiftPressed) {
       if (key == LogicalKeyboardKey.keyC) {
@@ -357,6 +377,21 @@ class _SshTerminalViewState extends State<SshTerminalView>
       if (_control) setState(() => _control = false);
       return KeyEventResult.handled;
     }
+    // Windows can stop forwarding printable keys to the hidden text input
+    // after focus changes. Send physical characters directly, while leaving
+    // composed input to the text input connection.
+    final character = event.character;
+    if (defaultTargetPlatform == TargetPlatform.windows &&
+        !keyboard.isControlPressed &&
+        !keyboard.isMetaPressed &&
+        !keyboard.isAltPressed &&
+        _input.value.composing.isCollapsed &&
+        character != null &&
+        character.isNotEmpty &&
+        !character.runes.any((rune) => rune < 0x20 || rune == 0x7f)) {
+      _send(utf8.encode(character));
+      return KeyEventResult.handled;
+    }
     return KeyEventResult.ignored;
   }
 
@@ -371,6 +406,7 @@ class _SshTerminalViewState extends State<SshTerminalView>
     _firstLine + (offset.dy / _cellHeight).floor().clamp(0, screen.rows - 1),
   );
   Future<void> _copy() async {
+    _focus.requestFocus();
     final all = _allLines;
     final a = _selectionStart, b = _selectionEnd;
     String value;
@@ -402,6 +438,7 @@ class _SshTerminalViewState extends State<SshTerminalView>
   }
 
   Future<void> _paste() async {
+    _focus.requestFocus();
     final value = await Clipboard.getData(Clipboard.kTextPlain);
     if (!mounted || _closed || value?.text == null) return;
     if (utf8.encode(value!.text!).length > 65536) {
@@ -439,6 +476,7 @@ class _SshTerminalViewState extends State<SshTerminalView>
     _resizeTimer?.cancel();
     unawaited(_channel?.cancel());
     _pendingReplies.clear();
+    _input.removeListener(_inputChanged);
     _input.clear();
     _input.dispose();
     _focus.dispose();
@@ -446,7 +484,12 @@ class _SshTerminalViewState extends State<SshTerminalView>
   }
 
   Widget _button(String label, String value) => TextButton(
-    onPressed: _closed ? null : () => _send(utf8.encode(value)),
+    onPressed: _closed
+        ? null
+        : () {
+            _focus.requestFocus();
+            _send(utf8.encode(value));
+          },
     child: Text(label),
   );
   @override
@@ -549,7 +592,6 @@ class _SshTerminalViewState extends State<SshTerminalView>
                               key: const Key('ssh-terminal-input'),
                               controller: _input,
                               focusNode: _focus,
-                              onChanged: _text,
                               enabled: !_closed,
                               autocorrect: false,
                               enableSuggestions: false,
@@ -586,7 +628,10 @@ class _SshTerminalViewState extends State<SshTerminalView>
               TextButton(
                 onPressed: _closed
                     ? null
-                    : () => setState(() => _control = !_control),
+                    : () {
+                        _focus.requestFocus();
+                        setState(() => _control = !_control);
+                      },
                 child: Text(_control ? 'Ctrl ●' : 'Ctrl'),
               ),
               _button('Esc', '\x1b'),
