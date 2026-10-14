@@ -130,13 +130,18 @@ class RequestStorage {
 
   Future<RequestEntry> create(String folder, HttpRequestFile request) async {
     request.validate();
-    final relative = [
-      if (folder.trim().isNotEmpty) folder,
-      '${safeName(request.name)}.json',
-    ].join('/');
-    final path = _requestPath(relative);
-    if (await store.exists(path)) {
-      throw StateError('Request already exists: $relative');
+    final stem = safeName(request.name);
+    var suffix = 1;
+    String relative;
+    String path;
+    while (true) {
+      relative = [
+        if (folder.trim().isNotEmpty) folder,
+        '$stem${suffix == 1 ? '' : '-$suffix'}.json',
+      ].join('/');
+      path = _requestPath(relative);
+      if (!await store.exists(path)) break;
+      suffix++;
     }
     await store.validateRegularFilePath(path);
     await store.createDirectory(_folder(folder));

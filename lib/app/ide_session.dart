@@ -80,6 +80,20 @@ class IdeSession {
   final List<String> output = [];
   final List<String> errors = [];
   final List<String> recentWorkspaces = [];
+  final Set<String> hiddenProjects = {};
+  static String projectKey(Uri root) =>
+      root.toString().replaceAll(RegExp(r'/+$'), '');
+
+  Future<void> forgetProject(Uri root) async {
+    final key = projectKey(root);
+    recentWorkspaces.removeWhere(
+      (value) => projectKey(Uri.parse(value)) == key,
+    );
+    hiddenProjects.add(key);
+    changed(persist: false);
+    await persistNow();
+  }
+
   Uri? workspaceRoot;
   final List<Uri> additionalWorkspaceRoots = [];
   List<Uri> get workspaceRoots => [?workspaceRoot, ...additionalWorkspaceRoots];
@@ -457,6 +471,7 @@ class IdeSession {
     recentWorkspaces
       ..remove(root.toString())
       ..insert(0, root.toString());
+    hiddenProjects.remove(projectKey(root));
     if (recentWorkspaces.length > 10) recentWorkspaces.removeLast();
 
     workspaceHasGit = git.available && await git.isRepository(root);
@@ -653,6 +668,9 @@ class IdeSession {
         data['recentWorkspaces'] ?? [],
         'recentWorkspaces',
       );
+      hiddenProjects.addAll(
+        stringList(data['hiddenProjects'] ?? [], 'hiddenProjects'),
+      );
       final folders = stringList(
         data['workspaceFolders'] ?? [],
         'workspaceFolders',
@@ -666,7 +684,6 @@ class IdeSession {
       }
       final active = data['activeIndex'];
       String? restoredActive;
-      final pendingImageReloads = <OpenDocument>[];
       for (var i = 0; i < normalized.length; i++) {
         final d = normalized[i];
         if (_isLegacyExample(d)) continue;
@@ -684,16 +701,10 @@ class IdeSession {
           kind: kind,
         );
         observe(doc);
-        if (kind == DocumentKind.image && doc.uri != null) {
-          pendingImageReloads.add(doc);
-        }
         if (i == active) restoredActive = doc.id;
       }
       if (restoredActive != null) documents.activeId = restoredActive;
       recentWorkspaces.addAll(recent.take(10));
-      for (final doc in pendingImageReloads) {
-        unawaited(_reloadImageBytes(doc));
-      }
     });
     log('Foundation ready · API v1');
     if (recentWorkspaces.isNotEmpty) {
@@ -733,17 +744,34 @@ class IdeSession {
         );
       }
     }
-  }
-
-  Future<void> _reloadImageBytes(OpenDocument doc) async {
-    final uri = doc.uri;
-    if (uri == null || doc.kind != DocumentKind.image) return;
-    try {
-      doc.bytes = await documents.files.readBytes(uri);
-      changed(persist: false);
-    } catch (error) {
-      log('Could not reload image ${doc.name}: $error', error: true);
+    // Restore filesystem access before checking saved tabs (including images).
+    var repaired = false;
+    for (final doc in documents.documents.toList()) {
+      final uri = doc.uri;
+      if (uri == null) continue;
+      try {
+        if (doc.kind == DocumentKind.image) {
+          doc.bytes = await documents.files.readBytes(uri);
+        } else {
+          await documents.files.read(uri);
+        }
+      } catch (error) {
+        repaired = true;
+        if (doc.dirty) {
+          // Keep recovered edits, but require Save As instead of recreating a
+          // deleted file or its former project directory on the next save.
+          doc.uri = null;
+          doc.savedText = null;
+          log('Recovered unsaved changes from unavailable file $uri: $error');
+        } else {
+          await _subscriptions.remove(doc.id)?.cancel();
+          await documents.close(doc);
+          log('Closed unavailable file $uri: $error');
+        }
+      }
     }
+    if (repaired) await persistNow();
+    changed(persist: false);
   }
 
   Future<void> persistNow() {
@@ -772,6 +800,7 @@ class IdeSession {
           (d) => d.id == documents.activeId,
         ),
         'recentWorkspaces': recentWorkspaces,
+        'hiddenProjects': hiddenProjects.toList(),
         'workspaceFolders': [
           for (final root in additionalWorkspaceRoots) root.toString(),
         ],

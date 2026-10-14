@@ -1,12 +1,20 @@
 import 'dart:async';
+import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:tamtoot/app/ide_session.dart';
 import 'package:tamtoot/core/filesystem/filesystem.dart';
+import 'package:tamtoot/core/git/git_service.dart';
 import 'package:tamtoot/workspace/documents/document_service.dart';
 import 'support.dart';
 
 class CancelDialogs extends FakeDialogs {
   @override
   Future<Uri?> save(String name, String content) async => null;
+}
+
+class UnavailableGit extends Fake implements GitService {
+  @override
+  bool get available => false;
 }
 
 class DelayedFiles extends MemoryFileSystem {
@@ -19,6 +27,115 @@ class DelayedFiles extends MemoryFileSystem {
 }
 
 void main() {
+  test(
+    'forgetting a project persists its removal without closing documents',
+    () async {
+      final store = MemoryStore();
+      final session = await testSession(store: store);
+      final directory = await Directory.systemTemp.createTemp('tamtoot-forget-');
+      addTearDown(() => directory.delete(recursive: true));
+      final root = directory.uri;
+      session.recentWorkspaces.add(root.toString());
+      final doc = session.documents.create('draft.dart', 'unsaved');
+      await session.forgetProject(Uri.parse(IdeSession.projectKey(root)));
+      expect(session.recentWorkspaces, isEmpty);
+      expect(session.documents.active, same(doc));
+      final restored = await testSession(store: store, git: UnavailableGit());
+      expect(restored.recentWorkspaces, isEmpty);
+      expect(restored.hiddenProjects, contains(IdeSession.projectKey(root)));
+      await restored.openWorkspaceFolder(root);
+      expect(restored.hiddenProjects, isEmpty);
+      expect(restored.recentWorkspaces, [root.toString()]);
+      await session.dispose();
+      await restored.dispose();
+    },
+  );
+  test(
+    'restore removes unavailable tabs and persists the repaired session',
+    () async {
+      final store = MemoryStore();
+      final files = MemoryFileSystem();
+      final first = await testSession(store: store, files: files);
+      final kept = Uri.parse('memory:///project/kept.dart');
+      final removed = Uri.parse('memory:///project/removed.dart');
+      final moved = Uri.parse('memory:///project/moved.dart');
+      files.files.addAll({kept: 'kept', removed: 'removed', moved: 'moved'});
+      for (final uri in [kept, removed, moved]) {
+        first.observe(
+          await first.documents.open(FileEntry(uri, uri.pathSegments.last)),
+        );
+      }
+      await first.persistNow();
+      files.files.remove(removed);
+      files.files[Uri.parse('memory:///elsewhere/moved.dart')] = files.files
+          .remove(moved)!;
+
+      final restored = await testSession(store: store, files: files);
+      expect(restored.documents.documents.map((doc) => doc.uri), [kept]);
+      expect(restored.documents.active!.uri, kept);
+      final again = await testSession(store: store, files: files);
+      expect(again.documents.documents.map((doc) => doc.uri), [kept]);
+      expect(
+        again.output.any((line) => line.contains('Closed unavailable file')),
+        false,
+      );
+      await first.dispose();
+      await restored.dispose();
+      await again.dispose();
+    },
+  );
+
+  test('restore keeps edits from missing files as unsaved drafts', () async {
+    final store = MemoryStore();
+    final files = MemoryFileSystem();
+    final first = await testSession(store: store, files: files);
+    final uri = Uri.parse('memory:///deleted-project/edited.dart');
+    files.files[uri] = 'saved';
+    final doc = await first.documents.open(FileEntry(uri, 'edited.dart'));
+    first.observe(doc);
+    doc.editor.replaceSelection('edit');
+    final recoveredText = doc.editor.text;
+    first.observe(first.documents.create('draft.dart', 'draft'));
+    first.documents.activeId = doc.id;
+    await first.persistNow();
+    files.files.clear();
+
+    final restored = await testSession(store: store, files: files);
+    expect(restored.documents.documents.length, 2);
+    expect(restored.documents.active!.name, 'edited.dart');
+    expect(restored.documents.active!.editor.text, recoveredText);
+    expect(restored.documents.active!.uri, isNull);
+    expect(restored.documents.active!.dirty, true);
+    expect(files.files, isEmpty);
+    await first.dispose();
+    await restored.dispose();
+  });
+
+  test(
+    'restore removes missing images and reloads available image bytes',
+    () async {
+      final store = MemoryStore();
+      final files = MemoryFileSystem();
+      final first = await testSession(store: store, files: files);
+      final kept = Uri.parse('memory:///kept.png');
+      final removed = Uri.parse('memory:///removed.png');
+      files.files.addAll({kept: 'image', removed: 'image'});
+      for (final uri in [kept, removed]) {
+        first.observe(
+          await first.documents.open(FileEntry(uri, uri.pathSegments.last)),
+        );
+      }
+      await first.persistNow();
+      files.files.remove(removed);
+      final restored = await testSession(store: store, files: files);
+      expect(restored.documents.documents.length, 1);
+      expect(restored.documents.active!.uri, kept);
+      expect(restored.documents.active!.bytes, 'image'.codeUnits);
+      await first.dispose();
+      await restored.dispose();
+    },
+  );
+
   test(
     'session recovers unsaved content, active tab, settings and layout',
     () async {

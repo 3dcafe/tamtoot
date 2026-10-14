@@ -207,6 +207,7 @@ class _IdeShellState extends ConsumerState<IdeShell> {
     ],
     'Git': ['git.changes', 'git.clone'],
     'Tools': [
+      'ssh.connections',
       'requests.open',
       'agent.open',
       'agent.kanban',
@@ -329,6 +330,7 @@ class _IdeShellState extends ConsumerState<IdeShell> {
   }
 
   Widget _menuItem(String title, List<String> ids) => PopupMenuButton<String>(
+    popUpAnimationStyle: AnimationStyle.noAnimation,
     tooltip: title,
     onSelected: (id) {
       if (id == '—') return;
@@ -465,6 +467,8 @@ class _IdeShellState extends ConsumerState<IdeShell> {
         if (supportsFlutterTools)
           Flexible(child: ProjectLaunchBar(session: session)),
         Expanded(child: _pathBar()),
+        if (!kIsWeb)
+          action(Icons.dns_outlined, 'SSH connections', 'ssh.connections'),
         action(
           session.theme.dark
               ? Icons.light_mode_outlined

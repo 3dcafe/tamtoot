@@ -16,8 +16,17 @@ import 'explorer_test.dart' show IndicatorGit, RepositoryMemory;
 import 'support.dart';
 import 'language_syntax_test.dart' show loadLanguage;
 import 'package:tamtoot/core/filesystem/filesystem.dart';
+import 'package:tamtoot/platform/ssh_secrets/native_ssh_secrets.dart';
 
 void main() {
+  setUp(() {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(NativeSshSecrets.channel, (_) async => false);
+  });
+  tearDown(() {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(NativeSshSecrets.channel, null);
+  });
   for (final platform in [TargetPlatform.macOS, TargetPlatform.windows]) {
     testWidgets('shell menu uses shared commands on $platform', (tester) async {
       debugDefaultTargetPlatformOverride = platform;
@@ -54,6 +63,23 @@ void main() {
         await tester.tap(find.text('New document'));
         await tester.pumpAndSettle();
         expect(session.documents.active, isNotNull);
+        final fileMenu = tester.widget<PopupMenuButton<String>>(
+          find.byWidgetPredicate(
+            (widget) =>
+                widget is PopupMenuButton<String> && widget.tooltip == 'File',
+          ),
+        );
+        expect(fileMenu.popUpAnimationStyle, AnimationStyle.noAnimation);
+        await tester.tap(find.text('Tools'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('SSH connections…'));
+        await tester.pumpAndSettle();
+        expect(find.text('Add SSH profile'), findsOneWidget);
+        await tester.tap(find.text('Add SSH profile'));
+        await tester.pumpAndSettle();
+        expect(find.byType(TextField), findsWidgets);
+        await tester.tap(find.text('Cancel'));
+        await tester.pumpAndSettle();
       }
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox());

@@ -103,10 +103,12 @@ class ShellActions implements PresentationActions {
   }
 
   @override
-  Future<void> showSettings() => showDialog<void>(
-    context: context(),
-    builder: (ctx) => SettingsDialog(session: session),
-  );
+  Future<void> showSettings({String initialSection = 'appearance'}) =>
+      showDialog<void>(
+        context: context(),
+        builder: (ctx) =>
+            SettingsDialog(session: session, initialSection: initialSection),
+      );
   @override
   Future<void> showPrivacyPolicy() => showDialog<void>(
     context: context(),
@@ -280,8 +282,13 @@ class _CommandPaletteState extends State<CommandPalette> {
 }
 
 class SettingsDialog extends StatefulWidget {
-  const SettingsDialog({super.key, required this.session});
+  const SettingsDialog({
+    super.key,
+    required this.session,
+    this.initialSection = 'appearance',
+  });
   final IdeSession session;
+  final String initialSection;
   @override
   State<SettingsDialog> createState() => _SettingsDialogState();
 }
@@ -295,7 +302,7 @@ class _SettingsDialogState extends State<SettingsDialog> {
   late final TextEditingController font = TextEditingController(
     text: widget.session.settings.get('fontFamily') as String,
   );
-  String section = 'appearance';
+  late String section = widget.initialSection;
   Map<String, String> get sections => {
     'appearance': 'Appearance',
     'editor': 'Editor',
@@ -1389,8 +1396,17 @@ class _OpenProjectDialogState extends State<OpenProjectDialog> {
       byKey[keyFor(project.uri)] = project;
     }
 
-    final list = byKey.values.toList()
-      ..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+    final list =
+        byKey.values
+            .where(
+              (project) => !widget.session.hiddenProjects.contains(
+                IdeSession.projectKey(project.uri),
+              ),
+            )
+            .toList()
+          ..sort(
+            (a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()),
+          );
     return list;
   }
 
@@ -1483,6 +1499,14 @@ class _OpenProjectDialogState extends State<OpenProjectDialog> {
                     overflow: TextOverflow.ellipsis,
                   ),
                   onTap: () => unawaited(_open(project)),
+                  trailing: IconButton(
+                    tooltip: 'Remove from list',
+                    icon: const Icon(Icons.close),
+                    onPressed: () async {
+                      await widget.session.forgetProject(project.uri);
+                      if (mounted) setState(() => _projects = _load());
+                    },
+                  ),
                 );
               },
             );

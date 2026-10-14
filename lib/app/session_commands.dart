@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import '../core/commands/commands.dart';
 import '../core/flutter/flutter_runner.dart';
 import '../core/projects/project_detection.dart';
@@ -13,7 +14,7 @@ abstract interface class PresentationActions {
   Future<void> writeClipboard(String value);
   Future<bool> confirmDiscard(String name);
   Future<void> showCommands();
-  Future<void> showSettings();
+  Future<void> showSettings({String initialSection = 'appearance'});
   Future<void> showLanguagePackageInstaller();
   Future<void> showCloneRepository();
   Future<void> showGitChanges();
@@ -449,6 +450,12 @@ void registerSessionCommands(IdeSession s, PresentationActions ui) {
   );
   add('view.commands', 'Command palette', (_) => ui.showCommands());
   add('settings.open', 'Settings', (_) => ui.showSettings());
+  add(
+    'ssh.connections',
+    'SSH connections…',
+    (_) => ui.showSettings(initialSection: 'ssh'),
+    visible: () => !kIsWeb,
+  );
   add('help.privacy', 'Privacy Policy', (_) => ui.showPrivacyPolicy());
   add(
     'extensions.manage',

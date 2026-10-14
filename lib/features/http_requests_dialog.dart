@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import '../app/ide_session.dart';
 import '../core/git/http_git_service.dart';
 import '../core/requests/http_request.dart';
+import '../core/requests/curl_import.dart';
 import '../core/requests/request_executor.dart';
 import '../core/requests/request_storage.dart';
 
@@ -253,34 +254,131 @@ class _HttpRequestsDialogState extends State<HttpRequestsDialog> {
     if (path == activePath || !await _confirmLose()) return;
     try {
       final request = await storage.read(path);
-      for (final item in [...headers, ...query]) {
-        item.dispose();
-      }
-      headers
-        ..clear()
-        ..addAll(request.headers.map(_KvDraft.from));
-      query
-        ..clear()
-        ..addAll(request.query.map(_KvDraft.from));
-      name.text = request.name;
-      url.text = request.url;
-      body.text = request.body.type == 'json'
-          ? const JsonEncoder.withIndent('  ').convert(request.body.value)
-          : request.body.value?.toString() ?? '';
-      setState(() {
-        activePath = path;
-        compactEditorVisible = true;
-        method = request.method;
-        bodyType = request.body.type;
-        authMode = request.auth.mode;
-        authToken = request.auth.token;
-        attachments = request.attachments;
-        dirty = false;
-        feedback = null;
-        results = const [];
-      });
+      _applyRequest(request, path);
     } catch (e) {
       setState(() => feedback = '$e');
+    }
+  }
+
+  void _applyRequest(
+    HttpRequestFile request,
+    String path, {
+    bool imported = false,
+  }) {
+    for (final item in [...headers, ...query]) {
+      item.dispose();
+    }
+    headers
+      ..clear()
+      ..addAll(request.headers.map(_KvDraft.from));
+    query
+      ..clear()
+      ..addAll(request.query.map(_KvDraft.from));
+    name.text = request.name;
+    url.text = request.url;
+    body.text = request.body.type == 'json'
+        ? const JsonEncoder.withIndent('  ').convert(request.body.value)
+        : request.body.value?.toString() ?? '';
+    setState(() {
+      activePath = path;
+      compactEditorVisible = true;
+      method = request.method;
+      bodyType = request.body.type;
+      authMode = request.auth.mode;
+      authToken = request.auth.token;
+      attachments = request.attachments;
+      dirty = imported;
+      feedback = imported
+          ? 'Imported from cURL. Review and save the request.'
+          : null;
+      results = const [];
+    });
+  }
+
+  Future<void> _importCurl() async {
+    if (busy || !await _confirmLose() || !mounted) return;
+    var source = '', title = 'Imported request';
+    String? error;
+    final request = await showDialog<HttpRequestFile>(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, update) => AlertDialog(
+          title: const Text('Import cURL'),
+          content: SizedBox(
+            width: 600,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextFormField(
+                    initialValue: title,
+                    decoration: const InputDecoration(
+                      labelText: 'Request name',
+                    ),
+                    onChanged: (value) => title = value,
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    autofocus: true,
+                    minLines: 4,
+                    maxLines: 10,
+                    decoration: const InputDecoration(
+                      labelText: 'cURL command',
+                      hintText:
+                          "curl 'https://example.com/api' -H 'Accept: application/json'",
+                    ),
+                    onChanged: (value) => source = value,
+                  ),
+                  if (error != null)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 12),
+                      child: Text(
+                        error!,
+                        style: TextStyle(
+                          color: Theme.of(context).colorScheme.error,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () {
+                try {
+                  final parsed = importCurl(source, name: title.trim());
+                  Navigator.pop(dialogContext, parsed);
+                } catch (e) {
+                  update(() => error = '$e');
+                }
+              },
+              child: const Text('Import'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (request == null || !mounted) return;
+    setState(() => busy = true);
+    try {
+      final entry = await storage.create(
+        '',
+        HttpRequestFile(name: request.name),
+      );
+      final loaded = await storage.list();
+      if (!mounted) return;
+      setState(() => entries = loaded);
+      _applyRequest(request, entry.path, imported: true);
+      await widget.session.refreshGitIndicators();
+    } catch (e) {
+      if (mounted) setState(() => feedback = '$e');
+    } finally {
+      if (mounted) setState(() => busy = false);
     }
   }
 
@@ -379,16 +477,25 @@ class _HttpRequestsDialogState extends State<HttpRequestsDialog> {
   }
 
   Future<void> _newRequest() async {
+    if (busy || !await _confirmLose() || !mounted) return;
     final value = await _ask('New Request (folder/name)', initial: 'request');
-    if (value == null || value.isEmpty) return;
+    if (value == null || value.isEmpty || !mounted) return;
     final slash = value.lastIndexOf('/');
     final folder = slash < 0 ? '' : value.substring(0, slash);
     final title = slash < 0 ? value : value.substring(slash + 1);
+    setState(() => busy = true);
     try {
       final entry = await storage.create(folder, HttpRequestFile(name: title));
-      await _load(entry.path);
+      final loaded = await storage.list();
+      final request = await storage.read(entry.path);
+      if (!mounted) return;
+      setState(() => entries = loaded);
+      _applyRequest(request, entry.path);
+      await widget.session.refreshGitIndicators();
     } catch (e) {
-      setState(() => feedback = '$e');
+      if (mounted) setState(() => feedback = '$e');
+    } finally {
+      if (mounted) setState(() => busy = false);
     }
   }
 
@@ -1290,9 +1397,14 @@ class _HttpRequestsDialogState extends State<HttpRequestsDialog> {
                   runSpacing: 6,
                   children: [
                     FilledButton.tonalIcon(
-                      onPressed: _newRequest,
+                      onPressed: busy ? null : _newRequest,
                       icon: const Icon(Icons.add),
                       label: const Text('New Request'),
+                    ),
+                    TextButton.icon(
+                      onPressed: busy ? null : _importCurl,
+                      icon: const Icon(Icons.download_outlined),
+                      label: const Text('Import cURL'),
                     ),
                     TextButton.icon(
                       onPressed: _newFolder,

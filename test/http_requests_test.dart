@@ -61,6 +61,45 @@ class _ConcurrencyTransport implements RequestHttpTransport {
 
 void main() {
   test(
+    'creating several requests with colliding names keeps every request',
+    () async {
+      final directory = await Directory.systemTemp.createTemp(
+        'tamtoot-multiple-requests-',
+      );
+      addTearDown(() => directory.delete(recursive: true));
+      final storage = RequestStorage(FileGitRepositoryStore(directory));
+      final created = <RequestEntry>[];
+      for (final name in [
+        'request',
+        'request',
+        'Первый запрос',
+        'Второй запрос',
+        'Imported request',
+        'Imported request',
+      ]) {
+        created.add(
+          await storage.create(
+            '',
+            HttpRequestFile(
+              name: name,
+              url: 'https://example.com/${created.length}',
+            ),
+          ),
+        );
+      }
+      expect(created.map((entry) => entry.path).toSet().length, 6);
+      final listed = await storage.list();
+      expect(listed.length, 6);
+      for (var i = 0; i < created.length; i++) {
+        final request = await storage.read(created[i].path);
+        expect(request.name, created[i].name);
+        expect(request.url, 'https://example.com/$i');
+      }
+      final reopened = RequestStorage(FileGitRepositoryStore(directory));
+      expect((await reopened.list()).length, 6);
+    },
+  );
+  test(
     'request files, Markdown, folders and environments round-trip',
     () async {
       final directory = await Directory.systemTemp.createTemp(

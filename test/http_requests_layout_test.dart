@@ -1,9 +1,11 @@
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:tamtoot/core/git/git_http.dart';
 import 'package:tamtoot/core/git/http_git_service.dart';
+import 'package:tamtoot/core/git/git_store.dart';
 import 'package:tamtoot/features/http_requests_dialog.dart';
 import 'package:tamtoot/platform/git_service_io.dart';
 import 'package:tamtoot/platform/git_shared.dart';
@@ -34,7 +36,139 @@ HttpGitService _fileGit() => HttpGitService(
   deflate: sharedDeflate,
 );
 
+class _RequestStore extends GitRepositoryStore {
+  final files = <String, Uint8List>{};
+  final directories = <String>{};
+  @override
+  Future<bool> exists(String path) async =>
+      files.containsKey(path) || directories.contains(path);
+  @override
+  Future<Uint8List> readBytes(String path) async => files[path]!;
+  @override
+  Future<void> writeBytes(String path, List<int> bytes) async {
+    files[path] = Uint8List.fromList(bytes);
+  }
+
+  @override
+  Future<void> delete(String path) async {
+    files.remove(path);
+  }
+
+  @override
+  Future<void> createDirectory(String path) async {
+    directories.add(path);
+  }
+
+  @override
+  Future<List<String>> listFiles(String dir) async => files.keys
+      .where((path) => dir.isEmpty || path.startsWith('$dir/'))
+      .toList();
+}
+
 void main() {
+  for (final width in [1400.0, 430.0]) {
+    testWidgets('creating multiple requests updates the list at width $width', (
+      tester,
+    ) async {
+      await tester.binding.setSurfaceSize(Size(width, 1000));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final store = _RequestStore();
+      final git = HttpGitService(
+        transport: _NoHttpTransport(),
+        openStore: (_) => store,
+        inflateAt: sharedInflateAt,
+        deflate: sharedDeflate,
+      );
+      final session = await testSession(git: git);
+      session.workspaceRoot = Uri.parse('file:///test-project/');
+
+      Future<void> flush() async {
+        await tester.pumpAndSettle();
+      }
+
+      Widget manager(String key) => MaterialApp(
+        home: Scaffold(
+          body: HttpRequestsDialog(key: ValueKey(key), session: session),
+        ),
+      );
+      await tester.pumpWidget(manager('first'));
+      await flush();
+      var count = 0;
+      for (final title in [
+        'request',
+        'request',
+        'Первый запрос',
+        'Второй запрос',
+      ]) {
+        await tester.tap(find.text('New Request'));
+        await tester.pumpAndSettle();
+        await tester.enterText(find.byType(TextFormField), title);
+        await tester.tap(find.text('OK'));
+        await flush();
+        count++;
+        if (width >= 720) {
+          final nameField = tester.widget<TextField>(
+            find.byWidgetPredicate(
+              (widget) =>
+                  widget is TextField && widget.decoration?.labelText == 'Name',
+            ),
+          );
+          expect(nameField.controller!.text, title);
+        }
+        if (width < 720) {
+          await tester.tap(find.text('Requests'));
+          await tester.pumpAndSettle();
+        }
+        if (width >= 720) {
+          expect(find.byType(CheckboxListTile), findsNWidgets(count));
+        } else {
+          final path = count == 1 ? 'request.json' : 'request-$count.json';
+          await tester.scrollUntilVisible(find.text(path), 80);
+          expect(find.text(path), findsOneWidget);
+        }
+        expect(tester.takeException(), isNull);
+      }
+
+      // Reopening must show all saved requests, including colliding names.
+      await tester.pumpWidget(manager('reopened'));
+      await flush();
+      if (width >= 720) {
+        expect(find.byType(CheckboxListTile), findsNWidgets(4));
+        expect(find.text('request'), findsNWidgets(2));
+        expect(find.text('Второй запрос'), findsOneWidget);
+      } else {
+        await tester.scrollUntilVisible(find.text('request-4.json'), 80);
+        expect(find.text('Второй запрос'), findsOneWidget);
+      }
+      if (width < 720) {
+        await tester.scrollUntilVisible(find.text('Первый запрос'), -80);
+      }
+      expect(find.text('Первый запрос'), findsOneWidget);
+
+      // Cancelling a switch from a dirty request must not create a hidden file.
+      await tester.tap(find.text('Первый запрос'));
+      await flush();
+      await tester.enterText(
+        find.byWidgetPredicate(
+          (widget) =>
+              widget is TextField && widget.decoration?.labelText == 'URL',
+        ),
+        'https://example.com/unsaved',
+      );
+      await tester.tap(find.text('New Request'));
+      await tester.pumpAndSettle();
+      expect(find.text('Unsaved request'), findsOneWidget);
+      await tester.tap(find.text('Keep editing'));
+      await tester.pumpAndSettle();
+      expect(find.text('New Request (folder/name)'), findsNothing);
+      final savedEntries = await requestStorageFor(session).list();
+      expect(savedEntries.where((entry) => !entry.directory).length, 4);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.runAsync(session.dispose);
+    });
+  }
+
   testWidgets('HTTP requests dialog fits a narrow mobile viewport', (
     tester,
   ) async {
