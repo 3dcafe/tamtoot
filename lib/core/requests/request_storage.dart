@@ -235,14 +235,28 @@ class RequestStorage {
     );
   }
 
-  Future<RequestEntry> move(String path, String targetFolder) async {
-    final request = await read(path);
+  Future<RequestEntry> move(
+    String path,
+    String targetFolder, {
+    HttpRequestFile? updated,
+  }) async {
+    final stored = await read(path);
+    final request = updated ?? stored;
+    request.validate();
     final filename = path.split('/').last;
     final target = [
       if (targetFolder.trim().isNotEmpty) targetFolder,
       filename,
     ].join('/');
     final targetPath = _requestPath(target);
+    if (targetPath == _requestPath(path)) {
+      if (updated != null) await save(path, updated);
+      return RequestEntry(
+        path: path,
+        name: request.name,
+        method: request.method,
+      );
+    }
     if (await store.exists(targetPath)) {
       throw StateError('Request already exists: $target');
     }

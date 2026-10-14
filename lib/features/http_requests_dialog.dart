@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
 import '../app/ide_session.dart';
@@ -173,7 +174,8 @@ class _HttpRequestsDialogState extends State<HttpRequestsDialog> {
   late final RequestStorage storage;
   final name = TextEditingController(),
       url = TextEditingController(),
-      body = TextEditingController();
+      body = TextEditingController(),
+      requestFolder = TextEditingController();
   List<RequestEntry> entries = const [];
   final selected = <String>{};
   final headers = <_KvDraft>[], query = <_KvDraft>[];
@@ -199,6 +201,7 @@ class _HttpRequestsDialogState extends State<HttpRequestsDialog> {
     name.dispose();
     url.dispose();
     body.dispose();
+    requestFolder.dispose();
     for (final item in [...headers, ...query]) {
       item.dispose();
     }
@@ -275,6 +278,9 @@ class _HttpRequestsDialogState extends State<HttpRequestsDialog> {
       ..clear()
       ..addAll(request.query.map(_KvDraft.from));
     name.text = request.name;
+    requestFolder.text = path.contains('/')
+        ? path.substring(0, path.lastIndexOf('/'))
+        : '';
     url.text = request.url;
     body.text = request.body.type == 'json'
         ? const JsonEncoder.withIndent('  ').convert(request.body.value)
@@ -435,8 +441,19 @@ class _HttpRequestsDialogState extends State<HttpRequestsDialog> {
         authToken = '{{$key}}';
         request = _draft();
       }
-      await storage.save(activePath!, request);
+      final previousPath = activePath!;
+      final entry = await storage.move(
+        previousPath,
+        requestFolder.text.trim(),
+        updated: request,
+      );
+      if (!mounted) return;
       setState(() {
+        activePath = entry.path;
+        requestFolder.text = entry.path.contains('/')
+            ? entry.path.substring(0, entry.path.lastIndexOf('/'))
+            : '';
+        if (selected.remove(previousPath)) selected.add(entry.path);
         dirty = false;
         feedback = 'Saved $activePath';
       });
@@ -566,14 +583,36 @@ class _HttpRequestsDialogState extends State<HttpRequestsDialog> {
       setState(() => feedback = 'Create or select a request first.');
       return;
     }
-    final value = await _ask('Move to folder', initial: '');
+    final value = await _ask('Move to folder', initial: requestFolder.text);
     if (value == null) return;
+    await _moveToFolder(activePath!, value);
+  }
+
+  Future<void> _moveToFolder(String path, String folder) async {
+    if (busy) return;
+    if (path == activePath) {
+      setState(() {
+        requestFolder.text = folder;
+        dirty = true;
+      });
+      await _save();
+      return;
+    }
+    setState(() => busy = true);
     try {
-      final entry = await storage.move(activePath!, value);
-      dirty = false;
-      await _load(entry.path);
+      final entry = await storage.move(path, folder);
+      final loaded = await storage.list();
+      if (!mounted) return;
+      setState(() {
+        entries = loaded;
+        if (selected.remove(path)) selected.add(entry.path);
+        feedback = 'Moved to ${entry.path}';
+      });
+      await widget.session.refreshGitIndicators();
     } catch (e) {
-      setState(() => feedback = '$e');
+      if (mounted) setState(() => feedback = '$e');
+    } finally {
+      if (mounted) setState(() => busy = false);
     }
   }
 
@@ -1101,6 +1140,16 @@ class _HttpRequestsDialogState extends State<HttpRequestsDialog> {
           onChanged: (_) => _changed(),
           decoration: const InputDecoration(labelText: 'Name'),
         ),
+        TextField(
+          key: const Key('request-folder'),
+          controller: requestFolder,
+          onChanged: (_) => _changed(),
+          decoration: const InputDecoration(
+            labelText: 'Folder',
+            hintText: 'users/admin',
+            helperText: 'Leave empty for the requests root. Applied on Save.',
+          ),
+        ),
         _kv('Params', query),
         _kv('Headers', headers),
         ExpansionTile(
@@ -1232,8 +1281,33 @@ class _HttpRequestsDialogState extends State<HttpRequestsDialog> {
     );
   }
 
+  Widget _folderTarget(String folder, Widget child) => DragTarget<String>(
+    key: ValueKey('request-folder-drop-$folder'),
+    onWillAcceptWithDetails: (details) =>
+        !busy &&
+        entries.any(
+          (entry) =>
+              entry.path == details.data && !entry.directory && entry.valid,
+        ),
+    onAcceptWithDetails: (details) => _moveToFolder(details.data, folder),
+    builder: (context, candidates, rejected) => ColoredBox(
+      color: candidates.isEmpty
+          ? Colors.transparent
+          : Theme.of(context).colorScheme.secondaryContainer,
+      child: child,
+    ),
+  );
+
   Widget _requestList() => Column(
     children: [
+      _folderTarget(
+        '',
+        const ListTile(
+          dense: true,
+          leading: Icon(Icons.folder_open, size: 18),
+          title: Text('Requests root'),
+        ),
+      ),
       Row(
         children: [
           TextButton(
@@ -1258,26 +1332,33 @@ class _HttpRequestsDialogState extends State<HttpRequestsDialog> {
           itemBuilder: (_, index) {
             final entry = entries[index];
             if (entry.directory) {
-              return ListTile(
-                dense: true,
-                leading: const Icon(Icons.folder_outlined, size: 18),
-                title: Text(
-                  entry.name,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                subtitle: Text(
-                  entry.path,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
+              return _folderTarget(
+                entry.path.replaceFirst(RegExp(r'/+$'), ''),
+                ListTile(
+                  dense: true,
+                  leading: const Icon(Icons.folder_outlined, size: 18),
+                  title: Text(
+                    entry.name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  subtitle: Text(
+                    entry.path,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
                 ),
               );
             }
-            return GestureDetector(
+            final tile = GestureDetector(
               onSecondaryTapDown: (event) =>
                   _entryMenu(entry, event.globalPosition),
-              onLongPressStart: (event) =>
-                  _entryMenu(entry, event.globalPosition),
+              onLongPressStart:
+                  !kIsWeb &&
+                      (defaultTargetPlatform == TargetPlatform.android ||
+                          defaultTargetPlatform == TargetPlatform.iOS)
+                  ? null
+                  : (event) => _entryMenu(entry, event.globalPosition),
               child: CheckboxListTile(
                 dense: true,
                 value: selected.contains(entry.path),
@@ -1314,6 +1395,31 @@ class _HttpRequestsDialogState extends State<HttpRequestsDialog> {
                 ),
                 selected: activePath == entry.path,
               ),
+            );
+            final feedback = Material(
+              elevation: 4,
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: Text(entry.name),
+              ),
+            );
+            if (!kIsWeb &&
+                (defaultTargetPlatform == TargetPlatform.android ||
+                    defaultTargetPlatform == TargetPlatform.iOS)) {
+              return LongPressDraggable<String>(
+                key: ValueKey('request-drag-${entry.path}'),
+                data: entry.path,
+                maxSimultaneousDrags: busy || !entry.valid ? 0 : 1,
+                feedback: feedback,
+                child: tile,
+              );
+            }
+            return Draggable<String>(
+              key: ValueKey('request-drag-${entry.path}'),
+              data: entry.path,
+              maxSimultaneousDrags: busy || !entry.valid ? 0 : 1,
+              feedback: feedback,
+              child: tile,
             );
           },
         ),

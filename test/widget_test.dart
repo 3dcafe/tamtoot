@@ -19,6 +19,78 @@ import 'package:tamtoot/core/filesystem/filesystem.dart';
 import 'package:tamtoot/platform/ssh_secrets/native_ssh_secrets.dart';
 
 void main() {
+  for (final platform in [
+    TargetPlatform.windows,
+    TargetPlatform.macOS,
+    TargetPlatform.linux,
+  ]) {
+    testWidgets('native file drops open editable tabs on $platform', (
+      tester,
+    ) async {
+      debugDefaultTargetPlatformOverride = platform;
+      addTearDown(() => debugDefaultTargetPlatformOverride = null);
+      await tester.binding.setSurfaceSize(const Size(1280, 900));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final windows = platform == TargetPlatform.windows;
+      final path = windows
+          ? r'C:\work\hello world.dart'
+          : '/work/hello world.dart';
+      final other = windows ? r'C:\work\other.dart' : '/work/other.dart';
+      final missing = windows ? r'C:\work\missing.dart' : '/work/missing.dart';
+      final files = MemoryFileSystem();
+      files.files[Uri.file(path, windows: windows)] = 'void main() {}';
+      files.files[Uri.file(other, windows: windows)] = 'other';
+      final session = await testSession(files: files);
+      final draft = session.documents.create('draft.dart', 'unsaved');
+      session.observe(draft);
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [sessionProvider.overrideWithValue(session)],
+          child: const TamtootApp(),
+        ),
+      );
+      await tester.pumpAndSettle();
+      Future<void> drop(List<String> paths) async {
+        final done = Completer<void>();
+        tester.binding.defaultBinaryMessenger.handlePlatformMessage(
+          'dev.tamtoot/file_drop',
+          const StandardMethodCodec().encodeMethodCall(
+            MethodCall('filesDropped', paths),
+          ),
+          (_) => done.complete(),
+        );
+        await done.future;
+        await tester.pumpAndSettle();
+      }
+
+      await drop([path]);
+      expect(session.documents.active!.name, 'hello world.dart');
+      expect(session.documents.active!.editor.readOnly, false);
+      session.documents.active!.editor.replaceSelection('edited');
+      final dropped = session.documents.active!;
+      await drop([path]);
+      expect(session.documents.documents.length, 2);
+      expect(session.documents.active, same(dropped));
+      expect(dropped.dirty, true);
+      expect(draft.editor.text, 'unsaved');
+      await drop([missing, other]);
+      expect(session.documents.active!.name, 'other.dart');
+      expect(session.documents.documents.length, 3);
+      expect(session.errors, isNotEmpty);
+      // A modal dialog must not send dropped files to the background editor.
+      unawaited(session.run('settings.open'));
+      await tester.pumpAndSettle();
+      await drop([path]);
+      expect(session.documents.active!.name, 'other.dart');
+      await tester.tap(find.text('Close'));
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox());
+      await tester.pumpAndSettle();
+      await tester.runAsync(session.dispose);
+      debugDefaultTargetPlatformOverride = null;
+    });
+  }
   setUp(() {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(NativeSshSecrets.channel, (_) async => false);

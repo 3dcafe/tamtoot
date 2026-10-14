@@ -1,12 +1,14 @@
 import 'dart:io';
-import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:tamtoot/core/git/git_http.dart';
 import 'package:tamtoot/core/git/http_git_service.dart';
 import 'package:tamtoot/core/git/git_store.dart';
 import 'package:tamtoot/features/http_requests_dialog.dart';
+import 'package:tamtoot/core/requests/http_request.dart';
+import 'package:tamtoot/core/requests/request_storage.dart';
 import 'package:tamtoot/platform/git_service_io.dart';
 import 'package:tamtoot/platform/git_shared.dart';
 
@@ -66,6 +68,105 @@ class _RequestStore extends GitRepositoryStore {
 }
 
 void main() {
+  testWidgets(
+    'requests drag into folders and save an edited request in a nested folder',
+    (tester) async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.windows;
+      addTearDown(() => debugDefaultTargetPlatformOverride = null);
+      await tester.binding.setSurfaceSize(const Size(1400, 1000));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final store = _RequestStore();
+      final git = HttpGitService(
+        transport: _NoHttpTransport(),
+        openStore: (_) => store,
+        inflateAt: sharedInflateAt,
+        deflate: sharedDeflate,
+      );
+      final session = await testSession(git: git);
+      session.workspaceRoot = Uri.parse('file:///test-project/');
+      final storage = RequestStorage(store);
+      await storage.createFolder('users/admin');
+      await storage.create(
+        '',
+        const HttpRequestFile(name: 'Alpha', url: 'https://example.com/alpha'),
+      );
+      await storage.create(
+        '',
+        const HttpRequestFile(name: 'Beta', url: 'https://example.com/beta'),
+      );
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: HttpRequestsDialog(
+              session: session,
+              initialPath: 'alpha.json',
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final url = find.byWidgetPredicate(
+        (widget) =>
+            widget is TextField && widget.decoration?.labelText == 'URL',
+      );
+      await tester.enterText(url, 'https://example.com/edited');
+      final beta = find.byKey(const ValueKey('request-drag-beta.json'));
+      final users = find.byKey(const ValueKey('request-folder-drop-users'));
+      await tester.dragFrom(
+        tester.getCenter(beta),
+        tester.getCenter(users) - tester.getCenter(beta),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('users/beta.json'), findsOneWidget);
+      expect(
+        (await storage.read('users/beta.json')).url,
+        'https://example.com/beta',
+      );
+      expect(
+        tester.widget<TextField>(url).controller!.text,
+        'https://example.com/edited',
+      );
+      expect(find.text('● Unsaved'), findsOneWidget);
+      await tester.enterText(
+        find.byKey(const Key('request-folder')),
+        'users/admin',
+      );
+      await tester.tap(find.text('Save'));
+      await tester.pumpAndSettle();
+      expect(find.text('users/admin/alpha.json'), findsOneWidget);
+      expect(
+        (await storage.read('users/admin/alpha.json')).url,
+        'https://example.com/edited',
+      );
+      expect(await store.exists('.tamtoot/requests/alpha.json'), false);
+      expect(find.text('● Unsaved'), findsNothing);
+      final alpha = find.byKey(
+        const ValueKey('request-drag-users/admin/alpha.json'),
+      );
+      final root = find.byKey(const ValueKey('request-folder-drop-'));
+      await tester.dragFrom(
+        tester.getCenter(alpha),
+        tester.getCenter(root) - tester.getCenter(alpha),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('alpha.json'), findsOneWidget);
+      expect(
+        (await storage.read('alpha.json')).url,
+        'https://example.com/edited',
+      );
+      expect(
+        tester
+            .widget<TextField>(find.byKey(const Key('request-folder')))
+            .controller!
+            .text,
+        isEmpty,
+      );
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox());
+      await tester.runAsync(session.dispose);
+      debugDefaultTargetPlatformOverride = null;
+    },
+  );
   for (final width in [1400.0, 430.0]) {
     testWidgets('creating multiple requests updates the list at width $width', (
       tester,

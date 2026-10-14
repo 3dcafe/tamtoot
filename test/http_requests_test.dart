@@ -61,6 +61,69 @@ class _ConcurrencyTransport implements RequestHttpTransport {
 
 void main() {
   test(
+    'saving into a folder preserves edits, documentation and conflict sources',
+    () async {
+      final directory = await Directory.systemTemp.createTemp(
+        'tamtoot-request-folder-',
+      );
+      addTearDown(() => directory.delete(recursive: true));
+      final storage = RequestStorage(FileGitRepositoryStore(directory));
+      const original = HttpRequestFile(
+        name: 'Request',
+        url: 'https://example.com/original',
+        attachments: [RequestAttachment(type: 'markdown', path: 'notes.md')],
+      );
+      final entry = await storage.create('', original);
+      await storage.saveMarkdown(entry.path, 'notes.md', 'documentation');
+      const draft = HttpRequestFile(
+        name: 'Edited',
+        method: 'POST',
+        url: 'https://example.com/edited',
+        body: RequestBody(type: 'text', value: 'new body'),
+        attachments: [RequestAttachment(type: 'markdown', path: 'notes.md')],
+      );
+      final moved = await storage.move(
+        entry.path,
+        'users/admin',
+        updated: draft,
+      );
+      expect(moved.path, 'users/admin/request.json');
+      expect((await storage.read(moved.path)).url, draft.url);
+      expect(
+        await storage.readMarkdown(moved.path, 'notes.md'),
+        'documentation',
+      );
+      expect(
+        await storage.store.exists('.tamtoot/requests/request.json'),
+        false,
+      );
+      await storage.move(moved.path, 'users/admin', updated: draft);
+      await storage.create('', original);
+      await expectLater(
+        storage.move(
+          moved.path,
+          '',
+          updated: const HttpRequestFile(
+            name: 'Conflict',
+            url: 'https://example.com/conflict',
+          ),
+        ),
+        throwsStateError,
+      );
+      expect((await storage.read(moved.path)).url, draft.url);
+      expect((await storage.read('request.json')).url, original.url);
+      expect(
+        await storage.readMarkdown(moved.path, 'notes.md'),
+        'documentation',
+      );
+      await expectLater(
+        storage.move(moved.path, '../outside', updated: draft),
+        throwsFormatException,
+      );
+      expect((await storage.read(moved.path)).url, draft.url);
+    },
+  );
+  test(
     'creating several requests with colliding names keeps every request',
     () async {
       final directory = await Directory.systemTemp.createTemp(

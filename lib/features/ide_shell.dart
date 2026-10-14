@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -10,6 +11,8 @@ import '../app/session_commands.dart';
 import '../editor/widgets/code_editor.dart';
 import '../editor/input/keyboard_mapping.dart';
 import '../platform/reveal_path.dart';
+import '../platform/file_drop.dart';
+import '../core/filesystem/filesystem.dart';
 import 'dialogs.dart';
 import 'agent_dialog.dart';
 import 'git_changes_dialog.dart';
@@ -35,6 +38,7 @@ class IdeShell extends ConsumerStatefulWidget {
 class _IdeShellState extends ConsumerState<IdeShell> {
   final _find = TextEditingController(), _replace = TextEditingController();
   late IdeSession session;
+  VoidCallback? _stopFileDrops;
   int _sidebar = 0;
   late final Future<String> _appVersion = _loadAppVersion();
 
@@ -60,10 +64,35 @@ class _IdeShellState extends ConsumerState<IdeShell> {
     session = ref.read(sessionProvider);
     // Always ensure commands exist — hot reload can leave an older set.
     registerSessionCommands(session, ShellActions(() => context, session));
+    _stopFileDrops = FileDropService.listen((paths) {
+      if (!mounted || ModalRoute.of(context)?.isCurrent != true) return false;
+      unawaited(_openDroppedFiles(paths));
+      return true;
+    });
+  }
+
+  Future<void> _openDroppedFiles(List<String> paths) async {
+    for (final path in paths) {
+      if (!mounted) return;
+      try {
+        final uri = Uri.file(
+          path,
+          windows: defaultTargetPlatform == TargetPlatform.windows,
+        );
+        if (!uri.hasScheme || uri.pathSegments.isEmpty) continue;
+        await session.run(
+          'file.openEntry',
+          FileEntry(uri, uri.pathSegments.last),
+        );
+      } catch (error) {
+        session.log('Could not open dropped file $path: $error', error: true);
+      }
+    }
   }
 
   @override
   void dispose() {
+    _stopFileDrops?.call();
     _find.dispose();
     _replace.dispose();
     super.dispose();
