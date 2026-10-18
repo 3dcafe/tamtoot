@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "packageVersion": "0.1.0",
+  "rules": [
+    {
+      "pattern": "^\\s*#.*$",
+      "scope": "comment"
+    },
+    {
+      "pattern": "^\\s*(?:[Ff][Rr][Oo][Mm]|[Rr][Uu][Nn]|[Cc][Mm][Dd]|[Ll][Aa][Bb][Ee][Ll]|[Mm][Aa][Ii][Nn][Tt][Aa][Ii][Nn][Ee][Rr]|[Ee][Xx][Pp][Oo][Ss][Ee]|[Ee][Nn][Vv]|[Aa][Dd][Dd]|[Cc][Oo][Pp][Yy]|[Ee][Nn][Tt][Rr][Yy][Pp][Oo][Ii][Nn][Tt]|[Vv][Oo][Ll][Uu][Mm][Ee]|[Uu][Ss][Ee][Rr]|[Ww][Oo][Rr][Kk][Dd][Ii][Rr]|[Aa][Rr][Gg]|[Oo][Nn][Bb][Uu][Ii][Ll][Dd]|[Ss][Tt][Oo][Pp][Ss][Ii][Gg][Nn][Aa][Ll]|[Hh][Ee][Aa][Ll][Tt][Hh][Cc][Hh][Ee][Cc][Kk]|[Ss][Hh][Ee][Ll][Ll])\\b",
+      "scope": "keyword"
+    },
+    {
+      "begin": "\"",
+      "end": "\"",
+      "escape": "\\\\.",
+      "scope": "string",
+      "contentRules": [
+        {
+          "pattern": "\\$(?:\\{[^}]+\\}|[A-Za-z_][A-Za-z0-9_]*)",
+          "scope": "interpolation"
+        }
+      ]
+    },
+    {
+      "begin": "'",
+      "end": "'",
+      "scope": "string"
+    },
+    {
+      "pattern": "\\$(?:\\{[^}]+\\}|[A-Za-z_][A-Za-z0-9_]*)",
+      "scope": "interpolation"
+    },
+    {
+      "pattern": "--[a-z][a-z0-9-]*(?:=[^\\s]+)?",
+      "scope": "attribute"
+    },
+    {
+      "pattern": "\\b[Aa][Ss]\\b",
+      "scope": "keyword"
+    },
+    {
+      "pattern": "(?<![\\w.])\\d+(?:\\.\\d+)*(?![\\w.])",
+      "scope": "number"
+    },
+    {
+      "pattern": "[\\[\\]{},=]|\\\\$",
+      "scope": "operator"
+    }
+  ]
+}

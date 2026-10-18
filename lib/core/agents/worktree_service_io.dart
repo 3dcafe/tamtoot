@@ -29,10 +29,7 @@ class AgentWorktreeService {
       for (final pattern in localPatterns) {
         if (!retained.contains(pattern)) retained.add(pattern);
       }
-      await exclude.writeAsString(
-        '${retained.join('\n')}\n',
-        flush: true,
-      );
+      await exclude.writeAsString('${retained.join('\n')}\n', flush: true);
     }
     final directory = Directory(
       '${repository.path}/.tamtoot/worktrees/$taskId',

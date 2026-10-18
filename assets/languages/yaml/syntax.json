@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 1,
+  "packageVersion": "0.1.0",
+  "rules": [
+    {
+      "pattern": "(?:^|(?<=\\s))#.*$",
+      "scope": "comment"
+    },
+    {
+      "pattern": "^\\s*(?:---|\\.\\.\\.)(?=\\s|$)|^%\\w+.*$",
+      "scope": "directive"
+    },
+    {
+      "pattern": "(?:^\\s*(?:-\\s+)?|(?<=[{,])\\s*)(?:[A-Za-z0-9_./\\-\\u0080-\\uFFFF]+|\"(?:\\\\.|[^\"\\\\])*\"|'(?:''|[^'])*')(?=\\s*:(?:\\s|$|[\\[{]))",
+      "scope": "property"
+    },
+    {
+      "begin": "\"",
+      "end": "\"",
+      "escape": "\\\\.",
+      "scope": "string"
+    },
+    {
+      "begin": "'",
+      "end": "'",
+      "escape": "''",
+      "scope": "string"
+    },
+    {
+      "pattern": "[&*][A-Za-z0-9_-]+|![^\\s,\\[\\]{}]+",
+      "scope": "annotation"
+    },
+    {
+      "pattern": "(?<![\\w./-])(?:true|True|TRUE|false|False|FALSE|null|Null|NULL|~)(?=$|[\\s,\\]}])",
+      "scope": "constant"
+    },
+    {
+      "pattern": "(?<![\\w./-])[-+]?(?:0x[0-9a-fA-F]+|0o[0-7]+|\\d+(?:\\.\\d*)?(?:[eE][-+]?\\d+)?|\\.inf|\\.Inf|\\.INF|\\.nan|\\.NaN|\\.NAN)(?=$|[\\s,\\]}])",
+      "scope": "number"
+    },
+    {
+      "pattern": "[\\[\\]{},:]|^\\s*-(?=\\s)|[|>][-+1-9]*(?=\\s|$)",
+      "scope": "operator"
+    }
+  ]
+}

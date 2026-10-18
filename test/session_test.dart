@@ -12,6 +12,20 @@ class CancelDialogs extends FakeDialogs {
   Future<Uri?> save(String name, String content) async => null;
 }
 
+class CountingStore extends MemoryStore {
+  final writes = <String>[];
+  String? failNext;
+  @override
+  Future<void> write(String key, String value) async {
+    if (failNext == key) {
+      failNext = null;
+      throw StateError('write failed');
+    }
+    writes.add(key);
+    await super.write(key, value);
+  }
+}
+
 class UnavailableGit extends Fake implements GitService {
   @override
   bool get available => false;
@@ -27,6 +41,56 @@ class DelayedFiles extends MemoryFileSystem {
 }
 
 void main() {
+  testWidgets(
+    'cursor movements do not schedule recovery writes or delay edited content',
+    (tester) async {
+      final store = CountingStore();
+      final session = await testSession(store: store);
+      final doc = session.documents.create('draft.dart', 'original');
+      session.observe(doc);
+      await session.persistNow();
+      store.writes.clear();
+      for (var i = 0; i < 100; i++) {
+        doc.editor.select(i % 8, i % 8);
+      }
+      await tester.pump(const Duration(milliseconds: 500));
+      expect(store.writes, isEmpty);
+      doc.editor.replaceSelection('edited');
+      doc.editor.select(0, 0);
+      await tester.pump(const Duration(milliseconds: 500));
+      await tester.pump();
+      expect(store.writes, ['session']);
+      expect(store.data['session'], contains('edited'));
+      await tester.runAsync(session.dispose);
+    },
+  );
+  test(
+    'typing saves only recovery data and changed preferences retry after failure',
+    () async {
+      final store = CountingStore();
+      final session = await testSession(store: store);
+      session.observe(session.documents.create('draft.dart', 'before'));
+      await session.persistNow();
+      expect(store.writes.length, 6);
+      store.writes.clear();
+      session.documents.active!.editor.replaceSelection('after');
+      await session.persistNow();
+      expect(store.writes, ['session']);
+      store.writes.clear();
+      session.settings.set('fontSize', 20.0);
+      await session.persistNow();
+      expect(store.writes, ['settings', 'session']);
+      store.writes.clear();
+      session.rememberModelApiKey('test-model', 'new-key');
+      store.failNext = 'modelCredentials';
+      await session.persistNow();
+      expect(store.writes, isEmpty);
+      await session.persistNow();
+      expect(store.writes, ['modelCredentials', 'session']);
+      expect(store.data['modelCredentials'], contains('new-key'));
+      await session.dispose();
+    },
+  );
   test(
     'dirty cache follows edits, cursor changes, snapshots and disk reload',
     () async {

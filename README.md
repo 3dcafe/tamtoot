@@ -127,6 +127,8 @@ Bundled language packages are versioned independently; their manifests record th
 | HTML | `.html`, `.htm` | Tags, attributes, quoted values, entities, doctype, multiline comments and CDATA |
 | JavaScript | `.js`, `.jsx`, `.mjs`, `.cjs` | Module/async keywords, built-ins, calls, operators, numeric literals including BigInt, strings, multiline templates and comments |
 | Dart | `.dart` | Expanded keywords and built-in types, annotations, calls, hexadecimal/exponent numbers, raw/triple-quoted strings and nested block comments |
+| Dockerfile | `Dockerfile`, `Dockerfile.*`, `Containerfile`, `Containerfile.*`, `.dockerfile` | Instructions, comments, variables, flags and quoted strings |
+| YAML | `.yaml`, `.yml`, including Docker Compose and GitHub Actions files | Mapping keys, quoted strings, comments, numbers, booleans/null, anchors, aliases and document markers |
 | C# | `.cs` | Contextual keywords, attributes, directives, escaped identifiers, numeric suffixes, verbatim/interpolated/raw strings and block comments |
 | TypeScript | `.ts`, `.tsx`, `.mts`, `.cts` | Types, generics, properties, decorators and template interpolation |
 | PHP | `.php`, `.phtml`, `.php8` | Tags, variables, types, attributes, methods, properties, strings and comments |

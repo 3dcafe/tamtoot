@@ -1,15 +1,31 @@
 import 'dart:convert';
 
-const httpMethods = {'GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'};
+const httpMethods = {
+  'GET',
+  'POST',
+  'PUT',
+  'PATCH',
+  'DELETE',
+  'HEAD',
+  'OPTIONS',
+};
 const requestBodyTypes = {'none', 'json', 'text', 'form'};
 const requestAuthModes = {'inherit', 'none', 'bearer'};
 
 class RequestKeyValue {
-  const RequestKeyValue({required this.key, required this.value, this.enabled = true});
+  const RequestKeyValue({
+    required this.key,
+    required this.value,
+    this.enabled = true,
+  });
   final String key, value;
   final bool enabled;
 
-  Map<String, dynamic> toJson() => {'key': key, 'value': value, 'enabled': enabled};
+  Map<String, dynamic> toJson() => {
+    'key': key,
+    'value': value,
+    'enabled': enabled,
+  };
 
   factory RequestKeyValue.parse(dynamic value) {
     if (value is! Map || value['key'] is! String || value['value'] is! String) {
@@ -39,8 +55,12 @@ class RequestAttachment {
   }
 
   factory RequestAttachment.parse(dynamic value) {
-    if (value is! Map || value['type'] != 'markdown' || value['path'] is! String) {
-      throw const FormatException('Only Markdown request attachments are supported.');
+    if (value is! Map ||
+        value['type'] != 'markdown' ||
+        value['path'] is! String) {
+      throw const FormatException(
+        'Only Markdown request attachments are supported.',
+      );
     }
     final path = value['path'] as String;
     if (!isSafeMarkdownPath(path)) {
@@ -56,11 +76,16 @@ class RequestBody {
   const RequestBody({this.type = 'none', this.value});
   final String type;
   final dynamic value;
-  Map<String, dynamic> toJson() => {'type': type, if (type != 'none') 'value': value};
+  Map<String, dynamic> toJson() => {
+    'type': type,
+    if (type != 'none') 'value': value,
+  };
 
   factory RequestBody.parse(dynamic value) {
     if (value == null) return const RequestBody();
-    if (value is! Map || value['type'] is! String || !requestBodyTypes.contains(value['type'])) {
+    if (value is! Map ||
+        value['type'] is! String ||
+        !requestBodyTypes.contains(value['type'])) {
       throw const FormatException('Request body is invalid.');
     }
     return RequestBody(type: value['type'] as String, value: value['value']);
@@ -70,11 +95,16 @@ class RequestBody {
 class RequestAuth {
   const RequestAuth({this.mode = 'inherit', this.token = ''});
   final String mode, token;
-  Map<String, dynamic> toJson() => {'mode': mode, if (mode == 'bearer') 'token': token};
+  Map<String, dynamic> toJson() => {
+    'mode': mode,
+    if (mode == 'bearer') 'token': token,
+  };
 
   factory RequestAuth.parse(dynamic value) {
     if (value == null) return const RequestAuth();
-    if (value is! Map || value['mode'] is! String || !requestAuthModes.contains(value['mode'])) {
+    if (value is! Map ||
+        value['mode'] is! String ||
+        !requestAuthModes.contains(value['mode'])) {
       throw const FormatException('Request authorization is invalid.');
     }
     return RequestAuth(
@@ -103,10 +133,15 @@ class HttpRequestFile {
 
   void validate() {
     if (name.trim().isEmpty || !httpMethods.contains(method)) {
-      throw const FormatException('Request name and supported HTTP method are required.');
+      throw const FormatException(
+        'Request name and supported HTTP method are required.',
+      );
     }
-    if (!requestBodyTypes.contains(body.type) || !requestAuthModes.contains(auth.mode)) {
-      throw const FormatException('Unsupported request body or authorization mode.');
+    if (!requestBodyTypes.contains(body.type) ||
+        !requestAuthModes.contains(auth.mode)) {
+      throw const FormatException(
+        'Unsupported request body or authorization mode.',
+      );
     }
     for (final item in [...headers, ...query]) {
       if (item.key.contains('\n') ||
@@ -149,7 +184,11 @@ class HttpRequestFile {
 
   factory HttpRequestFile.parse(String source) {
     final data = jsonDecode(source);
-    if (data is! Map || data['version'] != 1 || data['name'] is! String || data['method'] is! String || data['url'] is! String) {
+    if (data is! Map ||
+        data['version'] != 1 ||
+        data['name'] is! String ||
+        data['method'] is! String ||
+        data['url'] is! String) {
       throw const FormatException('Unsupported or invalid HTTP request file.');
     }
     List<T> list<T>(String key, T Function(dynamic) parse) {
@@ -157,6 +196,7 @@ class HttpRequestFile {
       if (raw is! List) throw FormatException('$key must be an array.');
       return raw.map(parse).toList();
     }
+
     final request = HttpRequestFile(
       name: data['name'] as String,
       method: data['method'] as String,
@@ -173,7 +213,11 @@ class HttpRequestFile {
 }
 
 class RequestEnvironment {
-  const RequestEnvironment({this.variables = const {}, this.authType = 'none', this.authToken = ''});
+  const RequestEnvironment({
+    this.variables = const {},
+    this.authType = 'none',
+    this.authToken = '',
+  });
   final Map<String, String> variables;
   final String authType, authToken;
 
@@ -193,7 +237,9 @@ class RequestEnvironment {
   }
 
   factory RequestEnvironment.parse(String? source) {
-    if (source == null || source.trim().isEmpty) return const RequestEnvironment();
+    if (source == null || source.trim().isEmpty) {
+      return const RequestEnvironment();
+    }
     final data = jsonDecode(source);
     if (data is! Map || data['version'] != 1 || data['variables'] is! Map) {
       throw const FormatException('Invalid request environment.');
@@ -206,12 +252,18 @@ class RequestEnvironment {
       variables[entry.key as String] = entry.value as String;
     }
     final auth = data['auth'];
-    final type = auth is Map && auth['type'] is String ? auth['type'] as String : 'none';
-    if (type != 'none' && type != 'bearer') throw const FormatException('Invalid project authorization.');
+    final type = auth is Map && auth['type'] is String
+        ? auth['type'] as String
+        : 'none';
+    if (type != 'none' && type != 'bearer') {
+      throw const FormatException('Invalid project authorization.');
+    }
     return RequestEnvironment(
       variables: variables,
       authType: type,
-      authToken: auth is Map && auth['token'] is String ? auth['token'] as String : '',
+      authToken: auth is Map && auth['token'] is String
+          ? auth['token'] as String
+          : '',
     );
   }
 }

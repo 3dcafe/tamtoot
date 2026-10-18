@@ -8,6 +8,7 @@ import 'package:tamtoot/core/agents/model_profile.dart';
 import 'package:tamtoot/core/agents/profile_store.dart';
 import 'package:tamtoot/core/git/http_git_service.dart';
 import 'package:tamtoot/features/model_profiles_dialog.dart';
+import 'package:tamtoot/features/dialogs.dart';
 import 'package:tamtoot/platform/git_service_io.dart';
 import 'package:tamtoot/platform/git_shared.dart';
 import 'explorer_test.dart' show RepositoryMemory;
@@ -29,6 +30,92 @@ class ProbeClient extends http.BaseClient {
 }
 
 void main() {
+  testWidgets(
+    'settings manages profiles while the editor only edits one profile',
+    (tester) async {
+      await tester.binding.setSurfaceSize(const Size(1200, 900));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      final files = ProfileMemory();
+      final session = await testSession(
+        git: HttpGitService(
+          transport: PushTransport(),
+          openStore: (_) => files,
+          inflateAt: archiveInflateAt,
+          deflate: archiveDeflate,
+        ),
+      );
+      session.workspaceRoot = Uri.parse('memory:///project/');
+      final profile = ModelProfile(
+        id: 'existing',
+        name: 'Existing profile',
+        provider: 'custom',
+        model: 'local-model',
+      );
+      final store = ProfileStore(files);
+      await store.save(store.path(profile.id), profile.encode(), null);
+      session.rememberModelApiKey(profile.id, 'local-key');
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: SettingsDialog(session: session, initialSection: 'agents'),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Existing profile'), findsOneWidget);
+      expect(find.byTooltip('Delete profile'), findsOneWidget);
+      await tester.tap(find.byTooltip('Edit profile'));
+      await tester.pumpAndSettle();
+      expect(find.text('Edit model profile'), findsOneWidget);
+      expect(find.byKey(const ValueKey('model-profile-picker')), findsNothing);
+      expect(
+        find.descendant(
+          of: find.byType(ModelProfilesDialog),
+          matching: find.text('New profile'),
+        ),
+        findsNothing,
+      );
+      expect(find.text('Delete profile'), findsNothing);
+      final nameField = find.byWidgetPredicate(
+        (w) => w is TextField && w.decoration?.labelText == 'Display name',
+      );
+      expect(
+        tester.widget<TextField>(nameField).controller!.text,
+        'Existing profile',
+      );
+      await tester.enterText(nameField, 'Renamed profile');
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.byKey(const ValueKey('save-profile')));
+      await tester.tap(find.byKey(const ValueKey('save-profile')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('Close profile'));
+      await tester.pumpAndSettle();
+      expect(find.text('Renamed profile'), findsOneWidget);
+      await tester.tap(find.byTooltip('Delete profile'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Cancel'));
+      await tester.pumpAndSettle();
+      expect(await store.read(store.path(profile.id)), isNotNull);
+      await tester.tap(find.byTooltip('Delete profile'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Delete'));
+      await tester.pumpAndSettle();
+      expect(await store.read(store.path(profile.id)), isNull);
+      expect(session.modelApiKey(profile.id), isEmpty);
+      expect(find.textContaining('No model profiles yet'), findsOneWidget);
+      await tester.tap(find.text('Add OpenAI GPT'));
+      await tester.pumpAndSettle();
+      expect(find.text('Create model profile'), findsOneWidget);
+      expect(
+        tester.widget<TextField>(nameField).controller!.text,
+        'OpenAI GPT',
+      );
+      expect(find.byKey(const ValueKey('server-openai')), findsOneWidget);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox());
+      await tester.runAsync(session.dispose);
+    },
+  );
   ModelProfile profile({
     String id = 'local-code',
     Map<String, dynamic> parameters = const {},
@@ -204,7 +291,7 @@ void main() {
   testWidgets(
     'create, preview and reopen a saved model profile in narrow dialog',
     (tester) async {
-      await tester.binding.setSurfaceSize(const Size(600, 900));
+      await tester.binding.setSurfaceSize(const Size(430, 900));
       addTearDown(() => tester.binding.setSurfaceSize(null));
       final files = ProfileMemory();
       final session = await testSession(
@@ -216,6 +303,7 @@ void main() {
         ),
       );
       session.workspaceRoot = Uri.parse('memory:///project/');
+      String? selectedPath;
       Future<void> open() async {
         await tester.pumpWidget(
           MaterialApp(
@@ -224,7 +312,10 @@ void main() {
                 builder: (ctx) => TextButton(
                   onPressed: () => showDialog<void>(
                     context: ctx,
-                    builder: (_) => ModelProfilesDialog(session: session),
+                    builder: (_) => ModelProfilesDialog(
+                      session: session,
+                      initialPath: selectedPath,
+                    ),
                   ),
                   child: const Text('Open'),
                 ),
@@ -240,6 +331,26 @@ void main() {
         (w) => w is TextField && w.decoration?.labelText == label,
       );
       await open();
+      final saveButton = find.byKey(const ValueKey('save-profile'));
+      final saveRect = tester.getRect(saveButton);
+      for (final key in [
+        'check-model-api',
+        'find-models',
+        'reset-prompts',
+        'preview-prompts',
+        'run-model',
+        'save-profile',
+        'save-instructions',
+        'close-profile',
+      ]) {
+        expect(find.byKey(ValueKey(key)).hitTestable(), findsOneWidget);
+      }
+      await tester.drag(
+        find.byType(SingleChildScrollView).last,
+        const Offset(0, -600),
+      );
+      await tester.pumpAndSettle();
+      expect(tester.getRect(saveButton), saveRect);
       for (final entry in {
         'Display name': 'Coding',
         'Model name': 'local-model',
@@ -247,30 +358,46 @@ void main() {
         await tester.ensureVisible(field(entry.key));
         await tester.enterText(field(entry.key), entry.value);
       }
-      await tester.ensureVisible(find.text('Save profile *'));
-      await tester.tap(find.text('Save profile *'));
+      await tester.ensureVisible(find.byKey(const ValueKey('save-profile')));
+      await tester.tap(find.byKey(const ValueKey('save-profile')));
       await tester.pumpAndSettle();
       expect(
         files.data.containsKey('.tamtoot/agents/models/coding.json'),
         isTrue,
       );
-      await tester.ensureVisible(find.text('Preview prompts'));
-      await tester.tap(find.text('Preview prompts'));
+      await tester.ensureVisible(find.byTooltip('Preview prompts'));
+      await tester.tap(find.byTooltip('Preview prompts'));
       await tester.pumpAndSettle();
       expect(find.text('Prompt preview · not sent'), findsOneWidget);
       await tester.tap(find.text('Close').last);
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Close'));
+      await tester.tap(find.byTooltip('Close profile'));
       await tester.pumpAndSettle();
+      selectedPath = '.tamtoot/agents/models/coding.json';
       await tester.tap(find.text('Open'));
       await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const ValueKey('model-profile-picker')));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('coding.json').last);
-      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('model-profile-picker')), findsNothing);
+      expect(find.text('New profile'), findsNothing);
+      expect(find.text('Delete profile'), findsNothing);
       expect(
         tester.widget<TextField>(field('Model name')).controller!.text,
         'local-model',
+      );
+      await tester.ensureVisible(field('Shared project instructions'));
+      await tester.enterText(
+        field('Shared project instructions'),
+        'Project guidance',
+      );
+      await tester.pumpAndSettle();
+      expect(
+        find.byTooltip('Save instructions — unsaved changes'),
+        findsOneWidget,
+      );
+      await tester.tap(find.byKey(const ValueKey('save-instructions')));
+      await tester.pumpAndSettle();
+      expect(
+        await ProfileStore(files).read(ProfileStore.instructionsPath),
+        'Project guidance',
       );
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox());

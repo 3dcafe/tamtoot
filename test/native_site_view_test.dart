@@ -32,9 +32,7 @@ void main() {
       await tester.pump(const Duration(milliseconds: 100));
       final initial = calls.where((call) => call.method == 'bounds').length;
       expect(initial, 1);
-      tester.binding.handleAppLifecycleStateChanged(
-        AppLifecycleState.inactive,
-      );
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
       await tester.pump(const Duration(milliseconds: 500));
       expect(calls.where((call) => call.method == 'bounds').length, initial);
       await tester.pumpWidget(preview(400));

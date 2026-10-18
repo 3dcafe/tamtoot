@@ -196,8 +196,10 @@ class _PublishProjectDialogState extends State<PublishProjectDialog> {
             .where((entry) => entry.isChanged)
             .map((entry) => entry.path)
             .toList();
-        (await git.add(root, paths: paths.isEmpty ? const ['.'] : paths))
-            .ensureOk();
+        (await git.add(
+          root,
+          paths: paths.isEmpty ? const ['.'] : paths,
+        )).ensureOk();
         final committed = await git.commit(root, 'Initial commit');
         committed.ensureOk();
         commitHash = committed.stdout.trim();

@@ -1,0 +1,58 @@
+{
+  "schemaVersion": 1,
+  "packageVersion": "0.1.0",
+  "id": "yaml",
+  "comments": {
+    "line": "#"
+  },
+  "brackets": [
+    {
+      "open": "[",
+      "close": "]"
+    },
+    {
+      "open": "{",
+      "close": "}"
+    }
+  ],
+  "autoClosingPairs": [
+    {
+      "open": "[",
+      "close": "]"
+    },
+    {
+      "open": "{",
+      "close": "}"
+    },
+    {
+      "open": "\"",
+      "close": "\""
+    },
+    {
+      "open": "'",
+      "close": "'"
+    }
+  ],
+  "icons": {
+    "symbol": "code"
+  },
+  "adapters": [],
+  "name": "YAML",
+  "extensions": [
+    ".yaml",
+    ".yml"
+  ],
+  "filenames": [],
+  "fileTemplates": {
+    "yaml": {
+      "name": "YAML document",
+      "extension": ".yaml",
+      "body": "# {{name}}\n"
+    },
+    "compose": {
+      "name": "Docker Compose",
+      "extension": ".yaml",
+      "body": "services:\n  app:\n    image: alpine:3.22\n    command: [\"/bin/sh\", \"-c\", \"echo hello\"]\n"
+    }
+  }
+}

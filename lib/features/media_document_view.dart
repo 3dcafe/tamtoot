@@ -202,10 +202,7 @@ class _SvgPreviewState extends State<_SvgPreview> {
                           ),
                         ),
                       )
-                    : SvgPicture.string(
-                        _renderable!,
-                        fit: BoxFit.contain,
-                      ),
+                    : SvgPicture.string(_renderable!, fit: BoxFit.contain),
               ),
             ),
           ),

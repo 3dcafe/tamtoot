@@ -8,7 +8,7 @@ v1 — первая опубликованная схема. Схемы v0 не 
 
 | Контракт | Обязательные поля кроме schemaVersion | Optional / defaults |
 |---|---|---|
-| Language manifest | id, name, packageVersion, extensions: string[] | filenames/adapters/brackets/autoClosingPairs=[]; comments/indentation/icons={} |
+| Language manifest | id, name, packageVersion, extensions: string[] | filenames/filenamePatterns/adapters/brackets/autoClosingPairs=[]; comments/indentation/icons={} |
 | Syntax | rules: [{pattern, scope}] или region rules | Пустой список разрешён; приоритет правил по порядку при одинаковом начале совпадения |
 | Snippets | — | snippets={} |
 | Theme | id, name, packageVersion, dark, colors | fontFamily=monospace, iconTheme=material |
@@ -98,3 +98,5 @@ Hook может вернуть пустой stdout или object с `cancel: boo
 ## Workspace `.tamtoot`
 
 Локальная структура и security-поведение подробно описаны в [agents.md](agents.md). Встроенный Git UI исключает локальные данные `.tamtoot`, но включает HTTP requests и общий request environment. Это не заменяет `.gitignore` для внешнего Git-клиента. Secrets нельзя добавлять в model profiles; MCP headers хранятся verbatim и требуют отдельной осторожности.
+
+`filenamePatterns` — необязательные регулярные выражения для имени файла без пути; компилируются при загрузке пакета. Например, пакет Dockerfile распознаёт `Dockerfile.dev`.

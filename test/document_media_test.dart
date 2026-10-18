@@ -11,7 +11,15 @@ void main() {
     final files = MemoryFileSystem();
     final uri = Uri.parse('memory:///assets/branding/icon.png');
     // Minimal PNG-like binary that is not valid UTF-8.
-    final bytes = Uint8List.fromList([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0xff]);
+    final bytes = Uint8List.fromList([
+      0x89,
+      0x50,
+      0x4e,
+      0x47,
+      0x0d,
+      0x0a,
+      0xff,
+    ]);
     await files.writeBytes(uri, bytes);
 
     final docs = DocumentService(files, FakeDialogs());

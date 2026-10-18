@@ -266,7 +266,10 @@ void main() {
     expect(find.textContaining('https://example.com'), findsNothing);
     await tester.tap(find.byTooltip('Git settings'));
     await tester.pumpAndSettle();
-    expect(find.widgetWithText(TextField, 'Remote URL (origin)'), findsOneWidget);
+    expect(
+      find.widgetWithText(TextField, 'Remote URL (origin)'),
+      findsOneWidget,
+    );
     expect(find.text('https://example.com/repo.git'), findsOneWidget);
     expect(find.widgetWithText(TextField, 'Author name'), findsOneWidget);
     expect(
@@ -292,8 +295,14 @@ void main() {
     await tester.tap(find.text('Save'));
     await tester.pumpAndSettle();
     expect((await git.identity(root)).name, 'Updated Author');
-    expect((await git.remoteUrl(root)).stdout, 'https://example.com/updated.git');
-    expect(await store.readText('.git/config'), isNot(contains('temporary-secret')));
+    expect(
+      (await git.remoteUrl(root)).stdout,
+      'https://example.com/updated.git',
+    );
+    expect(
+      await store.readText('.git/config'),
+      isNot(contains('temporary-secret')),
+    );
     await tester.tap(find.byKey(const ValueKey('git-history')));
     await tester.pumpAndSettle();
     expect(find.text('Commit history · main'), findsOneWidget);

@@ -334,6 +334,7 @@ class IdeSession {
   final Map<String, StreamSubscription<void>> _subscriptions = {};
   Timer? _saveTimer;
   Future<void> _pendingSave = Future.value();
+  final Map<String, String> _persistedPreferences = {};
   bool _disposed = false;
   IdeTheme get theme => themes[settings.theme] ?? themes.values.first;
 
@@ -562,7 +563,12 @@ class IdeSession {
     if (_subscriptions.containsKey(doc.id)) return;
     configure(doc);
     // Cursor/selection and unsaved edits update the UI, never scan the disk.
-    _subscriptions[doc.id] = doc.editor.changes.listen((_) => changed());
+    var revision = doc.editor.revision;
+    _subscriptions[doc.id] = doc.editor.changes.listen((_) {
+      final textChanged = revision != doc.editor.revision;
+      revision = doc.editor.revision;
+      changed(persist: textChanged);
+    });
   }
 
   void configure(OpenDocument doc) {
@@ -820,7 +826,14 @@ class IdeSession {
     _pendingSave = _pendingSave.then((_) async {
       try {
         for (final e in snapshot.entries) {
+          // Preferences rarely change while typing. Compare in the save queue
+          // and cache only successful writes, so failures are retried correctly.
+          // Keep the large document recovery snapshot out of this cache.
+          if (e.key != 'session' && _persistedPreferences[e.key] == e.value) {
+            continue;
+          }
           await store.write(e.key, e.value);
+          if (e.key != 'session') _persistedPreferences[e.key] = e.value;
         }
       } catch (e) {
         log('Persistence failed: $e', error: true);
@@ -843,6 +856,7 @@ class IdeSession {
     _disposed = true;
     _modelApiKeys.clear();
     _gitCredentials.clear();
+    _persistedPreferences.clear();
     for (final s in _subscriptions.values) {
       await s.cancel();
     }

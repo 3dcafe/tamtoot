@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:tamtoot/platform/platform_services.dart';
+import 'package:tamtoot/core/filesystem/filesystem.dart';
 import 'support.dart';
 import 'legacy_examples.dart';
 
@@ -112,7 +113,9 @@ void main() {
           },
         ],
       );
-      final session = await testSession(store: store);
+      final files = MemoryFileSystem();
+      files.files[Uri.parse('file:///my/Program.cs')] = legacyExample2;
+      final session = await testSession(store: store, files: files);
       expect(session.documents.documents.length, 2);
       expect(
         session.documents.documents.first.editor.text,

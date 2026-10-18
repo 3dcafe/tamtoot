@@ -38,9 +38,7 @@ class _GithubTransport implements GitHttpTransport {
     if (url.path.endsWith('/repos') && method == 'POST') {
       final payload = jsonDecode(utf8.decode(body!)) as Map<String, dynamic>;
       final name = payload['name'] as String;
-      final owner = url.path.contains('/orgs/')
-          ? url.pathSegments[1]
-          : login;
+      final owner = url.path.contains('/orgs/') ? url.pathSegments[1] : login;
       return GitHttpResponse(
         statusCode: 201,
         body: Uint8List.fromList(

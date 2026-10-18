@@ -94,8 +94,8 @@ class _KanbanDialogState extends State<KanbanDialog> {
 
   bool _canMove(KanbanCard card, KanbanStatus status) =>
       !busy &&
-          store != null &&
-          board.cards.any((item) => item.id == card.id && item.status != status);
+      store != null &&
+      board.cards.any((item) => item.id == card.id && item.status != status);
 
   Future<void> _move(KanbanCard card, KanbanStatus status) async {
     if (!_canMove(card, status)) return;
@@ -157,8 +157,8 @@ class _KanbanDialogState extends State<KanbanDialog> {
               onChanged: busy
                   ? null
                   : (value) {
-                if (value != null) _move(card, value);
-              },
+                      if (value != null) _move(card, value);
+                    },
             ),
             if (card.worktree.isEmpty)
               TextButton.icon(
@@ -214,21 +214,18 @@ class _KanbanDialogState extends State<KanbanDialog> {
             padding: const EdgeInsets.all(8),
             child: Column(
               children: [
-                Text(
-                  switch (status) {
-                    KanbanStatus.todo => 'Todo',
-                    KanbanStatus.inProgress => 'In Progress',
-                    KanbanStatus.review => 'Review',
-                    KanbanStatus.done => 'Done',
-                  },
-                  style: Theme.of(context).textTheme.titleMedium,
-                ),
+                Text(switch (status) {
+                  KanbanStatus.todo => 'Todo',
+                  KanbanStatus.inProgress => 'In Progress',
+                  KanbanStatus.review => 'Review',
+                  KanbanStatus.done => 'Done',
+                }, style: Theme.of(context).textTheme.titleMedium),
                 const SizedBox(height: 8),
                 Expanded(
                   child: ListView(
                     children: [
                       for (final card in board.cards.where(
-                            (card) => card.status == status,
+                        (card) => card.status == status,
                       ))
                         _card(card),
                     ],
@@ -250,9 +247,7 @@ class _KanbanDialogState extends State<KanbanDialog> {
 
   @override
   Widget build(BuildContext context) => CallbackShortcuts(
-    bindings: {
-      const SingleActivator(LogicalKeyboardKey.escape): _close,
-    },
+    bindings: {const SingleActivator(LogicalKeyboardKey.escape): _close},
     child: Focus(
       autofocus: true,
       child: AlertDialog(
@@ -289,8 +284,9 @@ class _KanbanDialogState extends State<KanbanDialog> {
                       enabled: !busy,
                       textInputAction: TextInputAction.done,
                       onSubmitted: (_) => _create(),
-                      decoration:
-                          const InputDecoration(labelText: 'Description'),
+                      decoration: const InputDecoration(
+                        labelText: 'Description',
+                      ),
                     ),
                   ),
                   IconButton(

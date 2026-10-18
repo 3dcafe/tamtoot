@@ -16,6 +16,8 @@ const bundledLanguageIds = [
   'scss',
   'markdown',
   'conf',
+  'dockerfile',
+  'yaml',
 ];
 
 class SyntaxToken {
@@ -68,6 +70,7 @@ class LanguageDefinition {
     required this.extensions,
     required this.rules,
     this.filenames = const [],
+    this.filenamePatterns = const [],
     this.fileTemplates = const {},
     this.comments = const {},
     this.brackets = const [],
@@ -79,6 +82,7 @@ class LanguageDefinition {
   });
   final String id, name, version;
   final List<String> extensions, filenames, adapters;
+  final List<RegExp> filenamePatterns;
   final List<SyntaxRule> rules;
   final Map<String, dynamic> comments, snippets, indentation, icons;
   final Map<String, dynamic> fileTemplates;
@@ -325,6 +329,10 @@ class LanguagePackageLoader {
       version: requiredString(m, 'packageVersion'),
       extensions: stringList(m['extensions'], 'extensions'),
       filenames: stringList(m['filenames'] ?? [], 'filenames'),
+      filenamePatterns: stringList(
+        m['filenamePatterns'] ?? [],
+        'filenamePatterns',
+      ).map(RegExp.new).toList(),
       rules: rules,
       fileTemplates: templates,
       comments: object('comments'),
@@ -348,6 +356,7 @@ class LanguageRegistry {
     final lower = name.toLowerCase();
     for (final language in _languages.values) {
       if (language.filenames.contains(name) ||
+          language.filenamePatterns.any((pattern) => pattern.hasMatch(name)) ||
           language.extensions.any(
             (extension) => lower.endsWith(extension.toLowerCase()),
           )) {

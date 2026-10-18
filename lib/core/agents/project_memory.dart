@@ -33,8 +33,7 @@ class ProjectMemory {
     'recentEdits': recentEdits.map((edit) => edit.toJson()).toList(),
   };
 
-  String encode() =>
-      const JsonEncoder.withIndent('  ').convert(toJson());
+  String encode() => const JsonEncoder.withIndent('  ').convert(toJson());
 
   factory ProjectMemory.parse(String source) {
     final data = jsonDecode(source);
@@ -175,7 +174,9 @@ class ProjectMemory {
           path: path,
           summary: scrubSecrets(
             _clip(
-              summary.trim().isEmpty ? 'edited during agent task' : summary.trim(),
+              summary.trim().isEmpty
+                  ? 'edited during agent task'
+                  : summary.trim(),
               120,
             ),
           ),
@@ -281,10 +282,7 @@ class ProjectMemory {
       }
     }
 
-    return ProjectMemorySelection(
-      areas: chosenAreas,
-      recentEdits: chosenEdits,
-    );
+    return ProjectMemorySelection(areas: chosenAreas, recentEdits: chosenEdits);
   }
 
   /// Build prompt text; [stalePaths] mark known locations that changed on disk.
@@ -403,7 +401,9 @@ class ProjectMemory {
       final trimmed = item.trim();
       if (trimmed.isEmpty) continue;
       final clipped = _clip(trimmed, 180);
-      if (out.any((existing) => existing.toLowerCase() == clipped.toLowerCase())) {
+      if (out.any(
+        (existing) => existing.toLowerCase() == clipped.toLowerCase(),
+      )) {
         continue;
       }
       out.add(clipped);
@@ -524,7 +524,9 @@ class ProjectMemoryArea {
       files: strings('files'),
       learned: strings('learned'),
       lastChanges: strings('lastChanges'),
-      status: data['status'] is String ? data['status'] as String : 'investigated',
+      status: data['status'] is String
+          ? data['status'] as String
+          : 'investigated',
       fileFingerprints: fingerprints,
       updatedAtMs: data['updatedAtMs'] is int
           ? data['updatedAtMs'] as int

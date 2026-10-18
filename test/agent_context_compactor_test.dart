@@ -13,7 +13,8 @@ void main() {
     ];
     final observations = <String, String>{
       for (var index = 0; index < 6; index++)
-        'Search $index': 'Search result:\n${'lib/file_$index.dart:20 match\n' * 90}',
+        'Search $index':
+            'Search result:\n${'lib/file_$index.dart:20 match\n' * 90}',
     };
     final activeFiles = <String, String>{
       for (var index = 0; index < 6; index++)

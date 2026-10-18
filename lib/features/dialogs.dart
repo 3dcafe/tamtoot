@@ -469,21 +469,7 @@ class _SettingsDialogState extends State<SettingsDialog> {
                           ),
                         ],
                         if (section == 'agents')
-                          ListTile(
-                            contentPadding: EdgeInsets.zero,
-                            leading: const Icon(Icons.smart_toy_outlined),
-                            title: const Text('Model profiles and prompts'),
-                            subtitle: const Text(
-                              'Per-model prompts and project instructions',
-                            ),
-                            trailing: const Icon(Icons.chevron_right),
-                            onTap: () => showDialog<void>(
-                              context: context,
-                              barrierDismissible: false,
-                              builder: (_) =>
-                                  ModelProfilesDialog(session: widget.session),
-                            ),
-                          ),
+                          ModelProfilesSettings(session: widget.session),
                         if (section == 'mcp')
                           ListTile(
                             contentPadding: EdgeInsets.zero,

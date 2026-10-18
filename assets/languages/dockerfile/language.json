@@ -1,0 +1,58 @@
+{
+  "schemaVersion": 1,
+  "packageVersion": "0.1.0",
+  "id": "dockerfile",
+  "comments": {
+    "line": "#"
+  },
+  "brackets": [
+    {
+      "open": "[",
+      "close": "]"
+    },
+    {
+      "open": "{",
+      "close": "}"
+    }
+  ],
+  "autoClosingPairs": [
+    {
+      "open": "[",
+      "close": "]"
+    },
+    {
+      "open": "{",
+      "close": "}"
+    },
+    {
+      "open": "\"",
+      "close": "\""
+    },
+    {
+      "open": "'",
+      "close": "'"
+    }
+  ],
+  "icons": {
+    "symbol": "code"
+  },
+  "adapters": [],
+  "name": "Dockerfile",
+  "extensions": [
+    ".dockerfile"
+  ],
+  "filenames": [
+    "Dockerfile",
+    "Containerfile"
+  ],
+  "filenamePatterns": [
+    "^(?:[Dd][Oo][Cc][Kk][Ee][Rr][Ff][Ii][Ll][Ee]|[Cc][Oo][Nn][Tt][Aa][Ii][Nn][Ee][Rr][Ff][Ii][Ll][Ee])(?:\\..+)?$"
+  ],
+  "fileTemplates": {
+    "dockerfile": {
+      "name": "Dockerfile",
+      "extension": ".dockerfile",
+      "body": "FROM alpine:3.22\nWORKDIR /app\nCOPY . .\nCMD [\"/bin/sh\"]\n"
+    }
+  }
+}

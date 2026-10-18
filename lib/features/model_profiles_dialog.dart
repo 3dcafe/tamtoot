@@ -9,9 +9,215 @@ import '../core/agents/profile_store.dart';
 import '../core/git/http_git_service.dart';
 import 'model_request_dialog.dart';
 
-class ModelProfilesDialog extends StatefulWidget {
-  const ModelProfilesDialog({super.key, required this.session});
+class ModelProfilesSettings extends StatefulWidget {
+  const ModelProfilesSettings({super.key, required this.session});
   final IdeSession session;
+  @override
+  State<ModelProfilesSettings> createState() => _ModelProfilesSettingsState();
+}
+
+class _ModelProfilesSettingsState extends State<ModelProfilesSettings> {
+  ProfileStore? store;
+  late final root = widget.session.workspaceRoot;
+  List<({String path, String source, ModelProfile? profile})> profiles = [];
+  bool loading = true;
+  String? error;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    try {
+      final git = widget.session.git;
+      if (root == null) {
+        throw StateError('Open a project to manage its model profiles.');
+      }
+      if (git is! HttpGitService) {
+        throw UnsupportedError(
+          'This workspace provider does not support profile files.',
+        );
+      }
+      final repository = ProfileStore(git.openStore(root!));
+      final found = <({String path, String source, ModelProfile? profile})>[];
+      for (final path in await repository.list()) {
+        final source = await repository.read(path);
+        if (source == null) continue;
+        ModelProfile? profile;
+        try {
+          profile = ModelProfile.parse(source);
+        } catch (_) {
+          /* Keep invalid files visible for repair. */
+        }
+        found.add((path: path, source: source, profile: profile));
+      }
+      if (!mounted) return;
+      setState(() {
+        store = repository;
+        profiles = found;
+        error = null;
+        loading = false;
+      });
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          error = '$e';
+          loading = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _edit({String? path, String? server}) async {
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => ModelProfilesDialog(
+        session: widget.session,
+        initialPath: path,
+        initialServer: server,
+      ),
+    );
+    if (mounted) await _load();
+  }
+
+  Future<void> _delete(
+    String path,
+    String source,
+    ModelProfile? profile,
+  ) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Delete model profile?'),
+        content: Text(
+          'Delete ${profile?.name ?? path.split('/').last}? This does not delete the model or its provider account.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    setState(() => loading = true);
+    try {
+      if (widget.session.workspaceRoot != root) {
+        throw StateError('The active project changed. Reopen settings.');
+      }
+      final id = path.split('/').last.replaceFirst(RegExp(r'\.json$'), '');
+      await store!.delete(id, source);
+      widget.session.rememberModelApiKey(id, '');
+      widget.session.notifyAgentCatalogChanged();
+      await _load();
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          error = '$e';
+          loading = false;
+        });
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: [
+      Text(
+        'Model profiles and prompts',
+        style: Theme.of(context).textTheme.titleMedium,
+      ),
+      const SizedBox(height: 8),
+      const Text(
+        'Create a model profile or select an existing profile to edit its connection and prompts.',
+      ),
+      Wrap(
+        spacing: 8,
+        children: [
+          TextButton.icon(
+            onPressed: loading || store == null ? null : () => _edit(),
+            icon: const Icon(Icons.add),
+            label: const Text('New profile'),
+          ),
+          TextButton(
+            onPressed: loading || store == null
+                ? null
+                : () => _edit(server: 'openai'),
+            child: const Text('Add OpenAI GPT'),
+          ),
+          TextButton(
+            onPressed: loading || store == null
+                ? null
+                : () => _edit(server: 'ai-star'),
+            child: const Text('Add AI STAR agent'),
+          ),
+        ],
+      ),
+      if (loading) const LinearProgressIndicator(),
+      if (!loading && store != null && profiles.isEmpty)
+        const Padding(
+          padding: EdgeInsets.symmetric(vertical: 16),
+          child: Text(
+            'No model profiles yet. Create a profile to get started.',
+          ),
+        ),
+      for (final entry in profiles)
+        ListTile(
+          key: ValueKey('model-profile-${entry.path}'),
+          contentPadding: EdgeInsets.zero,
+          leading: const Icon(Icons.smart_toy_outlined),
+          title: Text(entry.profile?.name ?? entry.path.split('/').last),
+          subtitle: Text(
+            entry.profile == null
+                ? 'Invalid profile — open to inspect the error'
+                : '${entry.profile!.provider} · ${entry.profile!.model}',
+          ),
+          onTap: loading ? null : () => _edit(path: entry.path),
+          trailing: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              IconButton(
+                tooltip: 'Edit profile',
+                onPressed: loading ? null : () => _edit(path: entry.path),
+                icon: const Icon(Icons.edit_outlined),
+              ),
+              IconButton(
+                tooltip: 'Delete profile',
+                onPressed: loading
+                    ? null
+                    : () => _delete(entry.path, entry.source, entry.profile),
+                icon: const Icon(Icons.delete_outline),
+              ),
+            ],
+          ),
+        ),
+      if (error != null)
+        Text(
+          error!,
+          style: TextStyle(color: Theme.of(context).colorScheme.error),
+        ),
+    ],
+  );
+}
+
+class ModelProfilesDialog extends StatefulWidget {
+  const ModelProfilesDialog({
+    super.key,
+    required this.session,
+    this.initialPath,
+    this.initialServer,
+  });
+  final IdeSession session;
+  final String? initialPath, initialServer;
   @override
   State<ModelProfilesDialog> createState() => _ModelProfilesDialogState();
 }
@@ -43,7 +249,6 @@ class _ModelProfilesDialogState extends State<ModelProfilesDialog> {
   List<String> detectedModels = const [];
   String? connectionStatus;
   ProfileStore? store;
-  List<String> paths = [];
   String? selected, original, originalInstructions, error;
   bool busy = true, dirty = false, instructionsDirty = false;
   late final Uri? root = widget.session.workspaceRoot;
@@ -113,13 +318,15 @@ class _ModelProfilesDialogState extends State<ModelProfilesDialog> {
       );
     }
     final loaded = ProfileStore(git.openStore(root!));
-    final found = await loaded.list();
     final text = await loaded.read(ProfileStore.instructionsPath);
     if (!mounted) return;
     store = loaded;
-    paths = found;
     originalInstructions = text;
     instructions.text = text ?? '';
+    await _select(widget.initialPath);
+    if (widget.initialPath == null && widget.initialServer != null && mounted) {
+      _chooseServer(widget.initialServer!);
+    }
   });
 
   Future<bool> _confirm(String title, String message) async =>
@@ -271,9 +478,7 @@ class _ModelProfilesDialogState extends State<ModelProfilesDialog> {
           id.text = 'ai-star-agent';
         }
         model.text = 'gpt-6.1-sol';
-        parameters.text = const JsonEncoder.withIndent(
-          '  ',
-        ).convert({
+        parameters.text = const JsonEncoder.withIndent('  ').convert({
           'temperature': 0.1,
           'max_tokens': 2048,
           'enable_thinking': false,
@@ -333,7 +538,6 @@ class _ModelProfilesDialogState extends State<ModelProfilesDialog> {
     id.text = p.id;
     original = text;
     dirty = false;
-    paths = await store!.list();
     widget.session.rememberModelApiKey(p.id, apiKey.text);
     widget.session.notifyAgentCatalogChanged();
   });
@@ -350,38 +554,6 @@ class _ModelProfilesDialogState extends State<ModelProfilesDialog> {
     originalInstructions = text;
     instructionsDirty = false;
   });
-
-  Future<void> _delete() async {
-    if (!await _confirm(
-      'Delete model profile?',
-      'Delete ${id.text}? This does not delete the model or its provider account.',
-    )) {
-      return;
-    }
-    await _run(() async {
-      _checkProject();
-      widget.session.rememberModelApiKey(id.text.trim(), '');
-      await store!.delete(id.text, original!);
-      if (!mounted) return;
-      paths = await store!.list();
-      selected = null;
-      original = null;
-      dirty = false;
-      id.clear();
-      name.clear();
-      provider.text = 'ollama';
-      model.clear();
-      endpoint.text = 'http://localhost:11434/api/chat';
-      apiFormat = 'ollama';
-      serverType = 'ollama';
-      detectedModels = const [];
-      connectionStatus = null;
-      system.text = defaultSystemPrompt;
-      template.text = defaultUserTemplate;
-      parameters.text = '{}';
-      widget.session.notifyAgentCatalogChanged();
-    });
-  }
 
   Map<String, dynamic> _prompt() {
     final doc = widget.session.documents.active;
@@ -497,6 +669,33 @@ class _ModelProfilesDialogState extends State<ModelProfilesDialog> {
     if (mounted) Navigator.pop(context);
   }
 
+  Future<void> _resetPrompts() async {
+    if (!await _confirm(
+          'Reset prompts?',
+          'Replace both prompts with the built-in defaults? Save the profile to keep this change.',
+        ) ||
+        !mounted) {
+      return;
+    }
+    setState(() {
+      system.text = defaultSystemPrompt;
+      template.text = defaultUserTemplate;
+      dirty = true;
+    });
+  }
+
+  Widget _action(
+    String key,
+    String tooltip,
+    IconData icon,
+    VoidCallback action,
+  ) => IconButton(
+    key: ValueKey(key),
+    tooltip: tooltip,
+    onPressed: busy || store == null ? null : action,
+    icon: Icon(icon),
+  );
+
   Widget _field(
     String label,
     TextEditingController controller, {
@@ -521,7 +720,11 @@ class _ModelProfilesDialogState extends State<ModelProfilesDialog> {
   Widget build(BuildContext context) => PopScope(
     canPop: !busy && !dirty && !instructionsDirty,
     child: AlertDialog(
-      title: const Text('Model profiles'),
+      title: Text(
+        (selected ?? widget.initialPath) == null
+            ? 'Create model profile'
+            : 'Edit model profile',
+      ),
       content: SizedBox(
         width: 720,
         child: SingleChildScrollView(
@@ -530,81 +733,11 @@ class _ModelProfilesDialogState extends State<ModelProfilesDialog> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               const Text(
-                'Project profiles and prompt templates. Run uses the current form, including unsaved prompt edits. API keys stay in memory only and are never saved into the profile.',
+                'Configure this model connection and its prompts. Run uses the current form. API keys are stored separately from profile files.',
               ),
               const SizedBox(height: 12),
               if (busy) const LinearProgressIndicator(),
               if (store != null) ...[
-                DropdownButton<String>(
-                  key: const ValueKey('model-profile-picker'),
-                  isExpanded: true,
-                  value: selected,
-                  hint: const Text('New profile'),
-                  items: [
-                    for (final path in paths)
-                      DropdownMenuItem(
-                        value: path,
-                        child: Text(
-                          path.split('/').last,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                  ],
-                  onChanged: busy ? null : (value) => _select(value),
-                ),
-                Wrap(
-                  spacing: 8,
-                  children: [
-                    TextButton(
-                      onPressed: busy ? null : () => _select(null),
-                      child: const Text('New profile'),
-                    ),
-                    TextButton(
-                      onPressed: busy
-                          ? null
-                          : () async {
-                              if (!await _select(null)) return;
-                              if (!mounted) return;
-                              _chooseServer('openai');
-                            },
-                      child: const Text('Add OpenAI GPT'),
-                    ),
-                    TextButton(
-                      onPressed: busy
-                          ? null
-                          : () async {
-                              if (!await _select(null)) return;
-                              if (!mounted) return;
-                              _chooseServer('ai-star');
-                            },
-                      child: const Text('Add AI STAR agent'),
-                    ),
-                    TextButton(
-                      onPressed: busy || selected == null ? null : _delete,
-                      child: const Text('Delete profile'),
-                    ),
-                    TextButton(
-                      onPressed: busy
-                          ? null
-                          : () async {
-                              if (!await _confirm(
-                                'Reset prompts?',
-                                'Replace both prompts with the built-in defaults? Save the profile to keep this change.',
-                              )) {
-                                return;
-                              }
-                              if (mounted) {
-                                setState(() {
-                                  system.text = defaultSystemPrompt;
-                                  template.text = defaultUserTemplate;
-                                  dirty = true;
-                                });
-                              }
-                            },
-                      child: const Text('Reset prompts'),
-                    ),
-                  ],
-                ),
                 _field('Display name', name),
                 DropdownButtonFormField<String>(
                   key: ValueKey('server-$serverType'),
@@ -706,23 +839,6 @@ class _ModelProfilesDialogState extends State<ModelProfilesDialog> {
                   const SizedBox(height: 8),
                   _field('Or type another model id', model),
                 ],
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: [
-                    FilledButton.tonalIcon(
-                      key: const ValueKey('check-model-api'),
-                      onPressed: busy ? null : _checkConnection,
-                      icon: const Icon(Icons.health_and_safety_outlined),
-                      label: const Text('Check connection'),
-                    ),
-                    if (serverType == 'ollama')
-                      TextButton(
-                        onPressed: busy ? null : _detectOllama,
-                        child: const Text('Find Ollama models'),
-                      ),
-                  ],
-                ),
                 if (connectionStatus != null)
                   Padding(
                     padding: const EdgeInsets.only(top: 8),
@@ -812,23 +928,6 @@ class _ModelProfilesDialogState extends State<ModelProfilesDialog> {
                     border: OutlineInputBorder(),
                   ),
                 ),
-                Wrap(
-                  spacing: 8,
-                  children: [
-                    TextButton(
-                      onPressed: busy ? null : _preview,
-                      child: const Text('Preview prompts'),
-                    ),
-                    FilledButton(
-                      onPressed: busy ? null : _runModel,
-                      child: const Text('Run model…'),
-                    ),
-                    FilledButton(
-                      onPressed: busy ? null : _save,
-                      child: Text(dirty ? 'Save profile *' : 'Save profile'),
-                    ),
-                  ],
-                ),
                 const Divider(height: 28),
                 TextField(
                   controller: instructions,
@@ -839,14 +938,6 @@ class _ModelProfilesDialogState extends State<ModelProfilesDialog> {
                   decoration: const InputDecoration(
                     labelText: 'Shared project instructions',
                     border: OutlineInputBorder(),
-                  ),
-                ),
-                TextButton(
-                  onPressed: busy ? null : _saveInstructions,
-                  child: Text(
-                    instructionsDirty
-                        ? 'Save instructions *'
-                        : 'Save instructions',
                   ),
                 ),
               ],
@@ -860,7 +951,64 @@ class _ModelProfilesDialogState extends State<ModelProfilesDialog> {
         ),
       ),
       actions: [
-        TextButton(onPressed: busy ? null : _close, child: const Text('Close')),
+        SizedBox(
+          width: 720,
+          child: Wrap(
+            alignment: WrapAlignment.end,
+            spacing: 4,
+            runSpacing: 4,
+            children: [
+              _action(
+                'check-model-api',
+                'Check connection',
+                Icons.health_and_safety_outlined,
+                _checkConnection,
+              ),
+              if (serverType == 'ollama')
+                _action(
+                  'find-models',
+                  'Find Ollama models',
+                  Icons.manage_search,
+                  _detectOllama,
+                ),
+              _action(
+                'reset-prompts',
+                'Reset prompts',
+                Icons.restore,
+                _resetPrompts,
+              ),
+              _action(
+                'preview-prompts',
+                'Preview prompts',
+                Icons.visibility_outlined,
+                _preview,
+              ),
+              _action('run-model', 'Run model…', Icons.play_arrow, _runModel),
+              _action(
+                'save-profile',
+                dirty ? 'Save profile — unsaved changes' : 'Save profile',
+                dirty ? Icons.save_as_outlined : Icons.save_outlined,
+                _save,
+              ),
+              _action(
+                'save-instructions',
+                instructionsDirty
+                    ? 'Save instructions — unsaved changes'
+                    : 'Save instructions',
+                instructionsDirty
+                    ? Icons.pending_actions
+                    : Icons.description_outlined,
+                _saveInstructions,
+              ),
+              IconButton(
+                key: const ValueKey('close-profile'),
+                tooltip: 'Close profile',
+                onPressed: busy ? null : _close,
+                icon: const Icon(Icons.close),
+              ),
+            ],
+          ),
+        ),
       ],
     ),
   );
