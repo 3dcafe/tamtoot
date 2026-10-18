@@ -18,6 +18,13 @@ const bundledLanguageIds = [
   'conf',
   'dockerfile',
   'yaml',
+  'json',
+  'c',
+  'cpp',
+  'asm',
+  'arm',
+  'aarch64',
+  'gas',
 ];
 
 class SyntaxToken {
@@ -35,6 +42,8 @@ class SyntaxRule {
     this.nested = false,
     this.singleLine = false,
     this.endCapture,
+    this.endPrefix = '',
+    this.endSuffix = '',
     this.contentRules = const [],
   }) : expression = RegExp(pattern),
        end = end == null ? null : RegExp(end),
@@ -44,6 +53,7 @@ class SyntaxRule {
   final RegExp? end, escape;
   final bool nested, singleLine;
   final int? endCapture;
+  final String endPrefix, endSuffix;
   final List<SyntaxRule> contentRules;
 }
 
@@ -71,6 +81,7 @@ class LanguageDefinition {
     required this.rules,
     this.filenames = const [],
     this.filenamePatterns = const [],
+    this.caseSensitiveExtensions = const [],
     this.fileTemplates = const {},
     this.comments = const {},
     this.brackets = const [],
@@ -83,6 +94,7 @@ class LanguageDefinition {
   final String id, name, version;
   final List<String> extensions, filenames, adapters;
   final List<RegExp> filenamePatterns;
+  final List<String> caseSensitiveExtensions;
   final List<SyntaxRule> rules;
   final Map<String, dynamic> comments, snippets, indentation, icons;
   final Map<String, dynamic> fileTemplates;
@@ -108,9 +120,15 @@ class LanguageDefinition {
       final captured = rule.endCapture == null
           ? null
           : match.group(rule.endCapture!);
-      final end = captured == null || captured.isEmpty
+      final end =
+          captured == null ||
+              (captured.isEmpty &&
+                  rule.endPrefix.isEmpty &&
+                  rule.endSuffix.isEmpty)
           ? rule.end
-          : RegExp(RegExp.escape(captured));
+          : RegExp(
+              RegExp.escape('${rule.endPrefix}$captured${rule.endSuffix}'),
+            );
       return end == null ? parent : SyntaxState(rule, end, 1, parent);
     }
 
@@ -226,6 +244,14 @@ class LanguagePackageLoader {
           );
         }
         final capture = raw['endCapture'];
+        for (final field in ['endPrefix', 'endSuffix']) {
+          if (raw[field] != null &&
+              (raw[field] is! String || capture == null)) {
+            throw const SchemaException(
+              'End prefix/suffix requires endCapture and string values',
+            );
+          }
+        }
         if (capture != null && (capture is! int || capture < 1)) {
           throw const SchemaException(
             'endCapture must be a positive group number',
@@ -261,6 +287,8 @@ class LanguagePackageLoader {
           nested: raw['nested'] == true,
           singleLine: raw['singleLine'] == true,
           endCapture: capture as int?,
+          endPrefix: raw['endPrefix'] as String? ?? '',
+          endSuffix: raw['endSuffix'] as String? ?? '',
           contentRules: [
             for (final child in children) parseRule(child, depth + 1),
           ],
@@ -333,6 +361,10 @@ class LanguagePackageLoader {
         m['filenamePatterns'] ?? [],
         'filenamePatterns',
       ).map(RegExp.new).toList(),
+      caseSensitiveExtensions: stringList(
+        m['caseSensitiveExtensions'] ?? [],
+        'caseSensitiveExtensions',
+      ),
       rules: rules,
       fileTemplates: templates,
       comments: object('comments'),
@@ -358,7 +390,9 @@ class LanguageRegistry {
       if (language.filenames.contains(name) ||
           language.filenamePatterns.any((pattern) => pattern.hasMatch(name)) ||
           language.extensions.any(
-            (extension) => lower.endsWith(extension.toLowerCase()),
+            (extension) => language.caseSensitiveExtensions.contains(extension)
+                ? name.endsWith(extension)
+                : lower.endsWith(extension.toLowerCase()),
           )) {
         return language;
       }

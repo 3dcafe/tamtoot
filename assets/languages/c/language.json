@@ -1,0 +1,76 @@
+{
+  "schemaVersion": 1,
+  "packageVersion": "0.1.0",
+  "id": "c",
+  "name": "C",
+  "extensions": [
+    ".c",
+    ".i"
+  ],
+  "comments": {
+    "line": "//",
+    "block": {
+      "open": "/*",
+      "close": "*/"
+    }
+  },
+  "brackets": [
+    {
+      "open": "(",
+      "close": ")"
+    },
+    {
+      "open": "[",
+      "close": "]"
+    },
+    {
+      "open": "{",
+      "close": "}"
+    }
+  ],
+  "autoClosingPairs": [
+    {
+      "open": "(",
+      "close": ")"
+    },
+    {
+      "open": "[",
+      "close": "]"
+    },
+    {
+      "open": "{",
+      "close": "}"
+    },
+    {
+      "open": "\"",
+      "close": "\""
+    },
+    {
+      "open": "'",
+      "close": "'"
+    }
+  ],
+  "icons": {
+    "symbol": "code"
+  },
+  "adapters": [],
+  "fileTemplates": {
+    "main": {
+      "name": "C program",
+      "extension": ".c",
+      "body": "#include <stdio.h>\n\nint main(void) {\n    puts(\"Hello, world!\");\n    return 0;\n}\n"
+    },
+    "header": {
+      "name": "C header",
+      "extension": ".h",
+      "body": "#pragma once\n"
+    }
+  },
+  "indentation": {
+    "increaseAfter": "{"
+  },
+  "caseSensitiveExtensions": [
+    ".c",
+    ".i"
+  ]
+}

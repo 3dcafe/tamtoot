@@ -1,0 +1,60 @@
+{
+  "schemaVersion": 1,
+  "packageVersion": "0.1.0",
+  "id": "asm",
+  "name": "Assembly (Intel / NASM / MASM)",
+  "extensions": [
+    ".asm",
+    ".inc"
+  ],
+  "comments": {
+    "line": ";"
+  },
+  "brackets": [
+    {
+      "open": "(",
+      "close": ")"
+    },
+    {
+      "open": "[",
+      "close": "]"
+    },
+    {
+      "open": "{",
+      "close": "}"
+    }
+  ],
+  "autoClosingPairs": [
+    {
+      "open": "(",
+      "close": ")"
+    },
+    {
+      "open": "[",
+      "close": "]"
+    },
+    {
+      "open": "{",
+      "close": "}"
+    },
+    {
+      "open": "\"",
+      "close": "\""
+    },
+    {
+      "open": "'",
+      "close": "'"
+    }
+  ],
+  "icons": {
+    "symbol": "code"
+  },
+  "adapters": [],
+  "fileTemplates": {
+    "exit": {
+      "name": "Assembly (Intel / NASM / MASM) Linux exit example",
+      "extension": ".asm",
+      "body": "; NASM, x86-64 Linux\nbits 64\nsection .text\nglobal _start\n_start:\n    mov rax, 60\n    xor rdi, rdi\n    syscall\n"
+    }
+  }
+}

@@ -1,0 +1,63 @@
+{
+  "schemaVersion": 1,
+  "packageVersion": "0.1.0",
+  "id": "aarch64",
+  "name": "AArch64 assembly",
+  "extensions": [
+    ".aarch64",
+    ".arm64"
+  ],
+  "comments": {
+    "line": "//"
+  },
+  "brackets": [
+    {
+      "open": "(",
+      "close": ")"
+    },
+    {
+      "open": "[",
+      "close": "]"
+    },
+    {
+      "open": "{",
+      "close": "}"
+    }
+  ],
+  "autoClosingPairs": [
+    {
+      "open": "(",
+      "close": ")"
+    },
+    {
+      "open": "[",
+      "close": "]"
+    },
+    {
+      "open": "{",
+      "close": "}"
+    },
+    {
+      "open": "\"",
+      "close": "\""
+    },
+    {
+      "open": "'",
+      "close": "'"
+    }
+  ],
+  "icons": {
+    "symbol": "code"
+  },
+  "adapters": [],
+  "fileTemplates": {
+    "exit": {
+      "name": "AArch64 assembly Linux exit example",
+      "extension": ".aarch64.s",
+      "body": "// GNU assembler, AArch64 Linux\n.text\n.global _start\n_start:\n    mov x0, #0\n    mov x8, #93\n    svc #0\n"
+    }
+  },
+  "filenamePatterns": [
+    "^.*\\.(?:aarch64|arm64)\\.[sS]$"
+  ]
+}

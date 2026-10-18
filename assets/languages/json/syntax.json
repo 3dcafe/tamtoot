@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "packageVersion": "0.1.0",
+  "rules": [
+    {
+      "pattern": "\"(?:\\\\.|[^\"\\\\\\x00-\\x1f])*\"(?=\\s*:)",
+      "scope": "property"
+    },
+    {
+      "begin": "\"",
+      "end": "\"",
+      "escape": "\\\\.",
+      "singleLine": true,
+      "scope": "string"
+    },
+    {
+      "pattern": "(?<![\\w.+-])-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?(?=$|[\\s,\\]}])",
+      "scope": "number"
+    },
+    {
+      "pattern": "(?<![\\w])(?:true|false|null)(?=$|[\\s,\\]}])",
+      "scope": "constant"
+    },
+    {
+      "pattern": "[{}\\[\\],:]",
+      "scope": "operator"
+    }
+  ]
+}

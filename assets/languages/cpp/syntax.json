@@ -1,0 +1,66 @@
+{
+  "schemaVersion": 1,
+  "packageVersion": "0.1.0",
+  "rules": [
+    {
+      "pattern": "//.*$",
+      "scope": "comment"
+    },
+    {
+      "begin": "/\\*",
+      "end": "\\*/",
+      "scope": "comment"
+    },
+    {
+      "pattern": "^\\s*#\\s*[A-Za-z_]\\w*",
+      "scope": "directive"
+    },
+    {
+      "pattern": "(?<=include)\\s*<[^>]+>",
+      "scope": "string"
+    },
+    {
+      "begin": "(?:u8|u|U|L)?R\"([^\\s()\\\\]{0,16})\\(",
+      "end": "\\)\"",
+      "endCapture": 1,
+      "endPrefix": ")",
+      "endSuffix": "\"",
+      "scope": "string"
+    },
+    {
+      "begin": "(?:u8|u|U|L)?\"",
+      "end": "\"",
+      "escape": "\\\\.",
+      "singleLine": true,
+      "scope": "string"
+    },
+    {
+      "pattern": "(?:u8|u|U|L)?'(?:\\\\.|[^'\\\\])*'",
+      "scope": "string"
+    },
+    {
+      "pattern": "\\b(?:true|false|nullptr|NULL)\\b",
+      "scope": "constant"
+    },
+    {
+      "pattern": "\\b(?:auto|break|case|const|constexpr|continue|default|do|else|enum|extern|for|goto|if|inline|register|restrict|return|sizeof|static|static_assert|struct|switch|thread_local|typedef|typeof|typeof_unqual|union|volatile|while|_Alignas|_Alignof|_Atomic|_Generic|_Noreturn|_Static_assert|_Thread_local|alignas|alignof|asm|catch|class|concept|consteval|constinit|const_cast|co_await|co_return|co_yield|decltype|delete|dynamic_cast|explicit|export|final|friend|import|module|mutable|namespace|new|noexcept|operator|override|private|protected|public|reinterpret_cast|requires|static_cast|template|this|throw|try|typeid|typename|using|virtual|and|and_eq|bitand|bitor|compl|not|not_eq|or|or_eq|xor|xor_eq)\\b",
+      "scope": "keyword"
+    },
+    {
+      "pattern": "\\b(?:void|char|short|int|long|float|double|signed|unsigned|bool|_Bool|_Complex|_Imaginary|_BitInt|size_t|ptrdiff_t|wchar_t|char8_t|char16_t|char32_t|int8_t|int16_t|int32_t|int64_t|uint8_t|uint16_t|uint32_t|uint64_t|intptr_t|uintptr_t|string|string_view|vector|array|span|optional|variant|tuple|map|unordered_map|set|unique_ptr|shared_ptr|weak_ptr)\\b",
+      "scope": "type"
+    },
+    {
+      "pattern": "(?<![\\w.])(?:0[xX](?:[0-9a-fA-F]+(?:\\.[0-9a-fA-F]*)?|\\.[0-9a-fA-F]+)(?:[pP][+-]?\\d+)?|0[bB][01]+|(?:\\d+(?:\\.\\d*)?|\\.\\d+)(?:[eE][+-]?\\d+)?)[uUlLfF]*(?![\\w.])",
+      "scope": "number"
+    },
+    {
+      "pattern": "\\b[A-Za-z_]\\w*(?=\\s*\\()",
+      "scope": "function"
+    },
+    {
+      "pattern": "->|::|[{}\\[\\]();,.?:~!%^&*+\\-/=<>|]",
+      "scope": "operator"
+    }
+  ]
+}

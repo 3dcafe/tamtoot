@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "packageVersion": "0.1.0",
+  "snippets": {
+    "main": {
+      "prefix": "main",
+      "description": "Program entry point",
+      "body": "int main(void) {\n    return 0;\n}"
+    },
+    "for": {
+      "prefix": "for",
+      "description": "Counted loop",
+      "body": "for (int i = 0; i < count; ++i) {\n    \n}"
+    },
+    "if": {
+      "prefix": "if",
+      "body": "if (condition) {\n    \n}"
+    },
+    "struct": {
+      "prefix": "struct",
+      "body": "struct Example {\n    int value;\n};"
+    }
+  }
+}

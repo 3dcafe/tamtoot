@@ -1,0 +1,63 @@
+{
+  "schemaVersion": 1,
+  "packageVersion": "0.1.0",
+  "id": "arm",
+  "name": "ARM assembly",
+  "extensions": [
+    ".arm",
+    ".armasm"
+  ],
+  "comments": {
+    "line": "@"
+  },
+  "brackets": [
+    {
+      "open": "(",
+      "close": ")"
+    },
+    {
+      "open": "[",
+      "close": "]"
+    },
+    {
+      "open": "{",
+      "close": "}"
+    }
+  ],
+  "autoClosingPairs": [
+    {
+      "open": "(",
+      "close": ")"
+    },
+    {
+      "open": "[",
+      "close": "]"
+    },
+    {
+      "open": "{",
+      "close": "}"
+    },
+    {
+      "open": "\"",
+      "close": "\""
+    },
+    {
+      "open": "'",
+      "close": "'"
+    }
+  ],
+  "icons": {
+    "symbol": "code"
+  },
+  "adapters": [],
+  "fileTemplates": {
+    "exit": {
+      "name": "ARM assembly Linux exit example",
+      "extension": ".arm.s",
+      "body": "@ GNU assembler, ARM Linux\n.syntax unified\n.text\n.global _start\n_start:\n    mov r0, #0\n    mov r7, #1\n    svc #0\n"
+    }
+  },
+  "filenamePatterns": [
+    "^.*\\.arm\\.[sS]$"
+  ]
+}

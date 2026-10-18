@@ -129,6 +129,15 @@ Bundled language packages are versioned independently; their manifests record th
 | Dart | `.dart` | Expanded keywords and built-in types, annotations, calls, hexadecimal/exponent numbers, raw/triple-quoted strings and nested block comments |
 | Dockerfile | `Dockerfile`, `Dockerfile.*`, `Containerfile`, `Containerfile.*`, `.dockerfile` | Instructions, comments, variables, flags and quoted strings |
 | YAML | `.yaml`, `.yml`, including Docker Compose and GitHub Actions files | Mapping keys, quoted strings, comments, numbers, booleans/null, anchors, aliases and document markers |
+| JSON | `.json`, including `package.json` and application configuration | Property names, escaped strings, numbers, booleans/null and punctuation; object/array file templates |
+| C | `.c`, `.i` | Preprocessor directives, types, keywords, functions, strings, characters, numbers and multiline comments |
+| C++ / headers | `.cpp`, `.cc`, `.cxx`, `.c++`, `.C`, `.ii`, `.I`, `.h`, `.hpp`, `.hh`, `.hxx`, `.h++`, `.ipp`, `.tpp`, `.inl` | C-compatible highlighting, modern C++ keywords, templates and multiline raw strings |
+| Intel assembly | `.asm`, `.inc` | NASM/MASM-style labels, directives, instruction positions, x86/x64 and SIMD registers, immediates and semicolon comments |
+| GNU assembly | `.s`, `.S` | AT&T register/immediate prefixes, directives and hash comments |
+| ARM assembly | `.arm`, `.armasm`, `*.arm.s` / `*.arm.S` | ARM registers, immediate operands, labels, directives and `@` comments |
+| AArch64 assembly | `.aarch64`, `.arm64`, `*.aarch64.s` / `*.arm64.s` (also `.S`) | AArch64/SIMD/SVE register names, immediate operands, labels, directives and `//` comments |
+
+[C, C++ and assembly dialects: editing support and limitations](docs/c-cpp-assembly.md).
 | C# | `.cs` | Contextual keywords, attributes, directives, escaped identifiers, numeric suffixes, verbatim/interpolated/raw strings and block comments |
 | TypeScript | `.ts`, `.tsx`, `.mts`, `.cts` | Types, generics, properties, decorators and template interpolation |
 | PHP | `.php`, `.phtml`, `.php8` | Tags, variables, types, attributes, methods, properties, strings and comments |

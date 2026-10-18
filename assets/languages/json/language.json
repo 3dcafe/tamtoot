@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "packageVersion": "0.1.0",
+  "id": "json",
+  "name": "JSON",
+  "extensions": [".json"],
+  "comments": {},
+  "brackets": [
+    {"open": "{", "close": "}"},
+    {"open": "[", "close": "]"}
+  ],
+  "autoClosingPairs": [
+    {"open": "{", "close": "}"},
+    {"open": "[", "close": "]"},
+    {"open": "\"", "close": "\""}
+  ],
+  "icons": {"symbol": "code"},
+  "adapters": [],
+  "fileTemplates": {
+    "object": {
+      "name": "JSON object",
+      "extension": ".json",
+      "body": "{\n}\n"
+    },
+    "array": {
+      "name": "JSON array",
+      "extension": ".json",
+      "body": "[\n]\n"
+    }
+  }
+}

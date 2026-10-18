@@ -1,0 +1,85 @@
+{
+  "schemaVersion": 1,
+  "packageVersion": "0.1.0",
+  "id": "cpp",
+  "name": "C++",
+  "extensions": [
+    ".cpp",
+    ".cc",
+    ".cxx",
+    ".c++",
+    ".hpp",
+    ".hh",
+    ".hxx",
+    ".h++",
+    ".h",
+    ".ipp",
+    ".tpp",
+    ".inl",
+    ".C",
+    ".ii",
+    ".I"
+  ],
+  "comments": {
+    "line": "//",
+    "block": {
+      "open": "/*",
+      "close": "*/"
+    }
+  },
+  "brackets": [
+    {
+      "open": "(",
+      "close": ")"
+    },
+    {
+      "open": "[",
+      "close": "]"
+    },
+    {
+      "open": "{",
+      "close": "}"
+    }
+  ],
+  "autoClosingPairs": [
+    {
+      "open": "(",
+      "close": ")"
+    },
+    {
+      "open": "[",
+      "close": "]"
+    },
+    {
+      "open": "{",
+      "close": "}"
+    },
+    {
+      "open": "\"",
+      "close": "\""
+    },
+    {
+      "open": "'",
+      "close": "'"
+    }
+  ],
+  "icons": {
+    "symbol": "code"
+  },
+  "adapters": [],
+  "fileTemplates": {
+    "main": {
+      "name": "C++ program",
+      "extension": ".cpp",
+      "body": "#include <iostream>\n\nint main() {\n    std::cout << \"Hello, world!\\n\";\n    return 0;\n}\n"
+    },
+    "header": {
+      "name": "C++ header",
+      "extension": ".hpp",
+      "body": "#pragma once\n"
+    }
+  },
+  "indentation": {
+    "increaseAfter": "{"
+  }
+}

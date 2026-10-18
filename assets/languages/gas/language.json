@@ -1,0 +1,59 @@
+{
+  "schemaVersion": 1,
+  "packageVersion": "0.1.0",
+  "id": "gas",
+  "name": "GNU assembly (AT&T)",
+  "extensions": [
+    ".s"
+  ],
+  "comments": {
+    "line": "#"
+  },
+  "brackets": [
+    {
+      "open": "(",
+      "close": ")"
+    },
+    {
+      "open": "[",
+      "close": "]"
+    },
+    {
+      "open": "{",
+      "close": "}"
+    }
+  ],
+  "autoClosingPairs": [
+    {
+      "open": "(",
+      "close": ")"
+    },
+    {
+      "open": "[",
+      "close": "]"
+    },
+    {
+      "open": "{",
+      "close": "}"
+    },
+    {
+      "open": "\"",
+      "close": "\""
+    },
+    {
+      "open": "'",
+      "close": "'"
+    }
+  ],
+  "icons": {
+    "symbol": "code"
+  },
+  "adapters": [],
+  "fileTemplates": {
+    "exit": {
+      "name": "GNU assembly (AT&T) Linux exit example",
+      "extension": ".s",
+      "body": "# GNU assembler, x86-64 Linux\n.text\n.global _start\n_start:\n    mov $60, %rax\n    xor %rdi, %rdi\n    syscall\n"
+    }
+  }
+}

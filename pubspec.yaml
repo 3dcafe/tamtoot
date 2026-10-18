@@ -115,6 +115,13 @@ flutter:
     - assets/languages/conf/
     - assets/languages/dockerfile/
     - assets/languages/yaml/
+    - assets/languages/json/
+    - assets/languages/c/
+    - assets/languages/cpp/
+    - assets/languages/asm/
+    - assets/languages/arm/
+    - assets/languages/aarch64/
+    - assets/languages/gas/
     - assets/languages/css/
     - assets/languages/scss/
     - assets/languages/html/
