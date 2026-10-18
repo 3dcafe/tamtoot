@@ -1,5 +1,26 @@
 {
   "schemaVersion": 1,
   "packageVersion": "0.1.0",
-  "snippets": {}
+  "snippets": {
+    "arm-function": {
+      "prefix": "arm-function",
+      "description": "Thumb function",
+      "body": ".thumb_func\n.global example\n.type example, %function\nexample:\n    push {r4, lr}\n    @ body: preserve callee-saved registers\n    pop {r4, pc}\n.size example, .-example"
+    },
+    "arm-barrier": {
+      "prefix": "arm-barrier",
+      "description": "ARMv7 memory barriers",
+      "body": "dmb sy\ndsb sy\nisb sy"
+    },
+    "arm-primask": {
+      "prefix": "arm-primask",
+      "description": "Cortex-M save and mask interrupts",
+      "body": "mrs r0, PRIMASK\ncpsid i\n@ critical section: preserve r0\nmsr PRIMASK, r0"
+    },
+    "arm-mmio": {
+      "prefix": "arm-mmio",
+      "description": "32-bit MMIO read/write",
+      "body": "ldr r0, =0x40000000 @ replace with device register address\nldr r1, [r0]\n@ update r1 according to the register specification\nstr r1, [r0]"
+    }
+  }
 }

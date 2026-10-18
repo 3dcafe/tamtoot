@@ -55,6 +55,11 @@
       "name": "Assembly (Intel / NASM / MASM) Linux exit example",
       "extension": ".asm",
       "body": "; NASM, x86-64 Linux\nbits 64\nsection .text\nglobal _start\n_start:\n    mov rax, 60\n    xor rdi, rdi\n    syscall\n"
+    },
+    "boot-sector": {
+      "name": "x86 BIOS boot sector (NASM flat binary)",
+      "extension": ".asm",
+      "body": "; Build: nasm -f bin boot.asm -o boot.bin\n; Legacy x86 BIOS only; not UEFI. Does not load a kernel.\nbits 16\norg 0x7c00\n\njmp 0x0000:start\nstart:\n    cli\n    xor ax, ax\n    mov ds, ax\n    mov es, ax\n    mov ss, ax\n    mov sp, 0x7c00\n    cld\n    sti\n    mov ax, 0x0e54 ; BIOS teletype: T\n    xor bx, bx\n    int 0x10\n.halt:\n    cli\n    hlt\n    jmp .halt\n\ntimes 510 - ($ - $$) db 0\ndw 0xaa55\n"
     }
   }
 }

@@ -1,5 +1,31 @@
 {
   "schemaVersion": 1,
   "packageVersion": "0.1.0",
-  "snippets": {}
+  "snippets": {
+    "a64-function": {
+      "prefix": "a64-function",
+      "description": "AAPCS64 function frame",
+      "body": ".global example\n.type example, %function\nexample:\n    stp x29, x30, [sp, #-16]!\n    mov x29, sp\n    // body: preserve any other callee-saved registers used\n    ldp x29, x30, [sp], #16\n    ret\n.size example, .-example"
+    },
+    "a64-barrier": {
+      "prefix": "a64-barrier",
+      "description": "AArch64 memory barriers",
+      "body": "dmb sy\ndsb sy\nisb"
+    },
+    "a64-currentel": {
+      "prefix": "a64-currentel",
+      "description": "Read current exception level",
+      "body": "mrs x0, CurrentEL\nlsr x0, x0, #2"
+    },
+    "a64-vbar": {
+      "prefix": "a64-vbar",
+      "description": "Set EL1 vector base (requires EL1+, aligned table)",
+      "body": "adrp x0, vector_table\nadd x0, x0, :lo12:vector_table\nmsr VBAR_EL1, x0\nisb"
+    },
+    "a64-mmio": {
+      "prefix": "a64-mmio",
+      "description": "32-bit MMIO read/write",
+      "body": "ldr x0, =0x09000000 // replace with device register address\nldr w1, [x0]\n// update w1 according to the register specification\nstr w1, [x0]"
+    }
+  }
 }

@@ -1,0 +1,73 @@
+{
+  "schemaVersion": 1,
+  "packageVersion": "0.1.0",
+  "id": "linker",
+  "name": "GNU linker script",
+  "extensions": [
+    ".ld",
+    ".lds"
+  ],
+  "comments": {
+    "block": {
+      "open": "/*",
+      "close": "*/"
+    }
+  },
+  "brackets": [
+    {
+      "open": "(",
+      "close": ")"
+    },
+    {
+      "open": "[",
+      "close": "]"
+    },
+    {
+      "open": "{",
+      "close": "}"
+    }
+  ],
+  "autoClosingPairs": [
+    {
+      "open": "(",
+      "close": ")"
+    },
+    {
+      "open": "[",
+      "close": "]"
+    },
+    {
+      "open": "{",
+      "close": "}"
+    },
+    {
+      "open": "\"",
+      "close": "\""
+    },
+    {
+      "open": "'",
+      "close": "'"
+    }
+  ],
+  "icons": {
+    "symbol": "code"
+  },
+  "adapters": [],
+  "fileTemplates": {
+    "kernel": {
+      "name": "x86 ELF32 kernel linker script",
+      "extension": ".ld",
+      "body": "/* Requires a matching ELF32 boot entry named _start. */\nOUTPUT_FORMAT(elf32-i386)\nENTRY(_start)\nSECTIONS\n{\n    . = 1M;\n    .text ALIGN(4K) : { *(.text .text.*) }\n    .rodata ALIGN(4K) : { *(.rodata .rodata.*) }\n    .data ALIGN(4K) : { *(.data .data.*) }\n    .bss ALIGN(4K) (NOLOAD) : {\n        __bss_start = .;\n        *(COMMON) *(.bss .bss.*)\n        __bss_end = .;\n    }\n    __kernel_end = .;\n}\n"
+    },
+    "cortex-m3": {
+      "name": "Cortex-M3 FLASH/RAM layout (adapt to device)",
+      "extension": ".ld",
+      "body": "/* Example memory map, NOT a device definition. Add device IRQs to startup. */\nENTRY(Reset_Handler)\nMEMORY {\n    FLASH (rx) : ORIGIN = 0x08000000, LENGTH = 256K\n    RAM (rwx) : ORIGIN = 0x20000000, LENGTH = 64K\n}\n__stack_top = ORIGIN(RAM) + LENGTH(RAM);\nSECTIONS {\n    .isr_vector : { KEEP(*(.isr_vector)) } > FLASH\n    .text : { *(.text*) *(.rodata*) . = ALIGN(4); } > FLASH\n    .data : {\n        . = ALIGN(4); __data_start = .;\n        *(.data*) . = ALIGN(4); __data_end = .;\n    } > RAM AT> FLASH\n    __data_load = LOADADDR(.data);\n    .bss (NOLOAD) : {\n        . = ALIGN(4); __bss_start = .;\n        *(.bss*) *(COMMON) . = ALIGN(4); __bss_end = .;\n    } > RAM\n    ASSERT(__bss_end <= __stack_top - 4096, \"RAM overlaps reserved stack\")\n}\n"
+    },
+    "aarch64": {
+      "name": "AArch64 RAM image layout (adapt to firmware)",
+      "extension": ".ld",
+      "body": "/* Example RAM base; firmware must load ELF segments here. Single core only. */\nOUTPUT_ARCH(aarch64)\nENTRY(_start)\nSECTIONS {\n    . = 0x40080000;\n    .text : { KEEP(*(.text.boot)) *(.text*) }\n    .rodata : { *(.rodata*) }\n    .data : { *(.data*) }\n    .bss ALIGN(16) (NOLOAD) : {\n        __bss_start = .; *(.bss*) *(COMMON)\n        . = ALIGN(16); __bss_end = .;\n    }\n    .stack ALIGN(16) (NOLOAD) : { . += 16384; __stack_top = .; }\n}\n"
+    }
+  }
+}

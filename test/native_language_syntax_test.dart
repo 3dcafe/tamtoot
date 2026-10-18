@@ -6,6 +6,76 @@ import 'language_syntax_test.dart' show loadLanguage, scopeAt;
 
 void main() {
   test(
+    'ARM bare-metal tools use separate profiles and paired layout symbols',
+    () {
+      final arm = loadLanguage('arm');
+      final a64 = loadLanguage('aarch64');
+      final linker = loadLanguage('linker');
+      expect(scopeAt(arm, 'mrs r0, PRIMASK', 'PRIMASK'), 'type');
+      expect(scopeAt(arm, 'msr CONTROL, r0', 'CONTROL'), 'type');
+      expect(scopeAt(a64, 'mrs x0, CurrentEL', 'CurrentEL'), 'type');
+      expect(scopeAt(a64, 'msr VBAR_EL1, x0', 'VBAR_EL1'), 'type');
+      expect(scopeAt(a64, 'mrs x0, S3_0_C1_C0_0', 'S3_0_C1_C0_0'), 'type');
+      expect(arm.snippets.containsKey('arm-primask'), true);
+      expect(a64.snippets.containsKey('a64-vbar'), true);
+      for (final entry in {'arm': 'cortex-m3', 'aarch64': 'aarch64'}.entries) {
+        final lang = loadLanguage(entry.key);
+        final startup =
+            lang.fileTemplates[entry.key == 'arm'
+                    ? 'cortex-m3-startup'
+                    : 'bare-metal-startup']['body']
+                as String;
+        final layout = linker.fileTemplates[entry.value]['body'] as String;
+        for (final symbol in ['__stack_top', '__bss_start', '__bss_end']) {
+          expect(startup, contains(symbol));
+          expect(layout, contains(symbol));
+        }
+        expect(startup, contains('kernel_main'));
+      }
+      expect(
+        arm.fileTemplates['cortex-m3-startup']['body'],
+        contains('__data_load'),
+      );
+      expect(
+        loadLanguage('cpp').fileTemplates['arm-kernel']['body'],
+        contains('wfi'),
+      );
+    },
+  );
+  test('OS development syntax and templates are available', () {
+    final asm = loadLanguage('asm');
+    expect(scopeAt(asm, '%%again: dec ecx', '%%again:'), 'function');
+    expect(scopeAt(asm, 'jmp %%again', '%%again'), 'annotation');
+    expect(scopeAt(asm, 'mov eax, %1', '%1'), 'annotation');
+    expect(scopeAt(asm, r'times 510 - ($ - $$) db 0', r'$$'), 'constant');
+    expect(asm.snippets.containsKey('nasm-macro'), true);
+    expect(asm.fileTemplates['boot-sector']['body'], contains('dw 0xaa55'));
+    final cpp = loadLanguage('cpp');
+    expect(scopeAt(cpp, '__asm__ volatile ("hlt");', '__asm__'), 'keyword');
+    expect(
+      scopeAt(cpp, 'struct __attribute__((packed)) Gate {};', '__attribute__'),
+      'keyword',
+    );
+    expect(scopeAt(cpp, "auto mask = 0b1111'0000;", "0b1111'0000"), 'number');
+    expect(scopeAt(cpp, "auto size = 1'048'576uz;", "1'048'576uz"), 'number');
+    expect(scopeAt(cpp, 'auto size = 4_KiB;', '4_KiB'), 'number');
+    expect(cpp.snippets.containsKey('outb'), true);
+    final linker = loadLanguage('linker');
+    final registry = LanguageRegistry()..register(linker);
+    expect(registry.forPath('kernel.lds')?.id, 'linker');
+    expect(scopeAt(linker, 'KEEP(*(.boot))', 'KEEP'), 'keyword');
+    expect(
+      scopeAt(linker, '.text ALIGN(4K) : { *(.text.*) }', '.text'),
+      'annotation',
+    );
+    expect(scopeAt(linker, '. = 1M;', '1M'), 'number');
+    final comment = linker.tokenizeLine('/* layout');
+    expect(
+      linker.tokenizeLine('ENTRY ignored', comment.state).tokens.single.scope,
+      'comment',
+    );
+  });
+  test(
     'custom raw-string terminators validate their capture configuration',
     () {
       final manifest = jsonEncode({

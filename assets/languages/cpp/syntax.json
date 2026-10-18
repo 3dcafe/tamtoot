@@ -43,6 +43,10 @@
       "scope": "constant"
     },
     {
+      "pattern": "\\b(?:__asm__|__asm|__volatile__|__volatile|__attribute__|__declspec|__restrict__|__restrict|__extension__|__inline__|__inline|__builtin_[A-Za-z_]\\w*)\\b",
+      "scope": "keyword"
+    },
+    {
       "pattern": "\\b(?:auto|break|case|const|constexpr|continue|default|do|else|enum|extern|for|goto|if|inline|register|restrict|return|sizeof|static|static_assert|struct|switch|thread_local|typedef|typeof|typeof_unqual|union|volatile|while|_Alignas|_Alignof|_Atomic|_Generic|_Noreturn|_Static_assert|_Thread_local|alignas|alignof|asm|catch|class|concept|consteval|constinit|const_cast|co_await|co_return|co_yield|decltype|delete|dynamic_cast|explicit|export|final|friend|import|module|mutable|namespace|new|noexcept|operator|override|private|protected|public|reinterpret_cast|requires|static_cast|template|this|throw|try|typeid|typename|using|virtual|and|and_eq|bitand|bitor|compl|not|not_eq|or|or_eq|xor|xor_eq)\\b",
       "scope": "keyword"
     },
@@ -51,7 +55,7 @@
       "scope": "type"
     },
     {
-      "pattern": "(?<![\\w.])(?:0[xX](?:[0-9a-fA-F]+(?:\\.[0-9a-fA-F]*)?|\\.[0-9a-fA-F]+)(?:[pP][+-]?\\d+)?|0[bB][01]+|(?:\\d+(?:\\.\\d*)?|\\.\\d+)(?:[eE][+-]?\\d+)?)[uUlLfF]*(?![\\w.])",
+      "pattern": "(?<![\\w.])(?:0[xX][0-9a-fA-F](?:[0-9a-fA-F]|'[0-9a-fA-F])*(?:\\.[0-9a-fA-F]*)?(?:[pP][+-]?\\d+)?|0[bB][01](?:[01]|'[01])*|(?:\\d(?:\\d|'\\d)*(?:\\.\\d*)?|\\.\\d+)(?:[eE][+-]?\\d+)?)(?:[uUlLfFzZ]*|_[A-Za-z_]\\w*)(?![\\w.])",
       "scope": "number"
     },
     {

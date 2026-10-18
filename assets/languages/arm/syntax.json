@@ -42,6 +42,10 @@
       "scope": "keyword"
     },
     {
+      "pattern": "\\b(?:[mM][sS][pP]|[pP][sS][pP]|[pP][rR][iI][mM][aA][sS][kK]|[bB][aA][sS][eE][pP][rR][iI]|[fF][aA][uU][lL][tT][mM][aA][sS][kK]|[cC][oO][nN][tT][rR][oO][lL])\\b",
+      "scope": "type"
+    },
+    {
       "pattern": "(?<![\\w.$])%?(?:[fF][pP][sS][cC][rR]|[aA][pP][sS][rR]|[cC][pP][sS][rR]|[sS][pP][sS][rR]|[dD]27|[rR]15|[sS]18|[dD]26|[dD]22|[sS]24|[sS]21|[dD]14|[qQ]15|[dD]11|[dD]23|[sS]25|[sS]26|[sS]16|[sS]19|[dD]15|[dD]28|[rR]14|[sS]14|[sS]28|[dD]12|[dD]19|[dD]31|[sS]12|[dD]13|[dD]10|[qQ]10|[qQ]12|[qQ]14|[rR]11|[dD]29|[rR]10|[rR]12|[sS]29|[sS]22|[sS]13|[qQ]11|[qQ]13|[sS]30|[dD]30|[sS]17|[dD]21|[sS]31|[dD]24|[rR]13|[dD]18|[dD]20|[sS]11|[dD]25|[dD]17|[sS]23|[sS]20|[dD]16|[sS]27|[sS]15|[sS]10|[qQ]9|[rR]1|[sS]3|[qQ]1|[sS]4|[rR]0|[sS][lL]|[lL][rR]|[sS]7|[rR]8|[qQ]7|[sS][bB]|[sS]9|[fF][pP]|[dD]1|[qQ]6|[sS]0|[dD]5|[rR]4|[iI][pP]|[rR]9|[qQ]3|[qQ]0|[sS]2|[sS]8|[sS]6|[sS]1|[qQ]4|[pP][cC]|[dD]6|[rR]5|[dD]3|[dD]0|[sS]5|[qQ]5|[qQ]2|[sS][pP]|[dD]9|[qQ]8|[rR]3|[dD]7|[dD]8|[rR]7|[rR]2|[rR]6|[dD]4|[dD]2)(?:\\.[0-9]*[bBhHsSdDqQ])?(?![\\w.$])",
       "scope": "type"
     },

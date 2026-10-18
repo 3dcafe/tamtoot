@@ -21,12 +21,20 @@
       "scope": "string"
     },
     {
-      "pattern": "^\\s*(?:[A-Za-z_.$?][\\w.$?]*|\\d+):",
+      "pattern": "^\\s*(?:%%[A-Za-z_][\\w.$?]*|[A-Za-z_.$?][\\w.$?]*|\\d+):",
       "scope": "function"
     },
     {
       "pattern": "^\\s*[A-Za-z_.$?][\\w.$?]*(?=\\s+(?:[pP][rR][oO][cC]|[eE][nN][dD][pP]|[lL][aA][bB][eE][lL]|[eE][qQ][uU])\\b)",
       "scope": "function"
+    },
+    {
+      "pattern": "%%[A-Za-z_][\\w.$?]*|%\\$[A-Za-z_][\\w.$?]*|%\\d+|%\\{\\d+\\}",
+      "scope": "annotation"
+    },
+    {
+      "pattern": "\\$\\$|\\$|\\b(?:__BITS__|__OUTPUT_FORMAT__|__NASM_VERSION_ID__)\\b",
+      "scope": "constant"
     },
     {
       "pattern": "(?:^\\s*\\.[A-Za-z_]\\w*|%[A-Za-z_]\\w*|\\b(?:[sS][eE][cC][tT][iI][oO][nN]|[sS][eE][gG][mM][eE][nN][tT]|[eE][nN][dD][sS]|[gG][lL][oO][bB][aA][lL]|[eE][xX][tT][eE][rR][nN]|[pP][uU][bB][lL][iI][cC]|[bB][iI][tT][sS]|[dD][eE][fF][aA][uU][lL][tT]|[oO][rR][gG]|[eE][qQ][uU]|[dD][bB]|[dD][wW]|[dD][dD]|[dD][qQ]|[dD][tT]|[dD][oO]|[dD][yY]|[dD][zZ]|[rR][eE][sS][bB]|[rR][eE][sS][wW]|[rR][eE][sS][dD]|[rR][eE][sS][qQ]|[aA][lL][iI][gG][nN]|[tT][iI][mM][eE][sS]|[sS][tT][rR][uU][cC]|[eE][nN][dD][sS][tT][rR][uU][cC]|[pP][rR][oO][cC]|[eE][nN][dD][pP]|[eE][nN][dD]|[mM][aA][cC][rR][oO]|[eE][nN][dD][mM]|[bB][yY][tT][eE]|[wW][oO][rR][dD]|[dD][wW][oO][rR][dD]|[qQ][wW][oO][rR][dD]|[pP][tT][rR]|[oO][fF][fF][sS][eE][tT]|[nN][eE][aA][rR]|[fF][aA][rR])\\b)",

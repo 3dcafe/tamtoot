@@ -55,6 +55,11 @@
       "name": "AArch64 assembly Linux exit example",
       "extension": ".aarch64.s",
       "body": "// GNU assembler, AArch64 Linux\n.text\n.global _start\n_start:\n    mov x0, #0\n    mov x8, #93\n    svc #0\n"
+    },
+    "bare-metal-startup": {
+      "name": "AArch64 single-core startup",
+      "extension": ".aarch64.s",
+      "body": "// AArch64 single-core entry; firmware must supply executable RAM with MMU off.\n// Requires writable RAM, matching linker script, and a valid current EL SP bank.\n// No EL transition, vector setup, secondary-core release or constructors here.\n.section .text.boot,\"ax\"\n.balign 16\n.global _start\n_start:\n    msr DAIFSet, #0xf\n    ldr x0, =__stack_top\n    mov sp, x0\n    ldr x0, =__bss_start\n    ldr x1, =__bss_end\n1:  cmp x0, x1\n    b.hs 2f\n    str xzr, [x0], #8\n    b 1b\n2:  bl kernel_main\n3:  wfi\n    b 3b\n"
     }
   },
   "filenamePatterns": [

@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "packageVersion": "0.1.0",
+  "rules": [
+    {
+      "begin": "/\\*",
+      "end": "\\*/",
+      "scope": "comment"
+    },
+    {
+      "begin": "\"",
+      "end": "\"",
+      "singleLine": true,
+      "scope": "string"
+    },
+    {
+      "pattern": "\\b(?:ENTRY|OUTPUT_FORMAT|OUTPUT_ARCH|SECTIONS|MEMORY|PHDRS|KEEP|ALIGN|BLOCK|AT|ADDR|LOADADDR|SIZEOF|SIZEOF_HEADERS|ORIGIN|LENGTH|PROVIDE|PROVIDE_HIDDEN|HIDDEN|ASSERT|DEFINED|EXTERN|INCLUDE|INPUT|GROUP|SEARCH_DIR|STARTUP|SORT|SORT_BY_NAME|SORT_BY_ALIGNMENT|NOLOAD|COMMON|ABSOLUTE|MAX|MIN|NEXT)\\b",
+      "scope": "keyword"
+    },
+    {
+      "pattern": "/DISCARD/|\\.[A-Za-z_][\\w.*]*",
+      "scope": "annotation"
+    },
+    {
+      "pattern": "\\b(?:0[xX][0-9a-fA-F]+|\\d+[KkMm]?)\\b",
+      "scope": "number"
+    },
+    {
+      "pattern": "[{}()[\\];,:=+*/<>!&|~?%-]",
+      "scope": "operator"
+    }
+  ]
+}

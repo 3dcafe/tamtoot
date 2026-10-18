@@ -77,6 +77,16 @@
       "name": "C++ header",
       "extension": ".hpp",
       "body": "#pragma once\n"
+    },
+    "kernel": {
+      "name": "Freestanding x86 C++ kernel entry",
+      "extension": ".cpp",
+      "body": "// Requires a boot entry that sets the stack and clears .bss.\n// No hosted runtime, exceptions, RTTI or static constructors.\nextern \"C\" [[noreturn]] void kernel_main() {\n    for (;;) {\n        __asm__ volatile (\"cli; hlt\" : : : \"memory\");\n    }\n}\n"
+    },
+    "arm-kernel": {
+      "name": "Freestanding ARM/AArch64 C++ kernel entry",
+      "extension": ".cpp",
+      "body": "// Pair with the matching ARM startup and linker script.\n// Interrupts remain masked; initialize vectors/hardware before enabling them.\nextern \"C\" [[noreturn]] void kernel_main() {\n    for (;;) {\n        __asm__ volatile (\"wfi\" : : : \"memory\");\n    }\n}\n"
     }
   },
   "indentation": {

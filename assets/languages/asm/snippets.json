@@ -1,5 +1,31 @@
 {
   "schemaVersion": 1,
   "packageVersion": "0.1.0",
-  "snippets": {}
+  "snippets": {
+    "nasm-macro": {
+      "prefix": "nasm-macro",
+      "description": "NASM macro with invocation-local label",
+      "body": "%macro wait_loop 1\n%%again:\n    dec %1\n    jnz %%again\n%endmacro"
+    },
+    "nasm-section": {
+      "prefix": "nasm-section",
+      "description": "NASM code section",
+      "body": "section .text\nbits 32\nglobal entry\nentry:\n    ret"
+    },
+    "nasm-guard": {
+      "prefix": "nasm-guard",
+      "description": "NASM include guard",
+      "body": "%ifndef HEADER_INC\n%define HEADER_INC\n\n%endif"
+    },
+    "nasm-struct": {
+      "prefix": "nasm-struct",
+      "description": "NASM structure offsets",
+      "body": "struc example\n    .value: resd 1\nendstruc"
+    },
+    "nasm-align": {
+      "prefix": "nasm-align",
+      "description": "Align the following data",
+      "body": "align 16\n"
+    }
+  }
 }

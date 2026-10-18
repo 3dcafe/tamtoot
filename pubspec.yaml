@@ -122,6 +122,7 @@ flutter:
     - assets/languages/arm/
     - assets/languages/aarch64/
     - assets/languages/gas/
+    - assets/languages/linker/
     - assets/languages/css/
     - assets/languages/scss/
     - assets/languages/html/

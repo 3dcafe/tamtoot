@@ -32,6 +32,36 @@
     "template": {
       "prefix": "template",
       "body": "template <typename T>\nT identity(T value) {\n    return value;\n}"
+    },
+    "extern-c": {
+      "prefix": "extern-c",
+      "description": "C ABI declaration",
+      "body": "extern \"C\" void kernel_main();"
+    },
+    "packed": {
+      "prefix": "packed",
+      "description": "GCC/Clang packed hardware layout",
+      "body": "struct __attribute__((packed)) Descriptor {\n    unsigned short limit;\n    unsigned int base;\n};\nstatic_assert(sizeof(Descriptor) == 6);"
+    },
+    "mmio": {
+      "prefix": "mmio",
+      "description": "Typed memory-mapped register access",
+      "body": "#include <stdint.h>\n\ninline volatile uint32_t& mmio32(uintptr_t address) {\n    return *reinterpret_cast<volatile uint32_t*>(address);\n}"
+    },
+    "outb": {
+      "prefix": "outb",
+      "description": "x86 GCC/Clang port output (ring 0)",
+      "body": "#include <stdint.h>\n\ninline void outb(uint16_t port, uint8_t value) {\n    __asm__ volatile (\"outb %0, %1\" : : \"a\"(value), \"Nd\"(port));\n}"
+    },
+    "inb": {
+      "prefix": "inb",
+      "description": "x86 GCC/Clang port input (ring 0)",
+      "body": "#include <stdint.h>\n\ninline uint8_t inb(uint16_t port) {\n    uint8_t value;\n    __asm__ volatile (\"inb %1, %0\" : \"=a\"(value) : \"Nd\"(port));\n    return value;\n}"
+    },
+    "arm-barrier": {
+      "prefix": "arm-barrier",
+      "description": "ARMv7/AArch64 full-system barriers (GCC/Clang)",
+      "body": "__asm__ volatile (\"dmb sy\\ndsb sy\\nisb\" : : : \"memory\");"
     }
   }
 }
