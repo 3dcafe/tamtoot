@@ -29,6 +29,68 @@ const prompt = {
 };
 
 void main() {
+  test('Ollama model-list URL resolves to the selected generation format', () {
+    for (final format in ['ollama', 'chat-completions']) {
+      expect(
+        profile(
+          format,
+          'http://192.168.0.85:11434/api/tags/',
+        ).requestUri().path,
+        format == 'ollama' ? '/api/chat' : '/v1/chat/completions',
+      );
+      expect(
+        profile(
+          format,
+          'http://192.168.0.85:11434/proxy/api/tags',
+        ).requestUri().path,
+        format == 'ollama' ? '/proxy/api/chat' : '/proxy/v1/chat/completions',
+      );
+    }
+  });
+  test('local generation omits authentication when token is empty', () async {
+    final client = ModelClient(
+      client: MockClient((request) async {
+        expect(request.method, 'POST');
+        expect(request.url.path, '/v1/chat/completions');
+        expect(request.headers.containsKey('authorization'), false);
+        return http.Response(
+          jsonEncode({
+            'choices': [
+              {
+                'message': {'content': 'Hello'},
+                'finish_reason': 'stop',
+              },
+            ],
+          }),
+          200,
+        );
+      }),
+    );
+    final reply = await client.send(
+      profile('chat-completions', 'http://192.168.0.85:11434/api/tags'),
+      {'systemPrompt': '', 'userPrompt': 'Hello'},
+    );
+    expect(reply.text, 'Hello');
+  });
+  test('405 reports the request endpoint and preserves HTTP status', () async {
+    final client = ModelClient(
+      client: MockClient(
+        (request) async => http.Response('Method Not Allowed', 405),
+      ),
+    );
+    await expectLater(
+      client.send(profile(), {'systemPrompt': '', 'userPrompt': 'test'}),
+      throwsA(
+        isA<ModelApiException>()
+            .having((e) => e.statusCode, 'status', 405)
+            .having(
+              (e) => e.message,
+              'endpoint hint',
+              contains('POST https://api.example.test/v1/chat/completions'),
+            ),
+      ),
+    );
+  });
   test('css and cshtml attachments are inlined as text for STAR', () {
     final css = ModelAttachment(
       name: 'site.css',
@@ -474,7 +536,11 @@ void main() {
     expect(ModelClient.tokenBudgetKey('ollama'), 'num_predict');
     expect(ModelClient.tokenBudgetKey('anthropic'), 'max_tokens');
 
-    final chat = ModelClient.disableThinkingParameters('chat-completions');
+    expect(ModelClient.disableThinkingParameters('chat-completions'), isEmpty);
+    final chat = ModelClient.disableThinkingParameters(
+      'chat-completions',
+      provider: 'ai-star',
+    );
     expect(chat['enable_thinking'], isFalse);
     expect(chat['thinking'], {'type': 'disabled'});
     expect(chat['chat_template_kwargs'], {'enable_thinking': false});
@@ -626,27 +692,84 @@ void main() {
     );
   });
 
-  test('parseReply extracts JSON action from reasoning_content', () {
+  test('parseReply never promotes reasoning actions to executable content', () {
+    for (final field in ['reasoning_content', 'reasoning']) {
+      expect(
+        () => ModelClient.parseReply('chat-completions', {
+          'choices': [
+            {
+              'finish_reason': 'length',
+              'message': {
+                'content': '',
+                field:
+                    '{"action":"write_file","path":"injected.txt","content":"private-reasoning-marker"}',
+              },
+            },
+          ],
+        }),
+        throwsA(
+          isA<ModelEmptyAnswerException>()
+              .having((e) => e.reasoningOnly, 'reasoningOnly', true)
+              .having(
+                (e) => e.message,
+                'hidden reasoning',
+                isNot(contains('private-reasoning-marker')),
+              ),
+        ),
+      );
+    }
     final reply = ModelClient.parseReply('chat-completions', {
       'choices': [
         {
-          'finish_reason': 'stop',
           'message': {
-            'role': 'assistant',
-            'content': '',
-            'reasoning_content':
-                'I will edit now. {"action":"read_file","path":"lib/a.dart"} done.',
+            'content':
+                '<think>{"action":"write_file","path":"wrong","content":"x"}</think>{"action":"finish","summary":"done"}',
           },
         },
       ],
     });
-    expect(jsonDecode(reply.text), {
-      'action': 'read_file',
-      'path': 'lib/a.dart',
-    });
-    expect(reply.note, contains('reasoning_content'));
+    expect(jsonDecode(reply.text)['action'], 'finish');
   });
 
+  test('thinking tags inside an action file string are preserved', () {
+    final text = jsonEncode({
+      'action': 'write_file',
+      'path': 'example.html',
+      'content': '<think>literal markup</think>',
+    });
+    expect(
+      ModelClient.parseReply('chat-completions', {
+        'choices': [
+          {
+            'message': {'content': text},
+          },
+        ],
+      }).text,
+      text,
+    );
+  });
+  test('strict content mode does not promote native tool calls', () {
+    expect(
+      () => ModelClient.parseReply('chat-completions', {
+        'choices': [
+          {
+            'message': {
+              'content': '',
+              'tool_calls': [
+                {
+                  'function': {
+                    'name': 'write_file',
+                    'arguments': '{"path":"injected","content":"x"}',
+                  },
+                },
+              ],
+            },
+          },
+        ],
+      }, allowNativeToolActions: false),
+      throwsA(isA<ModelEmptyAnswerException>()),
+    );
+  });
   test('parseReply converts known tool_calls into JSON actions', () {
     final reply = ModelClient.parseReply('chat-completions', {
       'choices': [

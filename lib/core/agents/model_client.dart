@@ -5,7 +5,8 @@ import 'model_attachment.dart';
 import 'model_profile.dart';
 
 class ModelApiException implements Exception {
-  const ModelApiException(this.message);
+  const ModelApiException(this.message, {this.statusCode});
+  final int? statusCode;
   final String message;
   @override
   String toString() => message;
@@ -70,6 +71,7 @@ class ModelClient {
     ModelProfile profile,
     Map<String, dynamic> prompt, {
     String apiKey = '',
+    bool allowNativeToolActions = true,
     List<ModelAttachment> attachments = const [],
     void Function(String delta)? onDelta,
   }) async {
@@ -123,7 +125,12 @@ class ModelClient {
       request.bodyBytes = encoded;
       final reply =
           await Future.any([
-            _perform(request, profile.apiFormat, onDelta: onDelta),
+            _perform(
+              request,
+              profile.apiFormat,
+              onDelta: onDelta,
+              allowNativeToolActions: allowNativeToolActions,
+            ),
             _cancelled.future.then<ModelReply>(
               (_) => throw const ModelApiException('Request cancelled.'),
             ),
@@ -160,7 +167,7 @@ class ModelClient {
       // Keep the empty-answer type so callers can run a cheap recovery request.
       throw e is ModelEmptyAnswerException
           ? e.withMessage(bounded)
-          : ModelApiException(bounded);
+          : ModelApiException(bounded, statusCode: e.statusCode);
     } on FormatException {
       throw const ModelApiException(
         'Invalid endpoint, parameters or API response. Check the selected API format.',
@@ -195,21 +202,24 @@ class ModelClient {
   ///
   /// Only fields the matching API actually documents are sent: unknown
   /// parameters make strict gateways answer HTTP 400 instead of text.
-  static Map<String, dynamic> disableThinkingParameters(String apiFormat) =>
-      switch (apiFormat) {
-        'anthropic' => const {
-          'thinking': {'type': 'disabled'},
-        },
-        'responses' => const {
-          'reasoning': {'effort': 'minimal'},
-        },
-        'ollama' => const {'think': false},
-        _ => const {
-          'enable_thinking': false,
-          'thinking': {'type': 'disabled'},
-          'chat_template_kwargs': {'enable_thinking': false},
-        },
-      };
+  static Map<String, dynamic> disableThinkingParameters(
+    String apiFormat, {
+    String provider = '',
+  }) => switch (apiFormat) {
+    'anthropic' => const {
+      'thinking': {'type': 'disabled'},
+    },
+    'responses' => const {
+      'reasoning': {'effort': 'minimal'},
+    },
+    'ollama' => const {'think': false},
+    _ when provider == 'ai-star' => const {
+      'enable_thinking': false,
+      'thinking': {'type': 'disabled'},
+      'chat_template_kwargs': {'enable_thinking': false},
+    },
+    _ => const {},
+  };
 
   /// Chat Completions gateways accept OpenAI JSON mode; the others do not.
   static bool supportsJsonObjectMode(String apiFormat) =>
@@ -238,10 +248,12 @@ class ModelClient {
     // Ollama carries sampling knobs in `options`, but `think` is top-level.
     final ollamaOptions = Map<String, dynamic>.from(p.parameters);
     final ollamaThink = ollamaOptions.remove('think');
+    final ollamaFormat = ollamaOptions.remove('format');
     return switch (p.apiFormat) {
       'ollama' => {
         'model': p.model,
         if (ollamaThink != null) 'think': ollamaThink!,
+        'format': ?ollamaFormat,
         'messages': [
           if (system.isNotEmpty) {'role': 'system', 'content': system},
           {
@@ -460,6 +472,7 @@ class ModelClient {
     http.Request request,
     String format, {
     void Function(String delta)? onDelta,
+    bool allowNativeToolActions = true,
   }) async {
     final response = await _client.send(request);
     if (format == 'ollama' && onDelta != null && response.statusCode == 200) {
@@ -480,11 +493,15 @@ class ModelClient {
     }
     if (response.statusCode < 200 || response.statusCode >= 300) {
       final apiError = data is Map ? data['error'] : null;
-      final message = apiError is Map && apiError['message'] is String
+      final message = apiError is String
+          ? apiError
+          : apiError is Map && apiError['message'] is String
           ? apiError['message'] as String
           : '';
       final hint = switch (response.statusCode) {
         401 || 403 => 'Check the API key and model access.',
+        404 || 405 =>
+          'Check the API endpoint and format: POST ${request.url}. Use a generation endpoint, not a model list or web interface.',
         429 => 'Rate limit or quota reached. Retry later.',
         >= 300 && < 400 =>
           'Redirects are not followed. Enter the final API endpoint.',
@@ -492,6 +509,7 @@ class ModelClient {
       };
       throw ModelApiException(
         'HTTP ${response.statusCode}: $hint${message.isEmpty ? '' : '\n$message'}',
+        statusCode: response.statusCode,
       );
     }
     if (data is! Map<String, dynamic>) {
@@ -502,21 +520,11 @@ class ModelClient {
         'API returned an error instead of a model answer.',
       );
     }
-    try {
-      return parseReply(format, data);
-    } on ModelEmptyAnswerException catch (e) {
-      final choice = () {
-        final choices = data['choices'];
-        if (choices is List && choices.isNotEmpty) return choices.first;
-        if (format == 'anthropic') return data['content'];
-        if (format == 'responses') return data['output'];
-        if (format == 'ollama') return data['message'];
-        return data;
-      }();
-      throw e.withMessage(
-        '${e.message}\nraw: ${_previewDiagnostic(choice, max: 900)}',
-      );
-    }
+    return parseReply(
+      format,
+      data,
+      allowNativeToolActions: allowNativeToolActions,
+    );
   }
 
   Future<ModelReply> _ollamaStream(
@@ -571,7 +579,11 @@ class ModelClient {
     'finish',
   };
 
-  static ModelReply parseReply(String format, Map<String, dynamic> data) {
+  static ModelReply parseReply(
+    String format,
+    Map<String, dynamic> data, {
+    bool allowNativeToolActions = true,
+  }) {
     final parts = <String>[];
     String note = '';
     final hints = <String>[];
@@ -583,7 +595,17 @@ class ModelClient {
     void content(dynamic value) {
       rawContent ??= value;
       if (value is String) {
-        if (value.trim().isNotEmpty) parts.add(value);
+        final answer = value
+            .replaceAll(
+              RegExp(r'^\s*<think>[\s\S]*?</think>\s*', caseSensitive: false),
+              '',
+            )
+            .replaceFirst(
+              RegExp(r'^\s*<think>[\s\S]*$', caseSensitive: false),
+              '',
+            )
+            .trim();
+        if (answer.isNotEmpty) parts.add(answer);
         return;
       }
       if (value is List) {
@@ -593,7 +615,7 @@ class ModelClient {
           if ({'text', 'output_text'}.contains(type) &&
               block['text'] is String &&
               (block['text'] as String).trim().isNotEmpty) {
-            parts.add(block['text'] as String);
+            content(block['text'] as String);
           }
           if (type == 'refusal' &&
               block['refusal'] is String &&
@@ -640,7 +662,17 @@ class ModelClient {
       final message = data['message'];
       if (message is Map) {
         content(message['content']);
+        final reasoning = [
+          message['thinking'],
+          message['reasoning_content'],
+          message['reasoning'],
+        ].whereType<String>().where((v) => v.trim().isNotEmpty).firstOrNull;
+        if (reasoning is String) reasoningText = reasoning;
         noteToolCalls(message['tool_calls']);
+      }
+      finishReason = data['done_reason'] as String?;
+      if (finishReason == 'length') {
+        note = 'Output token limit reached; answer may be incomplete.';
       }
       if (data['prompt_eval_count'] is num) {
         data['usage'] = {
@@ -691,8 +723,10 @@ class ModelClient {
               (message['refusal'] as String).trim().isNotEmpty) {
             parts.add(message['refusal'] as String);
           }
-          final reasoning =
-              message['reasoning_content'] ?? message['reasoning'];
+          final reasoning = [
+            message['reasoning_content'],
+            message['reasoning'],
+          ].whereType<String>().where((v) => v.trim().isNotEmpty).firstOrNull;
           if (reasoning is String && reasoning.trim().isNotEmpty) {
             reasoningText = reasoning;
             hints.add('reasoning_content: ${reasoning.length} chars');
@@ -727,25 +761,13 @@ class ModelClient {
 
     // Providers sometimes ignore tool_choice:none and return native tool_calls.
     // Convert a known Tamtoot action into the text JSON the agent engine expects.
-    if (parts.join().trim().isEmpty) {
+    if (allowNativeToolActions && parts.join().trim().isEmpty) {
       final converted = _actionFromNativeTools(rawToolCalls);
       if (converted != null) {
         parts.add(converted);
         note = note.isEmpty
             ? 'Converted native tool_calls into a JSON action.'
             : '$note Converted native tool_calls into a JSON action.';
-      }
-    }
-
-    // Thinking models may put a JSON action only inside reasoning_content, or
-    // burn the whole budget on reasoning and leave content empty.
-    if (parts.join().trim().isEmpty && reasoningText != null) {
-      final embedded = _embeddedJsonAction(reasoningText);
-      if (embedded != null) {
-        parts.add(embedded);
-        note = note.isEmpty
-            ? 'Extracted JSON action from reasoning_content.'
-            : '$note Extracted JSON action from reasoning_content.';
       }
     }
 
@@ -767,10 +789,7 @@ class ModelClient {
     // If content is prose/reasoning but embeds a JSON action, prefer the action.
     if (!_looksLikeJsonAction(parts.join('\n'))) {
       final fromParts = _embeddedJsonAction(parts.join('\n'));
-      final fromReasoning = reasoningText == null
-          ? null
-          : _embeddedJsonAction(reasoningText);
-      final embedded = fromParts ?? fromReasoning;
+      final embedded = fromParts;
       if (embedded != null) {
         return ModelReply(
           embedded,
@@ -900,10 +919,10 @@ class ModelClient {
     final lines = <String>[
       'No text answer returned.',
       if (finishReason != null) 'finish_reason: $finishReason',
-      'content: ${_previewDiagnostic(content)}',
+      'content: ${content == null ? 'null' : 'no usable answer'}',
       if (toolCalls != null) 'tool_calls: ${_previewDiagnostic(toolCalls)}',
       if (reasoning != null)
-        'reasoning_content: ${_previewDiagnostic(reasoning, max: 400)}',
+        'reasoning_content: ${reasoning.length} chars (not displayed)',
       if (model != null && model.isNotEmpty) 'model: $model',
       if (hints.isNotEmpty) 'hints: ${hints.join('; ')}',
     ];

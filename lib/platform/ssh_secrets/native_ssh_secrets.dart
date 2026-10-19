@@ -31,7 +31,11 @@ class NativeSshSecrets implements SshSecretStore {
   @override
   Future<Uint8List?> read(String id) {
     _validate(id);
-    return channel.invokeMethod<Uint8List>('read', {'id': id});
+    // Engine message buffers may be read-only. Authentication wipes secrets
+    // after use, so return an owned, writable copy rather than the channel view.
+    return channel
+        .invokeMethod<Uint8List>('read', {'id': id})
+        .then((value) => value == null ? null : Uint8List.fromList(value));
   }
 
   @override

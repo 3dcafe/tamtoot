@@ -7,6 +7,7 @@ import '../git/multi_root_store.dart';
 import 'agent_context_compactor.dart';
 import 'model_attachment.dart';
 import 'model_client.dart';
+import 'agent_generation.dart';
 import 'model_profile.dart';
 import 'hook_runner.dart';
 import 'command_runner.dart';
@@ -16,6 +17,10 @@ import 'agent_privacy.dart';
 
 class AgentRunOptions {
   const AgentRunOptions({
+    this.localMaxTokens = 4096,
+    this.localTemperature = 0.15,
+    this.localResponseFormat = 'auto',
+    this.localThinking = 'off',
     this.yolo = true,
     this.enhancedPrivacy = false,
     this.timeout = const Duration(minutes: 10),
@@ -26,6 +31,9 @@ class AgentRunOptions {
     this.maxInvestigationIterationsBeforeFirstEdit = 12,
   });
 
+  final int localMaxTokens;
+  final double localTemperature;
+  final String localResponseFormat, localThinking;
   final bool yolo, enhancedPrivacy;
   final Duration timeout;
   final int maxConsecutiveMistakes, maxIterations;
@@ -96,6 +104,8 @@ class AgentTaskEngine {
   final McpRegistry? mcp;
   final List<Uri> workspaceRoots;
   bool _stopped = false;
+  AgentRunOptions _generation = const AgentRunOptions();
+  String _responseMode = 'json_object';
   AgentPrivacy? _privacy;
   int get _excerptLimit => _privacy == null ? maxExcerptCharacters : 2000;
   ModelClient? _active;
@@ -173,6 +183,28 @@ Relative paths only. Never touch .git or .tamtoot.
 Reuse retained excerpts — do not re-read unchanged files.
 ''';
 
+  static const localProtocol = r'''
+You are a coding agent. Return exactly one JSON object in message.content.
+No reasoning, plans, markdown or claimed tool results. Wait for the actual host result after each action.
+Actions:
+{"action":"list_files","path":""}
+{"action":"search_files","query":"literal text","path":"optional/folder"}
+{"action":"read_file","path":"file","startLine":1,"lineCount":60}
+{"action":"read_files","paths":["file1","file2"]}
+{"action":"write_file","path":"file","content":"complete file text"}
+{"action":"replace_in_file","path":"file","oldText":"unique current fragment","newText":"replacement"}
+{"action":"mcp_call","server":"name","tool":"name","arguments":{}}
+{"action":"say","text":"brief update"}
+{"action":"finish","summary":"what was done and what was not tested"}
+Only relative project paths; never .git or .tamtoot. No shell/build/test tool is available.
+Read existing files before modifying them. New files may be written directly.
+If the project index is empty, do not search/list it; write the requested files.
+After a successful write do not repeat it: create the next missing file, read the changed files once, then finish.
+Preserve unrelated code. Use small unique replace_in_file edits for existing files.
+C# console projects need both a .csproj and Program.cs. C# language version and .NET target version are distinct.
+Never claim compilation/tests ran; file reads only check contents.
+''';
+
   /// One navigation action is a few dozen tokens; this is pure headroom.
   static const int agentActionTokens = 700;
 
@@ -222,6 +254,24 @@ Reuse retained excerpts — do not re-read unchanged files.
     if (options.maxConsecutiveMistakes < 1 || options.maxIterations < 1) {
       throw const ModelApiException('Agent limits must be positive.');
     }
+    if (options.localMaxTokens < 256 ||
+        options.localMaxTokens > 32768 ||
+        !options.localTemperature.isFinite ||
+        options.localTemperature < 0 ||
+        options.localTemperature > 2 ||
+        !{
+          'auto',
+          'text',
+          'json_object',
+          'json_schema',
+        }.contains(options.localResponseFormat) ||
+        !{'off', 'on', 'default'}.contains(options.localThinking)) {
+      throw const ModelApiException('Invalid local generation options.');
+    }
+    _generation = options;
+    _responseMode = options.localResponseFormat == 'auto'
+        ? (profile.isOllama ? 'json_schema' : 'json_object')
+        : options.localResponseFormat;
     _privacy = options.enhancedPrivacy ? AgentPrivacy() : null;
     if (_privacy != null) {
       try {
@@ -297,6 +347,21 @@ Reuse retained excerpts — do not re-read unchanged files.
               ? <String>[]
               : (await store.listFiles('')).where(_useful).toList())
           ..sort();
+    final emptyProject = _privacy == null && indexedPaths.isEmpty;
+    if (emptyProject) {
+      transcript.add(
+        'Project is empty at task start. Phase: implementation. Create files directly with write_file; do not search or list an empty project. For a C# console project create both Program.cs and a .csproj. C# 8 means LangVersion 8.0, not .NET 8. Use a compatible supported target, explicit Program.Main and no top-level statements. Verify created files with read_file/read_files. Never claim a build ran without a tool result.',
+      );
+    }
+    final csharpScaffold =
+        emptyProject &&
+        RegExp(r'(c#|csharp|си.?шарп)', caseSensitive: false).hasMatch(task) &&
+        RegExp(r'(project|прилож|проект)', caseSensitive: false).hasMatch(task);
+    if (csharpScaffold) {
+      transcript.add(
+        'C# scaffold recipe: write Hello.csproj using a minimal SDK project, without XML namespaces, schemas or DOCTYPE: <Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net8.0</TargetFramework><LangVersion>8.0</LangVersion></PropertyGroup></Project>. For C# 8 write Program.cs with using System; class Program { static void Main() { Console.WriteLine("Привет мир"); } }. Adapt the greeting to the task. Each file is a separate write_file action. Then read_files for both and finish. Do not claim compilation.',
+      );
+    }
     final listedDirectories = <String>{};
     if (_privacy == null) {
       _rememberObservation(
@@ -362,7 +427,8 @@ Reuse retained excerpts — do not re-read unchanged files.
     var consecutiveSearches = 0;
     var consecutiveBlockedReads = 0;
     var requireReadAfterSearch = false;
-    var jsonMode = true;
+    var jsonMode = !profile.isLocal || options.localResponseFormat != 'text';
+    String? repairHint;
     final completedSearches = <_CompletedSearch>[];
     final focusLinesByPath = <String, List<int>>{};
     var searchesBeforeEdit = 0;
@@ -381,7 +447,7 @@ Reuse retained excerpts — do not re-read unchanged files.
     }
     final systemPrompt = [
       _privacy == null ? profile.systemPrompt : defaultSystemPrompt,
-      protocol,
+      profile.isLocal ? localProtocol : protocol,
       if (_privacy != null)
         'Enhanced privacy overrides context defaults: no project index, instructions or retained memory was supplied. Discover only the files needed for this task. Read one file at a time, at most 40 lines. Hosts are represented by private-*.invalid aliases; preserve aliases exactly in edits. Their real values are restored locally. Do not guess real hosts. MCP and hooks are disabled.',
       if (_privacy == null && mcp != null && mcp!.tools.isNotEmpty)
@@ -392,6 +458,16 @@ Reuse retained excerpts — do not re-read unchanged files.
         throw const ModelApiException('Agent stopped.');
       }
       onEvent(AgentEvent('iteration', 'Iteration $iteration'));
+      if (csharpScaffold) {
+        final hasProject = indexedPaths.any((p) => p.endsWith('.csproj'));
+        final hasProgram = indexedPaths.any((p) => p.endsWith('.cs'));
+        _replaceNote(
+          transcript,
+          'Scaffold status:',
+          'Scaffold status: ${hasProject ? 'csproj exists; do not rewrite it.' : 'Create the .csproj.'} ${hasProgram ? 'C# source exists.' : 'Create Program.cs.'} ${hasProject && hasProgram ? 'Read both files and finish. No build tool is available.' : 'Create the missing file next.'}',
+        );
+      }
+
       final budgetReached =
           !hasEdited &&
           _investigationExhausted(
@@ -410,7 +486,7 @@ Reuse retained excerpts — do not re-read unchanged files.
         );
       }
       final implementationPhase =
-          hasEdited || budgetReached || activeFiles.isNotEmpty;
+          emptyProject || hasEdited || budgetReached || activeFiles.isNotEmpty;
       final compaction = contextCompactor.compact(
         transcript: transcript,
         observations: observations,
@@ -436,37 +512,64 @@ Reuse retained excerpts — do not re-read unchanged files.
           options: options,
           maxTokens: implementationPhase ? agentEditTokens : agentActionTokens,
           jsonMode: jsonMode,
-          systemPrompt: systemPrompt,
-          userPrompt: _buildPrompt(
-            transcript,
-            activeFiles,
-            observations,
-            memoryPrompt,
-            compactedContext,
-          ),
+          systemPrompt: repairHint == null
+              ? systemPrompt
+              : 'Return exactly one valid JSON action in message.content. No explanation.\n${profile.isLocal ? localProtocol : protocol}',
+          userPrompt: repairHint == null
+              ? _buildPrompt(
+                  transcript,
+                  activeFiles,
+                  observations,
+                  memoryPrompt,
+                  compactedContext,
+                )
+              : 'Task: ${_bounded(task, 2000)}\n$repairHint\nKnown paths: ${indexedPaths.take(12).join(', ')}\nEmit one complete small JSON action. Never invent tool results.',
           attachments: iteration == 1 ? attachments : const [],
           // Empty content is answered by a tiny request instead of a full
           // agent turn: no transcript, no file context, no reasoning echo.
-          onEmptyAnswer: (failure) => _recoveryRequest(
-            options: options,
-            failure: failure,
-            jsonMode: jsonMode,
-            implementationPhase: implementationPhase,
-            task: task,
-            knownFiles: _knownRelevantFiles(
-              activeFiles: activeFiles,
-              searches: completedSearches,
-              memoryFiles: memoryFiles,
-            ),
-          ),
+          onEmptyAnswer: (failure) {
+            return _recoveryRequest(
+              options: options,
+              failure: failure,
+              jsonMode: jsonMode,
+              implementationPhase: implementationPhase,
+              task: task,
+              knownFiles: _knownRelevantFiles(
+                activeFiles: activeFiles,
+                searches: completedSearches,
+                memoryFiles: memoryFiles,
+              ),
+            );
+          },
         );
+        repairHint = null;
       } on ModelApiException catch (e) {
-        if (jsonMode && ModelClient.rejectedJsonObjectMode(e.message)) {
+        if (jsonMode &&
+            (ModelClient.rejectedJsonObjectMode(e.message) ||
+                (profile.isLocal &&
+                    e.statusCode == 400 &&
+                    e.message.contains('format')))) {
+          if (profile.isLocal && _responseMode == 'json_schema') {
+            _responseMode = 'json_object';
+            onEvent(
+              AgentEvent(
+                'context',
+                'Provider rejected JSON Schema; trying JSON Object mode',
+              ),
+            );
+            continue;
+          }
           jsonMode = false;
           onEvent(
             AgentEvent('context', 'Provider rejected JSON mode; disabled it'),
           );
           continue;
+        }
+        if (e is ModelEmptyAnswerException ||
+            e.message.startsWith('Model still returned empty content') ||
+            {401, 403, 404, 405}.contains(e.statusCode)) {
+          onEvent(AgentEvent('error', e.message));
+          rethrow;
         }
         mistakes++;
         onEvent(AgentEvent('error', e.message));
@@ -501,7 +604,24 @@ Reuse retained excerpts — do not re-read unchanged files.
       late final Map<String, dynamic> action;
       late final String name;
       try {
-        final objects = _extractJsonObjects(reply.text);
+        var objects = _extractJsonObjects(reply.text);
+        if (profile.isLocal) {
+          final source = reply.text
+              .trim()
+              .replaceFirst(RegExp(r'^```(?:json)?\s*'), '')
+              .replaceFirst(RegExp(r'\s*```$'), '');
+          try {
+            final decoded = jsonDecode(source);
+            if (decoded is! Map<String, dynamic>) throw const FormatException();
+          } on FormatException {
+            throw ModelApiException(
+              _looksTruncated(source, reply.note)
+                  ? 'Model output was truncated; emit a smaller complete JSON action.'
+                  : 'Model returned an invalid agent action: exactly one JSON object is required.',
+            );
+          }
+          objects = [source];
+        }
         if (objects.isEmpty) {
           if (_looksTruncated(reply.text, reply.note)) {
             throw ModelApiException(
@@ -521,6 +641,14 @@ Reuse retained excerpts — do not re-read unchanged files.
           finalReadUsed: finalReadUsed,
           transcript: transcript,
         );
+        AgentGeneration.validate(action);
+        if (emptyProject &&
+            !hasEdited &&
+            {'list_files', 'search_files'}.contains(action['action'])) {
+          throw const ModelApiException(
+            'Project index is empty. Do not search/list again; create the requested files with write_file or finish if no edits are needed.',
+          );
+        }
         name = action['action'] as String;
         if (name == 'replace_in_file' || name == 'write_file') {
           _assertCompactEditPayload(name, action);
@@ -964,6 +1092,13 @@ Reuse retained excerpts — do not re-read unchanged files.
               AgentEvent('tool', 'Wrote $path', data: {'changedPath': path}),
             );
             runEditedPaths.add(path);
+            if (!indexedPaths.contains(path)) {
+              indexedPaths.add(path);
+              indexedPaths.sort();
+            }
+            if (_privacy == null)
+              observations['Project index'] =
+                  'Known project files after edits: ${indexedPaths.take(80).join(', ')}';
             runFingerprints[path] = ProjectMemory.fingerprintText(content);
             transcript.add(
               'Tool write_file result: wrote $path successfully. Inspect it before finishing.',
@@ -1012,6 +1147,20 @@ Reuse retained excerpts — do not re-read unchanged files.
               'MCP $server/$tool result:\n${_bounded(jsonEncode(result), 12000)}',
             );
           case 'finish':
+            if (csharpScaffold && profile.isLocal) {
+              final files = await store.listFiles('');
+              if (!files.any((p) => p.endsWith('.csproj')) ||
+                  !files.any((p) => p.endsWith('.cs'))) {
+                throw const ModelApiException(
+                  'C# application is incomplete: create a .csproj and Program.cs before finish. C# 8 requires LangVersion 8.0, not a .NET 8 assumption.',
+                );
+              }
+              if (runEditedPaths.any((p) => !runReadPaths.contains(p))) {
+                throw const ModelApiException(
+                  'Read the created project files to verify their contents before finish. No build has been run.',
+                );
+              }
+            }
             final summary = _string(action, 'summary');
             _flushMemoryOnFailure = null;
             await _persistProjectMemory(
@@ -1047,6 +1196,11 @@ Reuse retained excerpts — do not re-read unchanged files.
       } catch (e) {
         mistakes++;
         final message = e is ModelApiException ? e.message : '$e';
+        if (e is FormatException ||
+            message.contains('invalid agent action') ||
+            message.contains('truncated')) {
+          repairHint = 'Previous action was invalid or truncated. $message';
+        }
         onEvent(AgentEvent('error', message));
         final editHint =
             message.contains('truncated') ||
@@ -1136,6 +1290,7 @@ Reuse retained excerpts — do not re-read unchanged files.
           'userPrompt': _privacy?.mask(userPrompt) ?? userPrompt,
         },
         apiKey: apiKey,
+        allowNativeToolActions: !profile.isLocal,
         attachments: _privacy?.prepareAttachments(attachments) ?? attachments,
       );
     } finally {
@@ -1160,7 +1315,7 @@ Reuse retained excerpts — do not re-read unchanged files.
         'context',
         'Recovery request after '
             '${failure.reasoningOnly ? 'a reasoning-only reply' : 'empty content'} '
-            '(minimal prompt, $agentRecoveryTokens tokens)',
+            '(minimal prompt, ${profile.isLocal ? _generation.localMaxTokens : agentRecoveryTokens} tokens)',
       ),
     );
     const system =
@@ -1588,16 +1743,60 @@ Reuse retained excerpts — do not re-read unchanged files.
     final params = Map<String, dynamic>.from(profile.parameters);
     // Each API format names the completion budget differently.
     params.removeWhere((key, _) => ModelClient.tokenBudgetKeys.contains(key));
-    params[ModelClient.tokenBudgetKey(format)] = maxTokens;
-    for (final entry in ModelClient.disableThinkingParameters(format).entries) {
+    params[ModelClient.tokenBudgetKey(format)] = profile.isLocal
+        ? _generation.localMaxTokens
+        : maxTokens;
+    if (profile.isLocal) params['temperature'] = _generation.localTemperature;
+    for (final entry in ModelClient.disableThinkingParameters(
+      format,
+      provider: profile.provider,
+    ).entries) {
       final existing = params[entry.key];
       final value = entry.value;
       params[entry.key] = existing is Map && value is Map
           ? {...Map<String, dynamic>.from(existing), ...value}
           : value;
     }
-    if (jsonMode && ModelClient.supportsJsonObjectMode(format)) {
-      // The protocol is a single JSON object, so ask the API to enforce it.
+    if (profile.isLocal) {
+      for (final key in [
+        'enable_thinking',
+        'thinking',
+        'chat_template_kwargs',
+        'think',
+        'reasoning_effort',
+      ]) {
+        params.remove(key);
+      }
+      if (_generation.localThinking != 'default') {
+        if (format == 'ollama') {
+          params['think'] = _generation.localThinking == 'on';
+        }
+        // Ollama-compatible endpoints support this standard field; no template kwargs.
+        if (format == 'chat-completions' && profile.isOllama) {
+          params['reasoning_effort'] = _generation.localThinking == 'on'
+              ? 'medium'
+              : 'none';
+        }
+      }
+      params.remove('response_format');
+      params.remove('format');
+      if (jsonMode && format == 'ollama') {
+        params['format'] = _responseMode == 'json_schema'
+            ? AgentGeneration.schema
+            : 'json';
+      }
+      if (jsonMode && format == 'chat-completions') {
+        params['response_format'] = _responseMode == 'json_schema'
+            ? {
+                'type': 'json_schema',
+                'json_schema': {
+                  'name': 'agent_action',
+                  'schema': AgentGeneration.schema,
+                },
+              }
+            : {'type': 'json_object'};
+      }
+    } else if (jsonMode && ModelClient.supportsJsonObjectMode(format)) {
       params['response_format'] = const {'type': 'json_object'};
     }
     return ModelProfile(

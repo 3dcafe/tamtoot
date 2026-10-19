@@ -211,10 +211,20 @@ class _SshConnectionDialogState extends State<SshConnectionDialog> {
     if (widget.profile.authentication == SshAuthentication.password &&
         !_usedStoredPassword) {
       _usedStoredPassword = true;
-      final secret = await widget.session.sshProfiles.readSecret(
-        widget.profile,
-      );
-      if (secret != null) return secret;
+      try {
+        final secret = await widget.session.sshProfiles.readSecret(
+          widget.profile,
+        );
+        if (secret != null) return secret;
+      } catch (_) {
+        // A locked/unavailable keychain must not prevent manual password entry.
+        if (mounted) {
+          setState(
+            () => banner =
+                'Saved SSH password could not be read. Enter it for this connection.',
+          );
+        }
+      }
     }
     final entered = await _credentials(
       'SSH password',
@@ -296,9 +306,11 @@ class _SshConnectionDialogState extends State<SshConnectionDialog> {
       if (mounted && generation == _generation) {
         setState(() => error = e.message);
       }
-    } catch (_) {
+    } catch (e) {
       if (mounted && generation == _generation) {
-        setState(() => error = 'SSH sign-in failed.');
+        setState(
+          () => error = 'SSH sign-in interface failed (${e.runtimeType}).',
+        );
       }
     } finally {
       if (mounted && generation == _generation) {

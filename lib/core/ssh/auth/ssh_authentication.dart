@@ -65,8 +65,6 @@ extension SshAuthenticationProtocol on SshClient {
     final packet = await _nextAuth(), reader = SshReader(packet)..byte();
     if (packet[0] == 52) {
       reader.end();
-      transport.authenticationSucceeded();
-      _state(SshClientState.ready);
       return true;
     }
     if (packet[0] != 51) {
@@ -288,6 +286,7 @@ extension SshAuthenticationProtocol on SshClient {
     _username = username;
     _banner = onBanner;
     _state(SshClientState.authenticating);
+    var stage = 'requesting the authentication service';
     try {
       if (!_serviceStarted) {
         await _send(
@@ -306,6 +305,7 @@ extension SshAuthenticationProtocol on SshClient {
         reader.end();
         _serviceStarted = true;
       }
+      stage = 'requesting authentication methods';
       if (_methods == null) {
         await _send(_request('none').take());
         if (await _response()) return;
@@ -317,12 +317,14 @@ extension SshAuthenticationProtocol on SshClient {
             identity != null &&
             available.contains('publickey') &&
             used.add('publickey')) {
+          stage = 'loading or using the private key';
           if (await _publicKey(identity)) return;
           continue;
         }
         if (password != null &&
             available.contains('password') &&
             used.add('password')) {
+          stage = 'reading or submitting the password';
           if (await _password(password)) return;
           continue;
         }
@@ -330,12 +332,14 @@ extension SshAuthenticationProtocol on SshClient {
             identity != null &&
             available.contains('publickey') &&
             used.add('publickey')) {
+          stage = 'loading or using the private key';
           if (await _publicKey(identity)) return;
           continue;
         }
         if (keyboard != null &&
             available.contains('keyboard-interactive') &&
             used.add('keyboard-interactive')) {
+          stage = 'answering the server authentication challenge';
           if (await _keyboard(keyboard)) return;
           continue;
         }
@@ -352,8 +356,12 @@ extension SshAuthenticationProtocol on SshClient {
     } on SshException catch (e) {
       if (e is! SshAuthenticationRejected) _fatal(e.message);
       rethrow;
-    } catch (_) {
-      throw const SshException('SSH sign-in failed.');
+    } catch (e) {
+      // Never include exception text: credential providers can embed secrets.
+      throw SshException(
+        transport.error ??
+            'SSH sign-in failed while $stage (${e.runtimeType}).',
+      );
     } finally {
       if (state == SshClientState.authenticating) _state(SshClientState.idle);
     }

@@ -19,8 +19,9 @@ class SshClient {
   SshClient(this.transport) {
     _subscription = transport.messages.listen(
       _receive,
-      onDone: () => _terminate('SSH connection closed.'),
-      onError: (Object _) => _terminate('SSH connection failed.'),
+      onDone: () => _terminate(transport.error ?? 'SSH connection closed.'),
+      onError: (Object _) =>
+          _terminate(transport.error ?? 'SSH connection failed.'),
     );
   }
   final SshTransport transport;
@@ -104,6 +105,14 @@ class SshClient {
       if (type == 6 || (type >= 50 && type <= 79)) {
         if (state != SshClientState.authenticating) {
           throw const SshException('Unexpected SSH authentication response.');
+        }
+        // OpenSSH can send connection requests immediately after USERAUTH_SUCCESS.
+        // Commit the state before delivering the success to an async waiter.
+        if (type == 52) {
+          final reader = SshReader(packet)..byte();
+          reader.end();
+          transport.authenticationSucceeded();
+          _state(SshClientState.ready);
         }
         final waiting = _authWaiting;
         if (waiting != null) {

@@ -146,6 +146,88 @@ void channels(
 }
 
 void main() {
+  test(
+    'password provider errors identify the stage without leaking secrets',
+    () async {
+      final wire = ProtocolTransport();
+      final client = SshClient(wire);
+      authScript(wire, (method, reader) {
+        reader.end();
+        reject(wire, ['password']);
+      });
+      try {
+        await expectLater(
+          client.login(
+            'alice',
+            password: () async => throw StateError('secret-test-password'),
+          ),
+          throwsA(
+            isA<SshException>().having(
+              (e) => e.message,
+              'safe diagnostic',
+              allOf(
+                contains('reading or submitting the password'),
+                contains('StateError'),
+                isNot(contains('secret-test-password')),
+              ),
+            ),
+          ),
+        );
+        expect(wire.closed, false);
+      } finally {
+        await client.close();
+      }
+    },
+  );
+  test(
+    'authentication success followed immediately by OpenSSH hostkeys stays connected',
+    () async {
+      final wire = ProtocolTransport();
+      final client = SshClient(wire);
+      authScript(wire, (method, reader) {
+        reader.end();
+        wire.emit([52]);
+        wire.emit(
+          (SshWriter()
+                ..byte(80)
+                ..text('hostkeys-00@openssh.com')
+                ..byte(0)
+                ..string([1, 2, 3]))
+              .take(),
+        );
+      });
+      try {
+        await client.login('alice');
+        await Future<void>.delayed(Duration.zero);
+        expect(client.state, SshClientState.ready);
+        expect(wire.closed, false);
+      } finally {
+        await client.close();
+      }
+    },
+  );
+
+  test('transport disconnect reason reaches an active command', () async {
+    final wire = ProtocolTransport();
+    final client = await ready(wire);
+    channels(wire, exit: false);
+    final channel = await client.openExec('test');
+    final result = expectLater(
+      channel.result,
+      throwsA(
+        isA<SshException>().having(
+          (e) => e.message,
+          'message',
+          'SSH operation timed out.',
+        ),
+      ),
+    );
+    wire.error = 'SSH operation timed out.';
+    await wire.close();
+    await result;
+    await client.close();
+  });
+
   test('credentials cannot be requested before host verification', () async {
     final wire = ProtocolTransport(trustRequired: true);
     final client = SshClient(wire);

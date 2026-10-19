@@ -371,6 +371,29 @@ void main() {
     },
   );
   test(
+    'native secret from a read-only platform message can be wiped',
+    () async {
+      final messenger =
+          TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+      messenger.setMockMessageHandler(
+        NativeSshSecrets.channel.name,
+        (_) async => const StandardMethodCodec()
+            .encodeSuccessEnvelope(Uint8List.fromList([7, 8]))
+            .asUnmodifiableView(),
+      );
+      addTearDown(
+        () => messenger.setMockMessageHandler(
+          NativeSshSecrets.channel.name,
+          null,
+        ),
+      );
+      final secret = (await NativeSshSecrets().read(SshProfiles.newId()))!;
+      expect(secret, [7, 8]);
+      secret.fillRange(0, secret.length, 0);
+      expect(secret, [0, 0]);
+    },
+  );
+  test(
     'native adapter treats missing channel as unavailable and transfers byte data',
     () async {
       final native = NativeSshSecrets();
@@ -383,7 +406,10 @@ void main() {
           });
       final id = SshProfiles.newId();
       await native.write(id, Uint8List.fromList([7, 8]));
-      expect(await native.read(id), [7, 8]);
+      final secret = await native.read(id);
+      expect(secret, [7, 8]);
+      secret!.fillRange(0, secret.length, 0);
+      expect(secret, [0, 0]);
       await native.delete(id);
       expect(calls.map((c) => c.method), ['write', 'read', 'delete']);
       expect(() => native.read('../escape'), throwsArgumentError);

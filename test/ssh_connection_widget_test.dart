@@ -1,4 +1,6 @@
 import 'dart:convert';
+import 'package:flutter/services.dart';
+import 'package:tamtoot/platform/ssh_secrets/native_ssh_secrets.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:tamtoot/core/ssh/ssh_profiles.dart';
@@ -8,6 +10,107 @@ import 'ssh_client_support.dart';
 import 'support.dart';
 
 void main() {
+  testWidgets(
+    'unavailable keychain falls back to manual password without disconnecting',
+    (tester) async {
+      final messenger =
+          TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+      messenger.setMockMethodCallHandler(NativeSshSecrets.channel, (
+        call,
+      ) async {
+        if (call.method == 'available') return true;
+        if (call.method == 'write') return null;
+        if (call.method == 'read') {
+          throw PlatformException(
+            code: 'locked',
+            message: 'sensitive-native-error',
+          );
+        }
+        return null;
+      });
+      addTearDown(
+        () =>
+            messenger.setMockMethodCallHandler(NativeSshSecrets.channel, null),
+      );
+      final session = await testSession();
+      final profile = SshProfile(
+        id: SshProfiles.newId(),
+        name: 'Server',
+        host: 'example.org',
+        port: 22,
+        username: 'alice',
+        authentication: SshAuthentication.password,
+      );
+      await session.sshProfiles.save(
+        profile,
+        secret: Uint8List.fromList([1]),
+        persistSecret: true,
+      );
+      final wire = ProtocolTransport();
+      wire.onSend = (bytes) {
+        final r = SshReader(bytes), type = r.byte();
+        if (type == 5) {
+          wire.emit(
+            (SshWriter()
+                  ..byte(6)
+                  ..text('ssh-userauth'))
+                .take(),
+          );
+        } else if (type == 50) {
+          r.asciiText();
+          r.asciiText();
+          final method = r.asciiText();
+          if (method == 'none') {
+            wire.emit(
+              (SshWriter()
+                    ..byte(51)
+                    ..names(['password'])
+                    ..byte(0))
+                  .take(),
+            );
+          } else {
+            expect(method, 'password');
+            expect(r.boolean(), false);
+            expect(utf8.decode(r.string()), 'manual-test-password');
+            wire.emit([52]);
+          }
+        }
+      };
+      try {
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Scaffold(
+              body: SshConnectionDialog(
+                session: session,
+                profile: profile,
+                createTransport: () => wire,
+              ),
+            ),
+          ),
+        );
+        await tester.pump(const Duration(milliseconds: 300));
+        await tester.pump(const Duration(milliseconds: 300));
+        expect(
+          find.text('SSH password'),
+          findsOneWidget,
+          reason: tester
+              .widgetList<Text>(find.byType(Text))
+              .map((w) => w.data)
+              .join(' | '),
+        );
+        expect(wire.closed, false);
+        expect(find.textContaining('sensitive-native-error'), findsNothing);
+        await tester.enterText(find.byType(TextField), 'manual-test-password');
+        await tester.tap(find.text('Continue'));
+        await tester.pumpAndSettle();
+        expect(find.text('Signed in as alice'), findsOneWidget);
+      } finally {
+        await tester.pumpWidget(const SizedBox());
+        await tester.pumpAndSettle();
+        await tester.runAsync(session.dispose);
+      }
+    },
+  );
   testWidgets(
     'trust, password, remote command and separate output at phone width',
     (tester) async {

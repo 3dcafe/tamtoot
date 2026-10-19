@@ -59,7 +59,9 @@ class _AgentPanelState extends State<AgentPanel> {
   String? selected, error;
   bool loading = true, running = false, yolo = true, yoloConfirmed = false;
   final taskQueue = <String>[];
-  int timeoutSeconds = 600, maxMistakes = 3;
+  int timeoutSeconds = 600, maxMistakes = 3, localMaxTokens = 4096;
+  double localTemperature = 0.15;
+  String localResponseFormat = 'auto', localThinking = 'off';
   int _catalogRevision = -1;
   StreamSubscription<int>? _sessionSub;
   VoidCallback? _stopListeningForDrops;
@@ -404,13 +406,6 @@ class _AgentPanelState extends State<AgentPanel> {
       setState(() => error = 'Select a model profile first.');
       return;
     }
-    if (_profileNeedsApiKey(profile) && apiKey.text.trim().isEmpty) {
-      setState(
-        () => error =
-            'Enter the API token below, then send again. It will be reused until the app closes.',
-      );
-      return;
-    }
     try {
       ModelAttachment.validateAll(attachments);
     } on FormatException catch (e) {
@@ -507,6 +502,10 @@ class _AgentPanelState extends State<AgentPanel> {
           enhancedPrivacy: enhancedPrivacy,
           timeout: Duration(seconds: timeoutSeconds),
           maxConsecutiveMistakes: maxMistakes,
+          localMaxTokens: localMaxTokens,
+          localTemperature: localTemperature,
+          localResponseFormat: localResponseFormat,
+          localThinking: localThinking,
         ),
       );
       await widget.session.refreshExplorer(refreshGit: false);
@@ -537,17 +536,6 @@ class _AgentPanelState extends State<AgentPanel> {
         });
       }
     }
-  }
-
-  bool _profileNeedsApiKey(ModelProfile profile) {
-    if (profile.apiFormat == 'ollama') return false;
-    final host = profile.requestUri().host.toLowerCase();
-    return host != 'localhost' && host != '127.0.0.1';
-  }
-
-  bool get _selectedNeedsApiKey {
-    final profile = selected == null ? null : profiles[selected];
-    return profile != null && _profileNeedsApiKey(profile);
   }
 
   void _restoreApiKey() {
@@ -730,14 +718,9 @@ class _AgentPanelState extends State<AgentPanel> {
                     autocorrect: false,
                     onChanged: _rememberApiKey,
                     decoration: InputDecoration(
-                      labelText: _selectedNeedsApiKey
-                          ? 'API token'
-                          : 'API token (optional)',
-                      helperText: _selectedNeedsApiKey
-                          ? apiKey.text.isEmpty
-                                ? 'Required. Enter it once; it is saved locally on this device.'
-                                : 'Saved locally for this profile. It is never added to the project.'
-                          : 'Local Ollama usually works without a token.',
+                      labelText: 'API token (optional)',
+                      helperText:
+                          'Leave empty if your server does not require authentication. Tokens are saved locally for this profile.',
                       suffixIcon: apiKey.text.isEmpty
                           ? null
                           : IconButton(
@@ -796,6 +779,95 @@ class _AgentPanelState extends State<AgentPanel> {
                   runSpacing: 6,
                   crossAxisAlignment: WrapCrossAlignment.center,
                   children: [
+                    SizedBox(
+                      width: 140,
+                      child: TextFormField(
+                        initialValue: '$localMaxTokens',
+                        enabled: !running,
+                        keyboardType: TextInputType.number,
+                        decoration: const InputDecoration(
+                          labelText: 'Local output tokens',
+                          isDense: true,
+                        ),
+                        onChanged: (value) =>
+                            localMaxTokens = int.tryParse(value) ?? 4096,
+                      ),
+                    ),
+                    SizedBox(
+                      width: 140,
+                      child: TextFormField(
+                        initialValue: '$localTemperature',
+                        enabled: !running,
+                        keyboardType: const TextInputType.numberWithOptions(
+                          decimal: true,
+                        ),
+                        decoration: const InputDecoration(
+                          labelText: 'Local temperature',
+                          isDense: true,
+                        ),
+                        onChanged: (value) =>
+                            localTemperature = double.tryParse(value) ?? 0.15,
+                      ),
+                    ),
+                    SizedBox(
+                      width: 180,
+                      child: DropdownButtonFormField<String>(
+                        initialValue: localResponseFormat,
+                        decoration: const InputDecoration(
+                          labelText: 'Local response format',
+                          isDense: true,
+                        ),
+                        items: const [
+                          DropdownMenuItem(
+                            value: 'auto',
+                            child: Text('Auto (server)'),
+                          ),
+                          DropdownMenuItem(value: 'text', child: Text('Text')),
+                          DropdownMenuItem(
+                            value: 'json_object',
+                            child: Text('JSON Object'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'json_schema',
+                            child: Text('JSON Schema'),
+                          ),
+                        ],
+                        onChanged: running
+                            ? null
+                            : (value) =>
+                                  setState(() => localResponseFormat = value!),
+                      ),
+                    ),
+                    SizedBox(
+                      width: 180,
+                      child: DropdownButtonFormField<String>(
+                        initialValue: localThinking,
+                        decoration: const InputDecoration(
+                          labelText: 'Local thinking',
+                          isDense: true,
+                        ),
+                        items: const [
+                          DropdownMenuItem(
+                            value: 'off',
+                            child: Text('Request off'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'on',
+                            child: Text('Request on'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'default',
+                            child: Text('Server default'),
+                          ),
+                        ],
+                        onChanged: running
+                            ? null
+                            : (value) => setState(() => localThinking = value!),
+                      ),
+                    ),
+                    const Text(
+                      'Local options apply to local/LAN profiles. Thinking support depends on the server and model. Schema mode is optional.',
+                    ),
                     FilterChip(
                       selected: yolo,
                       onSelected: running

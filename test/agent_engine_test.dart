@@ -73,6 +73,32 @@ ModelClient queueClient(List<String> actions) => ModelClient(
 
 void main() {
   final root = Uri.parse('memory:///project/');
+  test('agent stops after one request for an invalid API route', () async {
+    var requests = 0;
+    final engine = AgentTaskEngine(
+      profile: agentProfile(),
+      store: RepositoryMemory(),
+      git: AgentGit(),
+      root: root,
+      apiKey: '',
+      hooks: NoHooks(),
+      onEvent: (_) {},
+      approve: (_, _) async => true,
+      clientFactory: () => ModelClient(
+        client: MockClient((_) async {
+          requests++;
+          return http.Response('Method Not Allowed', 405);
+        }),
+      ),
+    );
+    await expectLater(
+      engine.run('Say hello', const AgentRunOptions()),
+      throwsA(
+        isA<ModelApiException>().having((e) => e.statusCode, 'status', 405),
+      ),
+    );
+    expect(requests, 1);
+  });
   test(
     'enhanced privacy sends minimal context and restores hosts before edits',
     () async {

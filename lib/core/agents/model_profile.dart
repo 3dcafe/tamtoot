@@ -49,7 +49,12 @@ class ModelProfile {
         path.substring(0, path.length - suffix.length);
 
     if (format == 'chat-completions') {
-      if (path.endsWith('/models')) {
+      if (RegExp(r'/api/(tags|chat|generate)$').hasMatch(path)) {
+        path = path.replaceFirst(
+          RegExp(r'/api/(tags|chat|generate)$'),
+          '/v1/chat/completions',
+        );
+      } else if (path.endsWith('/models')) {
         path = '${without('/models')}/chat/completions';
       } else if (path.isEmpty || path == '/') {
         path = '/v1/chat/completions';
@@ -64,13 +69,25 @@ class ModelProfile {
       } else if (path.endsWith('/v1')) {
         path = '$path/responses';
       }
-    } else if (format == 'ollama' && path.isEmpty) {
-      path = '/api/chat';
+    } else if (format == 'ollama') {
+      if (path.isEmpty || path == '/api') {
+        path = '/api/chat';
+      } else if (path.endsWith('/api/tags') || path.endsWith('/api/generate')) {
+        path = path.replaceFirst(RegExp(r'/api/(tags|generate)$'), '/api/chat');
+      }
     } else if (format == 'anthropic' && path.isEmpty) {
       path = '/v1/messages';
     }
     return uri.replace(path: path);
   }
+
+  bool get isOllama =>
+      apiFormat == 'ollama' ||
+      provider.toLowerCase() == 'ollama' ||
+      requestUri().port == 11434;
+
+  bool get isLocal =>
+      apiFormat == 'ollama' || _isPrivateHost(requestUri().host);
 
   static bool _isPrivateHost(String host) {
     if ({'localhost', '127.0.0.1', '::1', '[::1]'}.contains(host)) return true;
