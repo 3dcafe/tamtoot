@@ -40,7 +40,20 @@
   "name": "YAML",
   "extensions": [
     ".yaml",
-    ".yml"
+    ".yml",
+    ".unity",
+    ".prefab",
+    ".meta",
+    ".asset",
+    ".mat",
+    ".anim",
+    ".controller",
+    ".overridecontroller",
+    ".playable",
+    ".rendertexture",
+    ".terrainlayer",
+    ".lighting",
+    ".spriteatlas"
   ],
   "filenames": [],
   "fileTemplates": {

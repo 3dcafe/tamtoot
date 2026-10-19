@@ -66,6 +66,21 @@
       "name": "Interface",
       "extension": ".cs",
       "body": "public interface {{name}}\n{\n}\n"
+    },
+    "unity-component": {
+      "name": "Unity MonoBehaviour",
+      "extension": ".cs",
+      "body": "using UnityEngine;\n\npublic sealed class {{name}} : MonoBehaviour\n{\n    private void Awake()\n    {\n    }\n\n    private void Update()\n    {\n    }\n}\n"
+    },
+    "unity-asset": {
+      "name": "Unity ScriptableObject",
+      "extension": ".cs",
+      "body": "using UnityEngine;\n\n[CreateAssetMenu(fileName = \"{{name}}\", menuName = \"Game/{{name}}\") ]\npublic sealed class {{name}} : ScriptableObject\n{\n    [SerializeField] private float value = 1f;\n    public float Value => value;\n}\n"
+    },
+    "unity-editor-window": {
+      "name": "Unity EditorWindow (Editor folder)",
+      "extension": ".cs",
+      "body": "#if UNITY_EDITOR\nusing UnityEditor;\nusing UnityEngine;\n\npublic sealed class {{name}} : EditorWindow\n{\n    [MenuItem(\"Window/Game/{{name}}\") ]\n    private static void Open() => GetWindow<{{name}}>(\"{{name}}\");\n\n    private void OnGUI()\n    {\n        GUILayout.Label(\"{{name}}\", EditorStyles.boldLabel);\n    }\n}\n#endif\n"
     }
   }
 }

@@ -138,6 +138,8 @@ Bundled language packages are versioned independently; their manifests record th
 | AArch64 assembly | `.aarch64`, `.arm64`, `*.aarch64.s` / `*.arm64.s` (also `.S`) | AArch64/SIMD/SVE register names, immediate operands, labels, directives and `//` comments |
 
 [C, C++ and assembly dialects: editing support and limitations](docs/c-cpp-assembly.md).
+
+[Unity projects: C# templates, ShaderLab/HLSL, and asset formats](docs/unity-projects.md).
 | C# | `.cs` | Contextual keywords, attributes, directives, escaped identifiers, numeric suffixes, verbatim/interpolated/raw strings and block comments |
 | TypeScript | `.ts`, `.tsx`, `.mts`, `.cts` | Types, generics, properties, decorators and template interpolation |
 | PHP | `.php`, `.phtml`, `.php8` | Tags, variables, types, attributes, methods, properties, strings and comments |

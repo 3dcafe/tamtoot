@@ -100,6 +100,10 @@
       "scope": "constant"
     },
     {
+      "pattern": "\\b(?:MonoBehaviour|ScriptableObject|GameObject|Transform|RectTransform|Vector2|Vector3|Vector4|Vector2Int|Vector3Int|Quaternion|Matrix4x4|Color|Color32|Rigidbody|Rigidbody2D|Collider|Collider2D|Collision|Collision2D|Animator|AnimationCurve|SerializeField|SerializeReference|CreateAssetMenu|RequireComponent|DisallowMultipleComponent|ExecuteAlways|EditorWindow|SerializedObject|SerializedProperty|UnityEvent|WaitForSeconds)\\b",
+      "scope": "type"
+    },
+    {
       "pattern": "\\b(?:bool|byte|char|decimal|double|float|int|long|nint|nuint|object|sbyte|short|string|uint|ulong|ushort|void)\\b",
       "scope": "type"
     },

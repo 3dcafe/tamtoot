@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "packageVersion": "0.1.0",
+  "snippets": {
+    "hlsl-cbuffer": {
+      "prefix": "hlsl-cbuffer",
+      "body": "cbuffer Parameters\n{\n    float4 color;\n};"
+    },
+    "hlsl-kernel": {
+      "prefix": "hlsl-kernel",
+      "body": "[numthreads(8, 8, 1)]\nvoid CSMain(uint3 id : SV_DispatchThreadID)\n{\n}"
+    }
+  }
+}

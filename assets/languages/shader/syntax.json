@@ -1,0 +1,54 @@
+{
+  "schemaVersion": 1,
+  "packageVersion": "0.1.0",
+  "rules": [
+    {
+      "pattern": "//.*$",
+      "scope": "comment"
+    },
+    {
+      "begin": "/\\*",
+      "end": "\\*/",
+      "scope": "comment"
+    },
+    {
+      "begin": "\"",
+      "end": "\"",
+      "escape": "\\\\.",
+      "singleLine": true,
+      "scope": "string"
+    },
+    {
+      "pattern": "^\\s*#\\s*\\w+.*$",
+      "scope": "directive"
+    },
+    {
+      "pattern": "\\b(?:Shader|Properties|SubShader|Pass|Tags|UsePass|Fallback|CustomEditor|LOD|Cull|ZWrite|ZTest|Blend|BlendOp|ColorMask|Stencil|Ref|Comp|Fail|ZFail|Offset|CGPROGRAM|ENDCG|HLSLPROGRAM|ENDHLSL|CGINCLUDE|HLSLINCLUDE|Category|GrabPass|Name|Lighting|if|else|for|while|do|return|break|continue|discard|struct|static|const|uniform|in|out|inout|groupshared|precise|cbuffer|register|packoffset)\\b",
+      "scope": "keyword"
+    },
+    {
+      "pattern": "\\b(?:void|bool|int|uint|half|float|double|fixed)(?:[1-4](?:x[1-4])?)?\\b|\\b(?:sampler2D|samplerCUBE|SamplerState|SamplerComparisonState|Texture2D|Texture2DArray|TextureCube|RWTexture2D|StructuredBuffer|RWStructuredBuffer|ByteAddressBuffer|RWByteAddressBuffer|AppendStructuredBuffer|ConsumeStructuredBuffer)\\b",
+      "scope": "type"
+    },
+    {
+      "pattern": "\\b(?:SV_[A-Za-z0-9_]+|POSITION\\d*|NORMAL\\d*|TANGENT\\d*|TEXCOORD\\d*|COLOR\\d*)\\b",
+      "scope": "annotation"
+    },
+    {
+      "pattern": "\\b(?:true|false)\\b",
+      "scope": "constant"
+    },
+    {
+      "pattern": "(?<![\\w.])(?:0[xX][0-9a-fA-F]+|(?:\\d+(?:\\.\\d*)?|\\.\\d+)(?:[eE][+-]?\\d+)?)[fFhHuUlL]*(?![\\w.])",
+      "scope": "number"
+    },
+    {
+      "pattern": "\\b[A-Za-z_]\\w*(?=\\s*\\()",
+      "scope": "function"
+    },
+    {
+      "pattern": "[{}\\[\\]();,.?:~!%^&*+\\-/=<>|]",
+      "scope": "operator"
+    }
+  ]
+}

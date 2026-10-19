@@ -26,6 +26,7 @@ const bundledLanguageIds = [
   'aarch64',
   'gas',
   'linker',
+  'shader',
 ];
 
 class SyntaxToken {

@@ -77,6 +77,76 @@
       "prefix": "cw",
       "description": "Console output",
       "body": "Console.WriteLine();"
+    },
+    "unity-awake": {
+      "prefix": "unity-awake",
+      "description": "Unity Awake callback",
+      "body": "private void Awake()\n{\n}"
+    },
+    "unity-start": {
+      "prefix": "unity-start",
+      "description": "Unity Start callback",
+      "body": "private void Start()\n{\n}"
+    },
+    "unity-update": {
+      "prefix": "unity-update",
+      "description": "Unity Update callback",
+      "body": "private void Update()\n{\n}"
+    },
+    "unity-fixedupdate": {
+      "prefix": "unity-fixedupdate",
+      "description": "Unity physics callback",
+      "body": "private void FixedUpdate()\n{\n}"
+    },
+    "unity-enable": {
+      "prefix": "unity-enable",
+      "description": "Unity enable/disable lifecycle",
+      "body": "private void OnEnable()\n{\n}\n\nprivate void OnDisable()\n{\n}"
+    },
+    "unity-serialize": {
+      "prefix": "unity-serialize",
+      "description": "Inspector field",
+      "body": "[UnityEngine.SerializeField] private float speed = 1f;"
+    },
+    "unity-require": {
+      "prefix": "unity-require",
+      "description": "Require a Rigidbody component",
+      "body": "[UnityEngine.RequireComponent(typeof(UnityEngine.Rigidbody))]"
+    },
+    "unity-coroutine": {
+      "prefix": "unity-coroutine",
+      "description": "Coroutine (start using StartCoroutine)",
+      "body": "private System.Collections.IEnumerator RunRoutine()\n{\n    yield return new UnityEngine.WaitForSeconds(1f);\n}"
+    },
+    "unity-trigger": {
+      "prefix": "unity-trigger",
+      "description": "3D trigger callback",
+      "body": "private void OnTriggerEnter(UnityEngine.Collider other)\n{\n}"
+    },
+    "unity-trigger2d": {
+      "prefix": "unity-trigger2d",
+      "description": "2D trigger callback",
+      "body": "private void OnTriggerEnter2D(UnityEngine.Collider2D other)\n{\n}"
+    },
+    "unity-collision": {
+      "prefix": "unity-collision",
+      "description": "3D collision callback",
+      "body": "private void OnCollisionEnter(UnityEngine.Collision collision)\n{\n}"
+    },
+    "unity-tryget": {
+      "prefix": "unity-tryget",
+      "description": "TryGetComponent",
+      "body": "if (TryGetComponent<UnityEngine.Rigidbody>(out var body))\n{\n    // Use body here.\n}"
+    },
+    "unity-gizmos": {
+      "prefix": "unity-gizmos",
+      "description": "Selected-object Gizmo",
+      "body": "private void OnDrawGizmosSelected()\n{\n    UnityEngine.Gizmos.color = UnityEngine.Color.yellow;\n    UnityEngine.Gizmos.DrawWireSphere(transform.position, 1f);\n}"
+    },
+    "unity-log": {
+      "prefix": "unity-log",
+      "description": "Unity console output",
+      "body": "UnityEngine.Debug.Log(\"Message\", this);"
     }
   }
 }

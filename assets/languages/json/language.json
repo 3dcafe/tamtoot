@@ -3,18 +3,42 @@
   "packageVersion": "0.1.0",
   "id": "json",
   "name": "JSON",
-  "extensions": [".json"],
+  "extensions": [
+    ".json",
+    ".asmdef",
+    ".asmref",
+    ".inputactions",
+    ".shadergraph",
+    ".shadersubgraph"
+  ],
   "comments": {},
   "brackets": [
-    {"open": "{", "close": "}"},
-    {"open": "[", "close": "]"}
+    {
+      "open": "{",
+      "close": "}"
+    },
+    {
+      "open": "[",
+      "close": "]"
+    }
   ],
   "autoClosingPairs": [
-    {"open": "{", "close": "}"},
-    {"open": "[", "close": "]"},
-    {"open": "\"", "close": "\""}
+    {
+      "open": "{",
+      "close": "}"
+    },
+    {
+      "open": "[",
+      "close": "]"
+    },
+    {
+      "open": "\"",
+      "close": "\""
+    }
   ],
-  "icons": {"symbol": "code"},
+  "icons": {
+    "symbol": "code"
+  },
   "adapters": [],
   "fileTemplates": {
     "object": {
@@ -26,6 +50,16 @@
       "name": "JSON array",
       "extension": ".json",
       "body": "[\n]\n"
+    },
+    "unity-assembly": {
+      "name": "Unity assembly definition",
+      "extension": ".asmdef",
+      "body": "{\n  \"name\": \"{{name}}\",\n  \"rootNamespace\": \"{{name}}\",\n  \"references\": [],\n  \"autoReferenced\": true\n}\n"
+    },
+    "unity-editor-assembly": {
+      "name": "Unity Editor-only assembly definition",
+      "extension": ".asmdef",
+      "body": "{\n  \"name\": \"{{name}}\",\n  \"includePlatforms\": [\"Editor\"],\n  \"references\": [],\n  \"autoReferenced\": true\n}\n"
     }
   }
 }
