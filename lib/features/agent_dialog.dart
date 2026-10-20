@@ -1,1487 +1,458 @@
 import 'dart:async';
-import 'dart:convert';
 
-import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 
-import '../app/ide_session.dart';
-import '../core/agents/agent_engine.dart';
-import '../core/agents/command_runner.dart';
-import '../core/flutter/flutter_runner.dart';
-import '../core/agents/agent_history.dart';
-import '../core/agents/model_attachment.dart';
-import '../core/agents/model_profile.dart';
-import '../core/agents/mcp_client.dart';
-import '../core/agents/profile_store.dart';
-import '../core/git/http_git_service.dart';
-import '../core/git/multi_root_store.dart';
-import '../platform/file_drop.dart';
+import '../../app/ide_session.dart';
+import '../../core/opencode/opencode_client.dart';
 
+/// Full-screen dialog hosting the opencode-backed agent panel.
 class AgentDialog extends StatelessWidget {
   const AgentDialog({super.key, required this.session});
+
   final IdeSession session;
 
   @override
   Widget build(BuildContext context) => Dialog(
-    insetPadding: const EdgeInsets.all(16),
+    clipBehavior: Clip.antiAlias,
     child: SizedBox(
-      width: 800,
-      height: MediaQuery.sizeOf(context).height * .82,
-      child: AgentPanel(session: session, embedded: false),
+      width: 760,
+      height: 660,
+      child: AgentPanel(session: session, visible: true),
     ),
   );
 }
 
+/// Agent sidebar backed by a headless opencode server (`opencode serve`).
+///
+/// All agent logic — tools, permissions, providers, LSP diagnostics — lives in
+/// the opencode server; this panel is a thin chat client over its HTTP API.
 class AgentPanel extends StatefulWidget {
-  const AgentPanel({
-    super.key,
-    required this.session,
-    this.embedded = true,
-    this.visible = true,
-  });
+  const AgentPanel({super.key, required this.session, required this.visible});
 
   final IdeSession session;
-  final bool embedded;
   final bool visible;
 
   @override
   State<AgentPanel> createState() => _AgentPanelState();
 }
 
+class _ChatEntry {
+  _ChatEntry({required this.role, required this.blocks});
+  final String role;
+  final List<({String kind, String text})> blocks;
+}
+
 class _AgentPanelState extends State<AgentPanel> {
-  final task = TextEditingController();
-  final apiKey = TextEditingController();
-  final scroll = ScrollController();
-  final events = <AgentEvent>[];
-  final profiles = <String, ModelProfile>{};
-  final _rawProfiles = <String, ModelProfile>{};
-  bool enhancedPrivacy = false, writeAndRunTests = false;
-  final attachments = <ModelAttachment>[];
-  String? selected, error;
-  bool loading = true, running = false, yolo = true, yoloConfirmed = false;
-  final taskQueue = <String>[];
-  int timeoutSeconds = 600, maxMistakes = 3, localMaxTokens = 4096;
-  double localTemperature = 0.15;
-  String localResponseFormat = 'auto',
-      localThinking = 'off',
-      toolCalling = 'auto';
-  int _catalogRevision = -1;
-  StreamSubscription<int>? _sessionSub;
-  VoidCallback? _stopListeningForDrops;
-  Timer? _historySaveTimer;
-  AgentHistoryStore? _historyStore;
-  Future<void> _historyWrites = Future.value();
-  bool _historyLoaded = false;
-  bool _clearingConversation = false;
-  int _conversationEpoch = 0;
-  AgentTaskEngine? engine;
-  McpRegistry? activeMcp;
-  late final Uri? root = widget.session.workspaceRoot;
+  final _server = OpencodeServerManager();
+  final _input = TextEditingController();
+  final _scroll = ScrollController();
+  OpencodeClient? _api;
+  Timer? _poller;
 
-  /// Last user task that actually started a run (not the Continue wrapper).
-  String? _lastTask;
-
-  /// Why the last run stopped; non-null enables the Continue button.
-  String? _lastFailure;
+  var _starting = false;
+  String? _error;
+  List<Map<String, dynamic>> _sessions = const [];
+  String? _sessionId;
+  List<_ChatEntry> _entries = const [];
+  var _busy = false;
 
   @override
   void initState() {
     super.initState();
-    enhancedPrivacy = widget.session.settings.get('agentPrivacy') as bool;
-    toolCalling = widget.session.settings.get('agentToolCalling') as String;
-    writeAndRunTests =
-        widget.session.settings.get('agentWriteAndRunTests') as bool;
-    _catalogRevision = widget.session.agentCatalogRevision;
-    _sessionSub = widget.session.changes.listen((_) {
-      if (!mounted || running) return;
-      if (widget.session.agentCatalogRevision == _catalogRevision) return;
-      _catalogRevision = widget.session.agentCatalogRevision;
-      unawaited(_load(preserveSelection: true));
-    });
-    _stopListeningForDrops = FileDropService.listen((paths) {
-      if (!mounted || !widget.visible || running || root == null) return false;
-      unawaited(_attachFiles([for (final path in paths) XFile(path)]));
-      return true;
-    });
-    _load();
+    if (widget.visible) _start();
+  }
+
+  @override
+  void didUpdateWidget(covariant AgentPanel oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.visible && !oldWidget.visible) {
+      _start();
+    } else if (!widget.visible && oldWidget.visible) {
+      _poller?.cancel();
+    }
   }
 
   @override
   void dispose() {
-    _sessionSub?.cancel();
-    _stopListeningForDrops?.call();
-    _historySaveTimer?.cancel();
-    if (_historyLoaded) unawaited(_saveHistory());
-    engine?.stop();
-    activeMcp?.close();
-    apiKey.clear();
-    apiKey.dispose();
-    task.dispose();
-    scroll.dispose();
+    _poller?.cancel();
+    _input.dispose();
+    _scroll.dispose();
+    _server.stop();
     super.dispose();
+  }
+
+  String? get _projectPath {
+    final root = widget.session.workspaceRoot;
+    if (root == null) return null;
+    try {
+      return root.toFilePath();
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> _start() async {
+    if (_starting) return;
+    final path = _projectPath;
+    if (path == null) {
+      setState(() => _error = 'Open a project folder to use the agent.');
+      return;
+    }
+    setState(() {
+      _starting = true;
+      _error = null;
+    });
+    try {
+      final base = await _server.ensureRunning(workingDirectory: path);
+      _api = OpencodeClient(base);
+      await _loadSessions();
+      _sessionId ??= await _api!.createSession(title: 'Tamtoot session');
+      await _refresh();
+      _poller?.cancel();
+      _poller = Timer.periodic(
+        const Duration(milliseconds: 1500),
+        (_) => _refresh(),
+      );
+    } on OpencodeException catch (e) {
+      setState(() => _error = e.message);
+    } catch (e) {
+      setState(() => _error = '$e');
+    } finally {
+      if (mounted) setState(() => _starting = false);
+    }
+  }
+
+  Future<void> _loadSessions() async {
+    final api = _api;
+    if (api == null) return;
+    final sessions = await api.sessions();
+    if (!mounted) return;
+    setState(() {
+      _sessions = sessions;
+      if (_sessionId == null && sessions.isNotEmpty) {
+        _sessionId = sessions.first['id'] as String?;
+      }
+    });
+  }
+
+  Future<void> _refresh() async {
+    final api = _api;
+    final id = _sessionId;
+    if (api == null || id == null || !mounted) return;
+    try {
+      final raw = await api.messages(id);
+      final status = await api.sessionStatus();
+      if (!mounted) return;
+      setState(() {
+        _entries = [for (final message in raw) _toEntry(message)];
+        final state = status[id];
+        _busy = state is Map && '${state['type'] ?? state}' != 'idle';
+      });
+      _scrollToEnd();
+    } catch (_) {
+      // Transient poll failures are ignored; the next tick retries.
+    }
+  }
+
+  _ChatEntry _toEntry(Map<String, dynamic> message) {
+    final info = message['info'];
+    final role = info is Map ? '${info['role'] ?? 'assistant'}' : 'assistant';
+    final blocks = <({String kind, String text})>[];
+    final parts = message['parts'];
+    if (parts is List) {
+      for (final part in parts) {
+        if (part is! Map) continue;
+        switch (part['type']) {
+          case 'text':
+            final text = '${part['text'] ?? ''}'.trim();
+            if (text.isNotEmpty) blocks.add((kind: 'text', text: text));
+          case 'reasoning':
+            final text = '${part['text'] ?? ''}'.trim();
+            if (text.isNotEmpty) {
+              blocks.add((kind: 'reasoning', text: text));
+            }
+          case 'tool':
+            final state = part['state'];
+            final status = state is Map ? '${state['status'] ?? ''}' : '';
+            blocks.add((
+              kind: 'tool',
+              text: '${part['tool'] ?? 'tool'}'
+                  '${status.isEmpty ? '' : ' — $status'}',
+            ));
+          case 'step-start' || 'step-finish' || 'snapshot':
+            break;
+          default:
+            break;
+        }
+      }
+    }
+    return _ChatEntry(role: role, blocks: blocks);
+  }
+
+  Future<void> _send() async {
+    final api = _api;
+    final id = _sessionId;
+    final text = _input.text.trim();
+    if (api == null || id == null || text.isEmpty) return;
+    _input.clear();
+    setState(() {
+      _busy = true;
+      _entries = [
+        ..._entries,
+        _ChatEntry(role: 'user', blocks: [(kind: 'text', text: text)]),
+      ];
+    });
+    _scrollToEnd();
+    try {
+      await api.promptAsync(id, text);
+    } on OpencodeException catch (e) {
+      setState(() {
+        _busy = false;
+        _error = e.message;
+      });
+    }
+    unawaited(_refresh());
+  }
+
+  Future<void> _abort() async {
+    final api = _api;
+    final id = _sessionId;
+    if (api == null || id == null) return;
+    await api.abort(id);
+    await _refresh();
+  }
+
+  Future<void> _newSession() async {
+    final api = _api;
+    if (api == null) return;
+    final id = await api.createSession(title: 'Tamtoot session');
+    setState(() {
+      _sessionId = id;
+      _entries = const [];
+    });
+    await _loadSessions();
+    await _refresh();
   }
 
   void _scrollToEnd() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (scroll.hasClients) {
-        scroll.animateTo(
-          scroll.position.maxScrollExtent,
-          duration: const Duration(milliseconds: 180),
-          curve: Curves.easeOut,
-        );
+      if (_scroll.hasClients) {
+        _scroll.jumpTo(_scroll.position.maxScrollExtent);
       }
     });
-  }
-
-  Future<void> _load({bool preserveSelection = false}) async {
-    final previous = selected;
-    final epoch = _conversationEpoch;
-    if (mounted) {
-      setState(() {
-        loading = true;
-        error = null;
-        profiles.clear();
-        _rawProfiles.clear();
-        if (!preserveSelection) selected = null;
-      });
-    }
-    try {
-      if (root == null) {
-        error = 'Open a project to use Agent.';
-        return;
-      }
-      if (widget.session.git is! HttpGitService) {
-        error = 'Agent is unavailable for this project provider.';
-        return;
-      }
-      final git = widget.session.git as HttpGitService;
-      _historyStore ??= AgentHistoryStore(git.openStore(root!));
-      if (!_historyLoaded) {
-        final restored = await _historyStore!.load();
-        if (mounted &&
-            epoch == _conversationEpoch &&
-            events.isEmpty &&
-            restored.isNotEmpty) {
-          setState(() => events.addAll(restored));
-          _scrollToEnd();
-        }
-        _historyLoaded = true;
-      }
-      final store = ProfileStore(git.openStore(root!));
-      final instructions =
-          await store.read(ProfileStore.instructionsPath) ?? '';
-      for (final path in await store.list()) {
-        final text = await store.read(path);
-        if (text != null) {
-          final loaded = ModelProfile.parse(text);
-          _rawProfiles[path] = loaded;
-          profiles[path] = ModelProfile(
-            id: loaded.id,
-            name: loaded.name,
-            provider: loaded.provider,
-            model: loaded.model,
-            systemPrompt: [
-              loaded.systemPrompt,
-              instructions,
-            ].where((value) => value.trim().isNotEmpty).join('\n\n'),
-            userTemplate: loaded.userTemplate,
-            parameters: loaded.parameters,
-            apiFormat: loaded.apiFormat,
-            endpoint: loaded.endpoint,
-          );
-        }
-      }
-      if (preserveSelection &&
-          previous != null &&
-          profiles.containsKey(previous)) {
-        selected = previous;
-      } else {
-        selected = profiles.keys.firstOrNull;
-      }
-      _catalogRevision = widget.session.agentCatalogRevision;
-      if (selected == null) {
-        error = 'Create a model profile in Settings first.';
-      } else {
-        _restoreApiKey();
-      }
-    } catch (e) {
-      error = '$e';
-    } finally {
-      if (mounted) setState(() => loading = false);
-    }
-  }
-
-  Future<bool> _approve(String action, Map<String, dynamic> arguments) async {
-    if (!mounted) return false;
-    final path = arguments['path'];
-    final detail = action == 'run_command' || action == 'run_tests'
-        ? '${arguments['executable']} ${(arguments['args'] as List?)?.join(' ') ?? ''}\n\nThe command runs directly in the project folder.'
-        : action == 'mcp_call'
-        ? '${arguments['server']}/${arguments['tool']}\n\nArguments: ${jsonEncode(arguments['arguments'])}'
-        : action == 'replace_in_file'
-        ? '$path\n\nThe agent will replace one exact text fragment in this file.'
-        : '$path\n\nThe agent will replace this file.';
-    return await showDialog<bool>(
-          context: context,
-          builder: (ctx) => AlertDialog(
-            title: Text('Allow $action?'),
-            content: Text(detail),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(ctx, false),
-                child: const Text('Deny'),
-              ),
-              FilledButton(
-                onPressed: () => Navigator.pop(ctx, true),
-                child: const Text('Allow once'),
-              ),
-            ],
-          ),
-        ) ??
-        false;
-  }
-
-  Future<bool> _confirmYolo() async {
-    if (yoloConfirmed) return true;
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Enable YOLO Mode?'),
-        content: const Text(
-          'The agent may replace project files without asking for each action. Use Stop to interrupt it.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Enable for this window'),
-          ),
-        ],
-      ),
-    );
-    if (confirmed == true) yoloConfirmed = true;
-    return confirmed == true;
-  }
-
-  Future<void> _pickAttachments() async {
-    if (running) return;
-    final files = await openFiles();
-    await _attachFiles(files);
-  }
-
-  Future<void> _attachFiles(Iterable<XFile> files) async {
-    if (running) return;
-    final selectedFiles = files.toList(growable: false);
-    if (selectedFiles.isEmpty || !mounted) return;
-    final next = List<ModelAttachment>.from(attachments);
-    try {
-      for (final file in selectedFiles) {
-        if (next.length >= ModelAttachment.maxCount) {
-          throw FormatException(
-            'Attach at most ${ModelAttachment.maxCount} files.',
-          );
-        }
-        final length = await file.length();
-        if (length > ModelAttachment.maxBytesEach) {
-          throw FormatException('${file.name} is larger than 8 MiB.');
-        }
-        final total = next.fold<int>(
-          length,
-          (sum, item) => sum + item.bytes.length,
-        );
-        if (total > ModelAttachment.maxBytesTotal) {
-          throw const FormatException(
-            'Attachments are larger than 12 MiB in total.',
-          );
-        }
-        final bytes = await file.readAsBytes();
-        final name = _uniqueAttachmentName(file.name, next);
-        next.add(
-          ModelAttachment(
-            name: name,
-            mimeType: ModelAttachment.mimeForName(name),
-            bytes: bytes,
-          ),
-        );
-      }
-      ModelAttachment.validateAll(next);
-      setState(() {
-        attachments
-          ..clear()
-          ..addAll(next);
-        error = null;
-      });
-    } on FormatException catch (e) {
-      if (mounted) setState(() => error = e.message);
-    } catch (e) {
-      if (mounted) setState(() => error = 'Could not attach file: $e');
-    }
-  }
-
-  String _uniqueAttachmentName(
-    String original,
-    List<ModelAttachment> existing,
-  ) {
-    if (existing.every((item) => item.name != original)) return original;
-    final dot = original.lastIndexOf('.');
-    final stem = dot > 0 ? original.substring(0, dot) : original;
-    final extension = dot > 0 ? original.substring(dot) : '';
-    var index = 2;
-    while (existing.any((item) => item.name == '$stem ($index)$extension')) {
-      index++;
-    }
-    return '$stem ($index)$extension';
-  }
-
-  void _appendEvent(AgentEvent event) {
-    if (!mounted) return;
-    setState(() {
-      events.add(event);
-      if (events.length > AgentHistoryStore.maxEvents) events.removeAt(0);
-    });
-    _scheduleHistorySave();
-    _scrollToEnd();
-  }
-
-  void _scheduleHistorySave() {
-    if (!_historyLoaded || _historyStore == null) return;
-    _historySaveTimer?.cancel();
-    _historySaveTimer = Timer(
-      const Duration(milliseconds: 350),
-      () => unawaited(_saveHistory()),
-    );
-  }
-
-  Future<void> _saveHistory() async {
-    final store = _historyStore;
-    if (store == null) return;
-    final snapshot = List<AgentEvent>.of(events);
-    final operation = _historyWrites.then((_) => store.save(snapshot));
-    _historyWrites = operation.catchError((Object _) {});
-    try {
-      await operation;
-    } catch (e) {
-      if (mounted && error == null) {
-        setState(() => error = 'Could not save agent history: $e');
-      }
-    }
-  }
-
-  Future<void> _clearConversation() async {
-    if (_clearingConversation) return;
-    _conversationEpoch++;
-    _historySaveTimer?.cancel();
-    final previousEngine = engine;
-    final previousMcp = activeMcp;
-    setState(() {
-      _clearingConversation = true;
-      running = true;
-      engine = null;
-      activeMcp = null;
-      events.clear();
-      attachments.clear();
-      task.clear();
-      _lastFailure = null;
-      _lastTask = null;
-      error = null;
-      taskQueue.clear();
-    });
-    try {
-      // Wait for any in-flight memory write before deleting persisted state.
-      await previousEngine?.discardConversation();
-      previousMcp?.close();
-      final store = _historyStore;
-      if (store != null) {
-        final operation = _historyWrites.then((_) => store.clearConversation());
-        _historyWrites = operation.catchError((Object _) {});
-        await operation;
-      }
-    } catch (e) {
-      if (mounted) {
-        setState(() => error = 'Could not clear agent history and memory: $e');
-      }
-    } finally {
-      if (mounted) {
-        setState(() {
-          _clearingConversation = false;
-          running = false;
-        });
-      }
-    }
-  }
-
-  bool get _canContinue =>
-      !running &&
-      root != null &&
-      selected != null &&
-      (_lastTask?.trim().isNotEmpty ?? false) &&
-      _lastFailure != null;
-
-  Future<void> _start({bool continuePrevious = false}) async {
-    final epoch = _conversationEpoch;
-    final path = selected;
-    final typed = task.text.trim();
-    if (_clearingConversation || running || path == null || root == null) {
-      return;
-    }
-    if (continuePrevious) {
-      if (!_canContinue) return;
-    } else if (typed.isEmpty && attachments.isEmpty) {
-      return;
-    }
-    if (widget.session.workspaceRoot != root) {
-      setState(() => error = 'The active project changed. Reopen Agent.');
-      return;
-    }
-    final profile = profiles[path];
-    if (profile == null) {
-      setState(() => error = 'Select a model profile first.');
-      return;
-    }
-    try {
-      ModelAttachment.validateAll(attachments);
-    } on FormatException catch (e) {
-      setState(() => error = e.message);
-      return;
-    }
-    if (yolo && !await _confirmYolo()) return;
-    if (!mounted || epoch != _conversationEpoch) return;
-
-    final originalTask = continuePrevious
-        ? _lastTask!.trim()
-        : (typed.isEmpty ? 'Please inspect the attached files.' : typed);
-    final failure = _lastFailure;
-    final prompt = continuePrevious
-        ? buildAgentContinuationPrompt(
-            originalTask: originalTask,
-            stopReason: failure ?? 'unknown',
-          )
-        : originalTask;
-    final runAttachments = continuePrevious
-        ? const <ModelAttachment>[]
-        : List<ModelAttachment>.from(attachments);
-
-    final git = widget.session.git as HttpGitService;
-    McpRegistry? mcp;
-    try {
-      final projectStore = ProfileStore(git.openStore(root!));
-      final configText = await projectStore.read('.tamtoot/mcp.json');
-      if (!enhancedPrivacy &&
-          configText != null &&
-          configText.trim().isNotEmpty) {
-        mcp = McpRegistry(McpConfig.parse(configText));
-        await mcp.connect();
-      }
-    } catch (e) {
-      if (!mounted || epoch != _conversationEpoch) {
-        mcp?.close();
-        return;
-      }
-      setState(() => error = 'MCP: $e');
-      mcp?.close();
-      return;
-    }
-    if (!mounted || epoch != _conversationEpoch) {
-      mcp?.close();
-      return;
-    }
-    final runner = AgentTaskEngine(
-      profile: enhancedPrivacy ? (_rawProfiles[path] ?? profile) : profile,
-      store: MultiRootGitRepositoryStore(
-        primary: git.openStore(root!),
-        additional: {
-          for (final folder in widget.session.additionalWorkspaceRoots)
-            widget.session.workspaceRootAliases[folder]!: git.openStore(folder),
-        },
-      ),
-      git: git,
-      root: root!,
-      workspaceRoots: List.unmodifiable(widget.session.workspaceRoots),
-      apiKey: apiKey.text.trim(),
-      commands: AgentCommandRunner(
-        root!,
-        flutterSdkPath: widget.session.settings.get('flutterSdkPath') as String,
-        dotnetPath: widget.session.settings.get('dotnetPath') as String,
-      ),
-      attachments: runAttachments,
-      onEvent: (event) {
-        if (!mounted || epoch != _conversationEpoch) return;
-        final path = event.data['changedPath'];
-        if (path is String && !path.startsWith('@')) {
-          widget.session.markGitFileChanged(
-            root!.resolve(path.split('/').map(Uri.encodeComponent).join('/')),
-          );
-        }
-        _appendEvent(event);
-      },
-      approve: _approve,
-      mcp: mcp,
-    );
-    setState(() {
-      engine = runner;
-      activeMcp = mcp;
-      running = true;
-      error = null;
-      _lastTask = originalTask;
-      _lastFailure = null;
-      if (!continuePrevious) {
-        task.clear();
-        attachments.clear();
-      }
-    });
-    _appendEvent(
-      AgentEvent(
-        'user',
-        continuePrevious
-            ? 'Continue previous task\n\n$originalTask'
-            : [
-                originalTask,
-                if (runAttachments.isNotEmpty)
-                  'Attachments: ${runAttachments.map((item) => item.name).join(', ')}',
-              ].join('\n'),
-      ),
-    );
-    try {
-      await runner.run(
-        prompt,
-        AgentRunOptions(
-          toolCalling: toolCalling,
-          writeAndRunTests:
-              supportsFlutterTools && writeAndRunTests && !enhancedPrivacy,
-          yolo: yolo,
-          enhancedPrivacy: enhancedPrivacy,
-          timeout: Duration(seconds: timeoutSeconds),
-          maxConsecutiveMistakes: maxMistakes,
-          localMaxTokens: localMaxTokens,
-          localTemperature: localTemperature,
-          localResponseFormat: localResponseFormat,
-          localThinking: localThinking,
-        ),
-      );
-      if (!mounted || epoch != _conversationEpoch) return;
-      await widget.session.refreshExplorer(refreshGit: false);
-      await widget.session.ensureGitIndicators();
-      if (mounted && epoch == _conversationEpoch) {
-        setState(() {
-          _lastFailure = null;
-          error = null;
-        });
-      }
-    } catch (e) {
-      if (mounted && epoch == _conversationEpoch) {
-        setState(() {
-          error = '$e';
-          _lastFailure = '$e';
-          // Put the original task back so it is obvious what Continue will redo.
-          if (task.text.trim().isEmpty) task.text = originalTask;
-        });
-      }
-    } finally {
-      // Keep the API key in memory for the Agent panel session.
-      mcp?.close();
-      if (mounted && epoch == _conversationEpoch) {
-        setState(() {
-          running = false;
-          engine = null;
-          activeMcp = null;
-        });
-      }
-    }
-  }
-
-  void _restoreApiKey() {
-    final profile = selected == null ? null : profiles[selected];
-    apiKey.text = profile == null ? '' : widget.session.modelApiKey(profile.id);
-  }
-
-  void _selectProfile(String? value) {
-    setState(() {
-      selected = value;
-      error = null;
-      _restoreApiKey();
-    });
-  }
-
-  void _rememberApiKey(String value) {
-    final profile = selected == null ? null : profiles[selected];
-    if (profile != null) {
-      widget.session.rememberModelApiKey(profile.id, value);
-    }
-    setState(() {});
   }
 
   @override
   Widget build(BuildContext context) {
-    final colors = Theme.of(context).colorScheme;
-    return PopScope(
-      canPop: !running,
-      child: Material(
-        color: colors.surface,
-        borderRadius: widget.embedded ? null : BorderRadius.circular(16),
-        clipBehavior: Clip.antiAlias,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(12, 8, 6, 6),
-              child: Row(
-                children: [
-                  const Icon(Icons.smart_toy_outlined, size: 18),
-                  const SizedBox(width: 8),
-                  const Expanded(
-                    child: Text(
-                      'Agent',
-                      style: TextStyle(fontWeight: FontWeight.w600),
-                    ),
-                  ),
-                  IconButton(
-                    tooltip: 'Reload model profiles',
-                    visualDensity: VisualDensity.compact,
-                    onPressed: running || loading ? null : _load,
-                    icon: const Icon(Icons.refresh, size: 18),
-                  ),
-                  IconButton(
-                    tooltip: 'Model settings',
-                    visualDensity: VisualDensity.compact,
-                    onPressed: running
-                        ? null
-                        : () => widget.session.run('settings.open'),
-                    icon: const Icon(Icons.settings_outlined, size: 18),
-                  ),
-                  if (!widget.embedded)
-                    IconButton(
-                      tooltip: 'Close',
-                      visualDensity: VisualDensity.compact,
-                      onPressed: running ? null : () => Navigator.pop(context),
-                      icon: const Icon(Icons.close, size: 18),
-                    ),
-                ],
-              ),
-            ),
-            if (loading) const LinearProgressIndicator(minHeight: 2),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 10),
-              child: DropdownButtonFormField<String>(
-                key: ValueKey(selected ?? 'none'),
-                isExpanded: true,
-                initialValue: selected,
-                decoration: const InputDecoration(
-                  labelText: 'Model profile',
-                  isDense: true,
-                ),
-                items: [
-                  for (final entry in profiles.entries)
-                    DropdownMenuItem(
-                      value: entry.key,
-                      child: Text(
-                        '${entry.value.name} · ${entry.value.model}',
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                ],
-                onChanged: running ? null : _selectProfile,
-              ),
-            ),
-            if (events.isNotEmpty || _historyStore != null)
-              Padding(
-                padding: const EdgeInsets.fromLTRB(10, 2, 10, 0),
-                child: Row(
-                  children: [
-                    Text(
-                      '${events.length} log entries',
-                      style: TextStyle(
-                        fontSize: 11,
-                        color: colors.onSurfaceVariant,
-                      ),
-                    ),
-                    const Spacer(),
-                    TextButton.icon(
-                      key: const ValueKey('agent-clear-log'),
-                      onPressed: _clearingConversation || loading
-                          ? null
-                          : () => unawaited(_clearConversation()),
-                      icon: const Icon(Icons.delete_sweep_outlined, size: 16),
-                      label: const Text('Clear history & memory'),
-                      style: TextButton.styleFrom(
-                        visualDensity: VisualDensity.compact,
-                        padding: const EdgeInsets.symmetric(horizontal: 8),
-                      ),
-                    ),
-                  ],
+    final theme = Theme.of(context);
+    return Column(
+      children: [
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          child: Row(
+            children: [
+              const Icon(Icons.smart_toy_outlined, size: 18),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'Agent (opencode)',
+                  style: theme.textTheme.titleSmall,
                 ),
               ),
-            Expanded(
-              child: events.isEmpty
-                  ? Center(
-                      child: Padding(
-                        padding: const EdgeInsets.all(20),
+              if (_sessions.length > 1)
+                DropdownButton<String>(
+                  value: _sessionId,
+                  hint: const Text('Session'),
+                  items: [
+                    for (final s in _sessions)
+                      DropdownMenuItem(
+                        value: s['id'] as String,
                         child: Text(
-                          root == null
-                              ? 'Open a project to chat with Agent.'
-                              : 'Chat with the agent about the project.\nNo open file is required — describe the task below.',
-                          textAlign: TextAlign.center,
-                          style: TextStyle(color: colors.onSurfaceVariant),
-                        ),
-                      ),
-                    )
-                  : ListView.builder(
-                      controller: scroll,
-                      padding: const EdgeInsets.fromLTRB(10, 4, 10, 10),
-                      itemCount: events.length,
-                      itemBuilder: (_, index) => _eventCard(events[index]),
-                    ),
-            ),
-            if (error != null)
-              Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 10,
-                  vertical: 4,
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    SelectableText(
-                      error!,
-                      style: TextStyle(fontSize: 12, color: colors.error),
-                    ),
-                    if (_canContinue)
-                      Padding(
-                        padding: const EdgeInsets.only(top: 4),
-                        child: Text(
-                          'Press Continue to retry without restarting from scratch.',
-                          style: TextStyle(
-                            fontSize: 11,
-                            color: colors.onSurfaceVariant,
-                          ),
+                          '${s['title'] ?? s['id']}',
+                          overflow: TextOverflow.ellipsis,
                         ),
                       ),
                   ],
+                  onChanged: (value) {
+                    setState(() => _sessionId = value);
+                    _refresh();
+                  },
                 ),
+              IconButton(
+                tooltip: 'New session',
+                onPressed: _api == null ? null : _newSession,
+                icon: const Icon(Icons.add, size: 18),
               ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(10, 0, 10, 6),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  TextField(
-                    controller: apiKey,
-                    enabled: !running,
-                    obscureText: true,
-                    enableSuggestions: false,
-                    autocorrect: false,
-                    onChanged: _rememberApiKey,
-                    decoration: InputDecoration(
-                      labelText: 'API token (optional)',
-                      helperText:
-                          'Leave empty if your server does not require authentication. Tokens are saved locally for this profile.',
-                      suffixIcon: apiKey.text.isEmpty
-                          ? null
-                          : IconButton(
-                              tooltip: 'Forget token',
-                              onPressed: running
-                                  ? null
-                                  : () {
-                                      apiKey.clear();
-                                      _rememberApiKey('');
-                                    },
-                              icon: const Icon(Icons.close, size: 16),
-                            ),
-                      isDense: true,
-                    ),
-                  ),
-                ],
+              IconButton(
+                tooltip: 'Restart server',
+                onPressed: () {
+                  setState(() => _sessionId = null);
+                  _server.stop();
+                  _start();
+                },
+                icon: const Icon(Icons.refresh, size: 18),
               ),
-            ),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 10),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  FilterChip(
-                    key: const ValueKey('agent-enhanced-privacy'),
-                    selected: enhancedPrivacy,
-                    avatar: const Icon(Icons.privacy_tip_outlined, size: 18),
-                    label: const Text('Enhance privacy'),
-                    onSelected: running
-                        ? null
-                        : (value) {
-                            setState(() => enhancedPrivacy = value);
-                            widget.session.settings.set('agentPrivacy', value);
-                            widget.session.changed();
-                          },
-                  ),
-                  if (enhancedPrivacy)
-                    const Text(
-                      'Masks hosts; skips custom/project instructions, memory and automatic file context. Reads one small excerpt at a time. Text attachments only; MCP and hooks disabled. Code excerpts still go to the selected provider.',
-                      style: TextStyle(fontSize: 11),
-                    ),
-                ],
-              ),
-            ),
-            ExpansionTile(
-              dense: true,
-              tilePadding: const EdgeInsets.symmetric(horizontal: 10),
-              title: const Text(
-                'Agent options',
-                style: TextStyle(fontSize: 12),
-              ),
-              childrenPadding: const EdgeInsets.fromLTRB(10, 0, 10, 8),
-              children: [
-                if (supportsFlutterTools)
-                  CheckboxListTile(
-                    key: const ValueKey('agent-write-run-tests'),
-                    dense: true,
-                    contentPadding: EdgeInsets.zero,
-                    title: const Text('Write and run tests'),
-                    subtitle: Text(
-                      enhancedPrivacy
-                          ? 'Disabled in enhanced privacy mode.'
-                          : 'Ask the agent to add tests and verify changes with available SDKs. Each command needs approval.',
-                    ),
-                    value: writeAndRunTests && !enhancedPrivacy,
-                    onChanged: running || enhancedPrivacy
-                        ? null
-                        : (value) {
-                            setState(() => writeAndRunTests = value!);
-                            widget.session.settings.set(
-                              'agentWriteAndRunTests',
-                              value!,
-                            );
-                            widget.session.changed();
-                          },
-                  ),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 6,
-                  crossAxisAlignment: WrapCrossAlignment.center,
-                  children: [
-                    SizedBox(
-                      width: 140,
-                      child: TextFormField(
-                        initialValue: '$localMaxTokens',
-                        enabled: !running,
-                        keyboardType: TextInputType.number,
-                        decoration: const InputDecoration(
-                          labelText: 'Local output tokens',
-                          isDense: true,
-                        ),
-                        onChanged: (value) =>
-                            localMaxTokens = int.tryParse(value) ?? 4096,
-                      ),
-                    ),
-                    SizedBox(
-                      width: 140,
-                      child: TextFormField(
-                        initialValue: '$localTemperature',
-                        enabled: !running,
-                        keyboardType: const TextInputType.numberWithOptions(
-                          decimal: true,
-                        ),
-                        decoration: const InputDecoration(
-                          labelText: 'Local temperature',
-                          isDense: true,
-                        ),
-                        onChanged: (value) =>
-                            localTemperature = double.tryParse(value) ?? 0.15,
-                      ),
-                    ),
-                    SizedBox(
-                      width: 180,
-                      child: DropdownButtonFormField<String>(
-                        isExpanded: true,
-                        initialValue: localResponseFormat,
-                        decoration: const InputDecoration(
-                          labelText: 'Local response format',
-                          isDense: true,
-                        ),
-                        items: const [
-                          DropdownMenuItem(
-                            value: 'auto',
-                            child: Text('Auto (server)'),
-                          ),
-                          DropdownMenuItem(value: 'text', child: Text('Text')),
-                          DropdownMenuItem(
-                            value: 'json_object',
-                            child: Text('JSON Object'),
-                          ),
-                          DropdownMenuItem(
-                            value: 'json_schema',
-                            child: Text('JSON Schema'),
-                          ),
-                        ],
-                        onChanged: running
-                            ? null
-                            : (value) =>
-                                  setState(() => localResponseFormat = value!),
-                      ),
-                    ),
-                    SizedBox(
-                      width: 180,
-                      child: DropdownButtonFormField<String>(
-                        isExpanded: true,
-                        initialValue: localThinking,
-                        decoration: const InputDecoration(
-                          labelText: 'Local thinking',
-                          isDense: true,
-                        ),
-                        items: const [
-                          DropdownMenuItem(
-                            value: 'off',
-                            child: Text('Request off'),
-                          ),
-                          DropdownMenuItem(
-                            value: 'on',
-                            child: Text('Request on'),
-                          ),
-                          DropdownMenuItem(
-                            value: 'default',
-                            child: Text('Server default'),
-                          ),
-                        ],
-                        onChanged: running
-                            ? null
-                            : (value) => setState(() => localThinking = value!),
-                      ),
-                    ),
-                    SizedBox(
-                      width: 210,
-                      child: DropdownButtonFormField<String>(
-                        key: const ValueKey('agent-tool-calling'),
-                        isExpanded: true,
-                        initialValue: toolCalling,
-                        decoration: const InputDecoration(
-                          labelText: 'Tool calling',
-                          isDense: true,
-                        ),
-                        items: const [
-                          DropdownMenuItem(
-                            value: 'auto',
-                            child: Text('Auto (Ollama detection)'),
-                          ),
-                          DropdownMenuItem(
-                            value: 'native',
-                            child: Text('Native tools'),
-                          ),
-                          DropdownMenuItem(
-                            value: 'json',
-                            child: Text('JSON actions (fallback)'),
-                          ),
-                        ],
-                        onChanged: running
-                            ? null
-                            : (value) {
-                                setState(() => toolCalling = value!);
-                                widget.session.settings.set(
-                                  'agentToolCalling',
-                                  value!,
-                                );
-                                widget.session.changed();
-                              },
-                      ),
-                    ),
-                    const Text(
-                      'Local options apply to local/LAN profiles. Thinking support depends on the server and model. Schema mode is optional.',
-                    ),
-                    FilterChip(
-                      selected: yolo,
-                      onSelected: running
-                          ? null
-                          : (value) => setState(() => yolo = value),
-                      label: const Text('YOLO'),
-                    ),
-                    SizedBox(
-                      width: 120,
-                      child: TextFormField(
-                        initialValue: '$timeoutSeconds',
-                        enabled: !running,
-                        keyboardType: TextInputType.number,
-                        decoration: const InputDecoration(
-                          labelText: 'Timeout, sec',
-                          isDense: true,
-                        ),
-                        onChanged: (value) =>
-                            timeoutSeconds = int.tryParse(value) ?? 600,
-                      ),
-                    ),
-                    SizedBox(
-                      width: 120,
-                      child: TextFormField(
-                        initialValue: '$maxMistakes',
-                        enabled: !running,
-                        keyboardType: TextInputType.number,
-                        decoration: const InputDecoration(
-                          labelText: 'Max mistakes',
-                          isDense: true,
-                        ),
-                        onChanged: (value) =>
-                            maxMistakes = int.tryParse(value) ?? 3,
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-            if (running) const LinearProgressIndicator(minHeight: 2),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(10, 4, 10, 10),
-              child: Column(
-                children: [
-                  if (attachments.isNotEmpty)
-                    Align(
-                      alignment: Alignment.centerLeft,
-                      child: Wrap(
-                        spacing: 6,
-                        runSpacing: 6,
-                        children: [
-                          for (var i = 0; i < attachments.length; i++)
-                            InputChip(
-                              avatar: Icon(
-                                attachments[i].isImage
-                                    ? Icons.image_outlined
-                                    : Icons.attach_file,
-                                size: 16,
-                              ),
-                              label: Text(
-                                attachments[i].name,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                              onDeleted: running
-                                  ? null
-                                  : () =>
-                                        setState(() => attachments.removeAt(i)),
-                            ),
-                        ],
-                      ),
-                    ),
-                  if (attachments.isNotEmpty) const SizedBox(height: 6),
-                  TextField(
-                    controller: task,
-                    enabled: !running && root != null,
-                    minLines: 1,
-                    maxLines: 5,
-                    textInputAction: TextInputAction.send,
-                    onSubmitted: (_) {
-                      if (!running &&
-                          selected != null &&
-                          root != null &&
-                          (task.text.trim().isNotEmpty ||
-                              attachments.isNotEmpty)) {
-                        unawaited(_start());
-                      }
-                    },
-                    onChanged: (_) => setState(() {}),
-                    decoration: InputDecoration(
-                      hintText: 'Ask anything…',
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      isDense: true,
-                      contentPadding: const EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 12,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 6),
-                  Row(
-                    children: [
-                      IconButton(
-                        tooltip:
-                            'Attach any file, or drag files into the Agent tab',
-                        visualDensity: VisualDensity.compact,
-                        onPressed: running || root == null
-                            ? null
-                            : () => unawaited(_pickAttachments()),
-                        icon: const Icon(Icons.attach_file, size: 18),
-                      ),
-                      IconButton(
-                        tooltip: 'Copy chat log',
-                        visualDensity: VisualDensity.compact,
-                        onPressed: events.isEmpty ? null : _copyTranscript,
-                        icon: const Icon(Icons.copy_all_outlined, size: 18),
-                      ),
-                      IconButton(
-                        tooltip: 'JSON: client ↔ agent',
-                        visualDensity: VisualDensity.compact,
-                        onPressed: _modelExchanges.isEmpty
-                            ? null
-                            : () => _showJsonLog(_modelExchanges),
-                        icon: const Icon(Icons.data_object, size: 18),
-                      ),
-                      const Spacer(),
-                      if (running)
-                        FilledButton.tonalIcon(
-                          onPressed: () => engine?.stop(),
-                          icon: const Icon(Icons.stop, size: 18),
-                          label: const Text('Stop'),
-                        )
-                      else ...[
-                        if (_canContinue) ...[
-                          FilledButton.tonalIcon(
-                            key: const ValueKey('agent-continue'),
-                            onPressed: () =>
-                                unawaited(_start(continuePrevious: true)),
-                            icon: const Icon(Icons.replay, size: 18),
-                            label: const Text('Continue'),
-                          ),
-                          const SizedBox(width: 8),
-                        ],
-                        IconButton.filled(
-                          tooltip: 'Send',
-                          onPressed:
-                              selected == null ||
-                                  root == null ||
-                                  (task.text.trim().isEmpty &&
-                                      attachments.isEmpty)
-                              ? null
-                              : () => unawaited(_start()),
-                          icon: const Icon(Icons.arrow_upward, size: 18),
-                        ),
-                      ],
-                    ],
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  List<AgentEvent> get _modelExchanges =>
-      events.where((event) => event.type == 'model').toList(growable: false);
-
-  String _transcriptText() {
-    final buffer = StringBuffer();
-    for (var i = 0; i < events.length; i++) {
-      final event = events[i];
-      buffer.writeln('[${event.type}] ${event.text}');
-      if (event.data.isNotEmpty) {
-        try {
-          buffer.writeln(
-            const JsonEncoder.withIndent('  ').convert(event.data),
-          );
-        } catch (_) {
-          buffer.writeln(event.data.toString());
-        }
-      }
-      if (i < events.length - 1) buffer.writeln();
-    }
-    return buffer.toString();
-  }
-
-  Future<void> _copyTranscript() async {
-    final text = _transcriptText();
-    if (text.trim().isEmpty) return;
-    await Clipboard.setData(ClipboardData(text: text));
-    if (!mounted) return;
-    ScaffoldMessenger.maybeOf(context)?.showSnackBar(
-      const SnackBar(
-        content: Text('Chat log copied'),
-        duration: Duration(seconds: 2),
-      ),
-    );
-  }
-
-  Widget _eventCard(AgentEvent event) {
-    final colors = Theme.of(context).colorScheme;
-    final user = event.type == 'user';
-    final errorEvent = event.type == 'error';
-    final model = event.type == 'model';
-    final memory = event.type == 'memory';
-    final hasJson =
-        event.data.containsKey('request') || event.data.containsKey('response');
-    if (memory) {
-      return Padding(
-        padding: const EdgeInsets.only(bottom: 4),
-        child: Text(
-          event.text,
-          style: TextStyle(
-            fontSize: 11,
-            color: colors.onSurfaceVariant,
-            fontFamily: 'monospace',
+            ],
           ),
         ),
-      );
-    }
-    return Align(
-      alignment: user ? Alignment.centerRight : Alignment.centerLeft,
-      child: Container(
-        constraints: const BoxConstraints(maxWidth: 620),
-        margin: const EdgeInsets.only(bottom: 8),
-        padding: const EdgeInsets.fromLTRB(10, 8, 6, 8),
-        decoration: BoxDecoration(
-          color: user
-              ? colors.primaryContainer
-              : errorEvent
-              ? colors.errorContainer
-              : model
-              ? colors.surfaceContainerHigh
-              : colors.surfaceContainerHighest,
-          borderRadius: BorderRadius.circular(12),
-          border: model
-              ? Border.all(color: colors.outlineVariant.withValues(alpha: 0.6))
-              : null,
+        const Divider(height: 1),
+        Expanded(
+          child: _error != null
+              ? _ErrorView(
+                  message: _error!,
+                  busy: _starting,
+                  onRetry: _start,
+                )
+              : _entries.isEmpty
+              ? Center(
+                  child: Text(
+                    _starting
+                        ? 'Starting the opencode server…'
+                        : 'Ask the agent to change something in this project.',
+                    style: theme.textTheme.bodySmall,
+                  ),
+                )
+              : ListView.builder(
+                  controller: _scroll,
+                  padding: const EdgeInsets.all(12),
+                  itemCount: _entries.length,
+                  itemBuilder: (_, index) =>
+                      _EntryView(entry: _entries[index]),
+                ),
         ),
-        child: Row(
+        if (_busy)
+          const LinearProgressIndicator(minHeight: 2),
+        const Divider(height: 1),
+        Padding(
+          padding: const EdgeInsets.all(8),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: _input,
+                  minLines: 1,
+                  maxLines: 6,
+                  enabled: _api != null,
+                  decoration: const InputDecoration(
+                    hintText: 'Message the agent…',
+                    isDense: true,
+                    border: OutlineInputBorder(),
+                  ),
+                  onSubmitted: (_) => _send(),
+                ),
+              ),
+              const SizedBox(width: 8),
+              _busy
+                  ? IconButton(
+                      tooltip: 'Abort',
+                      onPressed: _abort,
+                      icon: const Icon(Icons.stop_circle_outlined),
+                    )
+                  : IconButton(
+                      tooltip: 'Send',
+                      onPressed: _api == null ? null : _send,
+                      icon: const Icon(Icons.send),
+                    ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _EntryView extends StatelessWidget {
+  const _EntryView({required this.entry});
+  final _ChatEntry entry;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final isUser = entry.role == 'user';
+    return Align(
+      alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
+      child: Container(
+        margin: const EdgeInsets.symmetric(vertical: 4),
+        padding: const EdgeInsets.all(10),
+        constraints: const BoxConstraints(maxWidth: 560),
+        decoration: BoxDecoration(
+          color: isUser
+              ? theme.colorScheme.primaryContainer
+              : theme.colorScheme.surfaceContainerHighest,
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    user
-                        ? 'You'
-                        : model
-                        ? 'Model'
-                        : event.type,
-                    style: TextStyle(
-                      fontSize: 10,
-                      fontWeight: FontWeight.w600,
-                      color: colors.onSurfaceVariant,
-                    ),
+            for (final block in entry.blocks)
+              switch (block.kind) {
+                'tool' => Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 2),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        Icons.build_outlined,
+                        size: 13,
+                        color: theme.colorScheme.outline,
+                      ),
+                      const SizedBox(width: 4),
+                      Flexible(
+                        child: Text(
+                          block.text,
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: theme.colorScheme.outline,
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
-                  const SizedBox(height: 3),
-                  SelectableText(
-                    event.text,
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontFamily: model || errorEvent ? 'monospace' : null,
-                    ),
+                ),
+                'reasoning' => Text(
+                  block.text,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    fontStyle: FontStyle.italic,
+                    color: theme.colorScheme.outline,
                   ),
-                ],
-              ),
-            ),
-            IconButton(
-              tooltip: 'Copy message',
-              visualDensity: VisualDensity.compact,
-              constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-              padding: EdgeInsets.zero,
-              onPressed: () async {
-                final payload = event.data.isEmpty
-                    ? event.text
-                    : const JsonEncoder.withIndent('  ').convert({
-                        'type': event.type,
-                        'text': event.text,
-                        'data': event.data,
-                      });
-                await Clipboard.setData(ClipboardData(text: payload));
+                ),
+                _ => SelectableText(block.text),
               },
-              icon: Icon(
-                Icons.copy_outlined,
-                size: 16,
-                color: colors.onSurfaceVariant,
-              ),
-            ),
-            if (hasJson)
-              IconButton(
-                tooltip: 'Show request / response JSON',
-                visualDensity: VisualDensity.compact,
-                constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-                padding: EdgeInsets.zero,
-                onPressed: () => _showJsonLog([event]),
-                icon: Icon(Icons.data_object, size: 18, color: colors.primary),
-              ),
           ],
         ),
       ),
     );
   }
-
-  Future<void> _showJsonLog(List<AgentEvent> exchanges) async {
-    if (!mounted || exchanges.isEmpty) return;
-    await showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      showDragHandle: true,
-      builder: (ctx) => _AgentJsonLogSheet(exchanges: exchanges),
-    );
-  }
 }
 
-class _AgentJsonLogSheet extends StatefulWidget {
-  const _AgentJsonLogSheet({required this.exchanges});
-  final List<AgentEvent> exchanges;
+class _ErrorView extends StatelessWidget {
+  const _ErrorView({
+    required this.message,
+    required this.busy,
+    required this.onRetry,
+  });
+  final String message;
+  final bool busy;
+  final VoidCallback onRetry;
 
   @override
-  State<_AgentJsonLogSheet> createState() => _AgentJsonLogSheetState();
-}
-
-class _AgentJsonLogSheetState extends State<_AgentJsonLogSheet>
-    with SingleTickerProviderStateMixin {
-  late final TabController _tabs;
-  final _requestScroll = ScrollController();
-  final _responseScroll = ScrollController();
-
-  @override
-  void initState() {
-    super.initState();
-    _tabs = TabController(length: 2, vsync: this);
-  }
-
-  @override
-  void dispose() {
-    _tabs.dispose();
-    _requestScroll.dispose();
-    _responseScroll.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = Theme.of(context).colorScheme;
-    final height = MediaQuery.sizeOf(context).height * 0.72;
-    return SizedBox(
-      height: height,
+  Widget build(BuildContext context) => Center(
+    child: Padding(
+      padding: const EdgeInsets.all(24),
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
+        mainAxisSize: MainAxisSize.min,
         children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 8, 8),
-            child: Row(
-              children: [
-                const Expanded(
-                  child: Text(
-                    'Client ↔ Agent JSON',
-                    style: TextStyle(fontWeight: FontWeight.w600, fontSize: 15),
-                  ),
-                ),
-                IconButton(
-                  tooltip: 'Copy all',
-                  onPressed: () {
-                    final payload = widget.exchanges
-                        .map((event) => event.toJson())
-                        .toList();
-                    Clipboard.setData(
-                      ClipboardData(
-                        text: const JsonEncoder.withIndent(
-                          '  ',
-                        ).convert(payload),
-                      ),
-                    );
-                    ScaffoldMessenger.maybeOf(context)?.showSnackBar(
-                      const SnackBar(
-                        content: Text('JSON log copied'),
-                        duration: Duration(seconds: 2),
-                      ),
-                    );
-                  },
-                  icon: const Icon(Icons.copy_outlined, size: 18),
-                ),
-              ],
-            ),
-          ),
-          TabBar(
-            controller: _tabs,
-            tabs: const [
-              Tab(text: 'Client → model'),
-              Tab(text: 'Agent ← model'),
-            ],
-          ),
-          Expanded(
-            child: TabBarView(
-              controller: _tabs,
-              children: [
-                _jsonPages(_requestScroll, colors, requestSide: true),
-                _jsonPages(_responseScroll, colors, requestSide: false),
-              ],
-            ),
+          const Icon(Icons.error_outline, size: 32),
+          const SizedBox(height: 12),
+          SelectableText(message, textAlign: TextAlign.center),
+          const SizedBox(height: 16),
+          FilledButton.icon(
+            onPressed: busy ? null : onRetry,
+            icon: const Icon(Icons.refresh),
+            label: Text(busy ? 'Starting…' : 'Retry'),
           ),
         ],
       ),
-    );
-  }
-
-  Widget _jsonPages(
-    ScrollController controller,
-    ColorScheme colors, {
-    required bool requestSide,
-  }) {
-    final exchanges = widget.exchanges;
-    return Scrollbar(
-      controller: controller,
-      thumbVisibility: true,
-      child: ListView.separated(
-        controller: controller,
-        padding: const EdgeInsets.all(12),
-        itemCount: exchanges.length,
-        separatorBuilder: (_, _) => const SizedBox(height: 12),
-        itemBuilder: (_, index) {
-          final event = exchanges[index];
-          final payload = requestSide
-              ? {
-                  'endpoint': event.data['endpoint'],
-                  'apiFormat': event.data['apiFormat'],
-                  'request': event.data['request'] ?? {},
-                }
-              : event.data['response'] ?? {'text': event.text};
-          final pretty = const JsonEncoder.withIndent('  ').convert(payload);
-          return Material(
-            color: colors.surfaceContainerHighest,
-            borderRadius: BorderRadius.circular(10),
-            child: Padding(
-              padding: const EdgeInsets.all(10),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          requestSide
-                              ? 'Request #${index + 1}'
-                              : 'Response #${index + 1}',
-                          style: const TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ),
-                      IconButton(
-                        tooltip: 'Copy',
-                        visualDensity: VisualDensity.compact,
-                        onPressed: () =>
-                            Clipboard.setData(ClipboardData(text: pretty)),
-                        icon: const Icon(Icons.copy_outlined, size: 16),
-                      ),
-                    ],
-                  ),
-                  SelectableText(
-                    pretty,
-                    style: const TextStyle(
-                      fontSize: 11,
-                      fontFamily: 'monospace',
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          );
-        },
-      ),
-    );
-  }
-}
-
-/// Prompt used when the user presses Continue after timeout / stop / mistakes.
-@visibleForTesting
-String buildAgentContinuationPrompt({
-  required String originalTask,
-  required String stopReason,
-}) {
-  final reason = stopReason.trim().isEmpty
-      ? 'unknown'
-      : stopReason.trim().split('\n').first;
-  return 'Continue the unfinished agent task. '
-      'Previous run stopped: $reason\n'
-      'Do not restart investigation from scratch. '
-      'Prefer replace_in_file, write_file, or finish over more search_files.\n'
-      'Reuse retained project memory and already known files.\n\n'
-      'Original task:\n$originalTask';
+    ),
+  );
 }

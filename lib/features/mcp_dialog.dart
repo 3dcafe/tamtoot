@@ -1,12 +1,14 @@
 import 'package:flutter/material.dart';
 
 import '../app/ide_session.dart';
-import '../core/agents/mcp_client.dart';
-import '../core/agents/profile_store.dart';
-import '../core/git/http_git_service.dart';
+import '../core/opencode/opencode_client.dart';
 
+/// MCP server status as reported by the opencode server (`GET /mcp`).
+/// MCP servers themselves are configured in the opencode config
+/// (`opencode.json`), which the agent server owns.
 class McpDialog extends StatefulWidget {
   const McpDialog({super.key, required this.session});
+
   final IdeSession session;
 
   @override
@@ -14,22 +16,10 @@ class McpDialog extends StatefulWidget {
 }
 
 class _McpDialogState extends State<McpDialog> {
-  static const path = '.tamtoot/mcp.json';
-  static const example = '''{
-  "mcpServers": {
-    "local": {
-      "type": "streamableHttp",
-      "url": "http://localhost:3000/mcp",
-      "disabled": true,
-      "timeoutSeconds": 30
-    }
-  }
-}''';
-  final source = TextEditingController(text: example);
-  ProfileStore? store;
-  String? original, status, error;
-  bool busy = true, dirty = false;
-  late final root = widget.session.workspaceRoot;
+  final _server = OpencodeServerManager();
+  Map<String, dynamic> _status = const {};
+  String? _error;
+  var _loading = true;
 
   @override
   void initState() {
@@ -39,127 +29,91 @@ class _McpDialogState extends State<McpDialog> {
 
   @override
   void dispose() {
-    source.dispose();
+    _server.stop();
     super.dispose();
   }
 
   Future<void> _load() async {
-    try {
-      if (root == null || widget.session.git is! HttpGitService) {
-        throw StateError('Open a supported project first.');
-      }
-      final git = widget.session.git as HttpGitService;
-      store = ProfileStore(git.openStore(root!));
-      original = await store!.read(path);
-      if (original != null) source.text = original!;
-    } catch (e) {
-      error = '$e';
-    } finally {
-      if (mounted) setState(() => busy = false);
-    }
-  }
-
-  Future<void> _save() async {
     setState(() {
-      busy = true;
-      error = null;
-      status = null;
+      _loading = true;
+      _error = null;
     });
     try {
-      if (widget.session.workspaceRoot != root) {
-        throw StateError('The active project changed. Reopen MCP settings.');
+      final root = widget.session.workspaceRoot;
+      if (root == null) {
+        throw const OpencodeException('Open a project folder first.');
       }
-      McpConfig.parse(source.text);
-      await store!.save(path, source.text, original);
-      original = source.text;
-      dirty = false;
-      status = 'Saved $path';
+      final base = await _server.ensureRunning(
+        workingDirectory: root.toFilePath(),
+      );
+      final status = await OpencodeClient(base).mcpStatus();
+      if (mounted) setState(() => _status = status);
+    } on OpencodeException catch (e) {
+      if (mounted) setState(() => _error = e.message);
     } catch (e) {
-      error = '$e';
+      if (mounted) setState(() => _error = '$e');
     } finally {
-      if (mounted) setState(() => busy = false);
-    }
-  }
-
-  Future<void> _test() async {
-    setState(() {
-      busy = true;
-      error = null;
-      status = null;
-    });
-    McpRegistry? registry;
-    try {
-      final config = McpConfig.parse(source.text);
-      registry = McpRegistry(config);
-      await registry.connect();
-      final description = registry.describe();
-      status = description.isEmpty
-          ? 'No enabled Streamable HTTP servers.'
-          : 'Connected tools:\n$description';
-    } catch (e) {
-      error = '$e';
-    } finally {
-      registry?.close();
-      if (mounted) setState(() => busy = false);
+      if (mounted) setState(() => _loading = false);
     }
   }
 
   @override
-  Widget build(BuildContext context) => PopScope(
-    canPop: !busy && !dirty,
-    child: AlertDialog(
-      title: const Text('MCP servers'),
-      content: SizedBox(
-        width: 760,
-        child: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              const Text(
-                'Project configuration in .tamtoot/mcp.json. Streamable HTTP servers are available to Agent after initialization.',
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: source,
-                enabled: !busy,
-                minLines: 14,
-                maxLines: 28,
-                style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
-                onChanged: (_) => setState(() => dirty = true),
-                decoration: const InputDecoration(
-                  labelText: 'MCP JSON',
-                  border: OutlineInputBorder(),
-                ),
-              ),
-              if (busy) const LinearProgressIndicator(),
-              if (status != null) SelectableText(status!),
-              if (error != null)
-                SelectableText(
-                  error!,
-                  style: TextStyle(color: Theme.of(context).colorScheme.error),
-                ),
-              const Text(
-                'Header values are stored in this project file. Prefer a local proxy or short-lived token; do not commit secrets.',
-              ),
-            ],
+  Widget build(BuildContext context) {
+    if (_loading) {
+      return const Padding(
+        padding: EdgeInsets.all(24),
+        child: Center(child: CircularProgressIndicator()),
+      );
+    }
+    if (_error != null) {
+      return Padding(
+        padding: const EdgeInsets.all(16),
+        child: SelectableText(_error!),
+      );
+    }
+    if (_status.isEmpty) {
+      return const Padding(
+        padding: EdgeInsets.all(16),
+        child: Text(
+          'No MCP servers are configured. Add them to opencode.json in the '
+          'project (the "mcp" section) and restart the agent.',
+        ),
+      );
+    }
+    return ListView(
+      shrinkWrap: true,
+      children: [
+        for (final entry in _status.entries)
+          ListTile(
+            dense: true,
+            leading: Icon(
+              _connected(entry.value)
+                  ? Icons.check_circle_outline
+                  : Icons.error_outline,
+            ),
+            title: Text(entry.key),
+            subtitle: Text(_describe(entry.value)),
+          ),
+        const Padding(
+          padding: EdgeInsets.all(12),
+          child: Text(
+            'MCP servers are managed by the opencode server configuration '
+            '(opencode.json).',
           ),
         ),
-      ),
-      actions: [
-        TextButton(
-          onPressed: busy ? null : _test,
-          child: const Text('Test connections'),
-        ),
-        TextButton(
-          onPressed: busy || dirty ? null : () => Navigator.pop(context),
-          child: const Text('Close'),
-        ),
-        FilledButton(
-          onPressed: busy ? null : _save,
-          child: Text(dirty ? 'Save *' : 'Save'),
-        ),
       ],
-    ),
-  );
+    );
+  }
+
+  bool _connected(dynamic value) =>
+      value is Map && '${value['status']}' == 'connected';
+
+  String _describe(dynamic value) {
+    if (value is Map) {
+      final status = '${value['status'] ?? 'unknown'}';
+      final error = value['error'];
+      return error == null ? status : '$status: $error';
+    }
+    return '$value';
+  }
 }

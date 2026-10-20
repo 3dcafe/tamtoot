@@ -1,13 +1,13 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 
 import '../app/ide_session.dart';
-import '../core/agents/kanban.dart';
-import '../core/agents/worktree_service.dart';
-import '../core/git/http_git_service.dart';
+import '../core/opencode/opencode_client.dart';
 
+/// Project "task board": in the opencode world a task is an agent session.
+/// Lists the project's opencode sessions and lets the user prune them.
 class KanbanDialog extends StatefulWidget {
   const KanbanDialog({super.key, required this.session});
+
   final IdeSession session;
 
   @override
@@ -15,12 +15,11 @@ class KanbanDialog extends StatefulWidget {
 }
 
 class _KanbanDialogState extends State<KanbanDialog> {
-  final title = TextEditingController(), description = TextEditingController();
-  KanbanStore? store;
-  KanbanBoard board = const KanbanBoard([]);
-  String? error;
-  bool busy = true;
-  late final root = widget.session.workspaceRoot;
+  final _server = OpencodeServerManager();
+  OpencodeClient? _api;
+  List<Map<String, dynamic>> _sessions = const [];
+  String? _error;
+  var _loading = true;
 
   @override
   void initState() {
@@ -30,305 +29,81 @@ class _KanbanDialogState extends State<KanbanDialog> {
 
   @override
   void dispose() {
-    title.dispose();
-    description.dispose();
+    _server.stop();
     super.dispose();
   }
 
   Future<void> _load() async {
-    try {
-      if (root == null || widget.session.git is! HttpGitService) {
-        throw StateError('Open a supported Git project first.');
-      }
-      final git = widget.session.git as HttpGitService;
-      store = KanbanStore(git.openStore(root!));
-      board = await store!.load();
-    } catch (e) {
-      error = '$e';
-    } finally {
-      if (mounted) setState(() => busy = false);
-    }
-  }
-
-  Future<void> _save(List<KanbanCard> cards) async {
     setState(() {
-      busy = true;
-      error = null;
+      _loading = true;
+      _error = null;
     });
     try {
-      if (widget.session.workspaceRoot != root) {
-        throw StateError('The project changed. Reopen Kanban.');
+      final root = widget.session.workspaceRoot;
+      if (root == null) {
+        throw const OpencodeException('Open a project folder first.');
       }
-      final updated = KanbanBoard(cards);
-      await store!.save(updated);
-      board = updated;
+      final base = await _server.ensureRunning(
+        workingDirectory: root.toFilePath(),
+      );
+      _api = OpencodeClient(base);
+      final sessions = await _api!.sessions();
+      if (mounted) setState(() => _sessions = sessions);
+    } on OpencodeException catch (e) {
+      if (mounted) setState(() => _error = e.message);
     } catch (e) {
-      error = '$e';
+      if (mounted) setState(() => _error = '$e');
     } finally {
-      if (mounted) setState(() => busy = false);
+      if (mounted) setState(() => _loading = false);
     }
   }
 
-  Future<void> _create() async {
-    if (busy) return;
-    final name = title.text.trim();
-    if (name.isEmpty) return;
-    var id = name
-        .toLowerCase()
-        .replaceAll(RegExp(r'[^a-z0-9]+'), '-')
-        .replaceAll(RegExp(r'^-+|-+$'), '');
-    if (id.isEmpty) id = 'task';
-    var suffix = 2;
-    final ids = board.cards.map((card) => card.id).toSet();
-    final base = id;
-    while (ids.contains(id)) {
-      id = '$base-${suffix++}';
-    }
-    await _save([
-      ...board.cards,
-      KanbanCard(id: id, title: name, description: description.text.trim()),
-    ]);
-    title.clear();
-    description.clear();
-  }
-
-  bool _canMove(KanbanCard card, KanbanStatus status) =>
-      !busy &&
-      store != null &&
-      board.cards.any((item) => item.id == card.id && item.status != status);
-
-  Future<void> _move(KanbanCard card, KanbanStatus status) async {
-    if (!_canMove(card, status)) return;
-    await _save([
-      for (final item in board.cards)
-        if (item.id == card.id) item.copyWith(status: status) else item,
-    ]);
-  }
-
-  Future<void> _worktree(KanbanCard card) async {
-    setState(() {
-      busy = true;
-      error = null;
-    });
-    try {
-      if (!board.ready(card)) {
-        throw StateError(
-          'Complete all dependencies before starting this card.',
-        );
-      }
-      final uri = await AgentWorktreeService().create(root!, card.id);
-      await _save([
-        for (final item in board.cards)
-          if (item.id == card.id)
-            item.copyWith(
-              status: KanbanStatus.inProgress,
-              worktree: uri.toFilePath(),
-            )
-          else
-            item,
-      ]);
-    } catch (e) {
-      error = '$e';
-      if (mounted) setState(() => busy = false);
-    }
-  }
-
-  Widget _card(KanbanCard card) {
-    final content = Card(
-      child: Padding(
-        padding: const EdgeInsets.all(8),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Text(card.title),
-            if (card.description.isNotEmpty) Text(card.description),
-            if (card.worktree.isNotEmpty)
-              SelectableText(
-                card.worktree,
-                style: Theme.of(context).textTheme.bodySmall,
-              ),
-            DropdownButton<KanbanStatus>(
-              value: card.status,
-              isExpanded: true,
-              items: [
-                for (final value in KanbanStatus.values)
-                  DropdownMenuItem(value: value, child: Text(value.name)),
-              ],
-              onChanged: busy
-                  ? null
-                  : (value) {
-                      if (value != null) _move(card, value);
-                    },
-            ),
-            if (card.worktree.isEmpty)
-              TextButton.icon(
-                onPressed: busy ? null : () => _worktree(card),
-                icon: const Icon(Icons.play_arrow),
-                label: const Text('Create worktree'),
-              ),
-          ],
-        ),
-      ),
-    );
-    // Long press leaves scrolling and the card's controls available on touch.
-    return LongPressDraggable<KanbanCard>(
-      key: ValueKey(card.id),
-      data: card,
-      maxSimultaneousDrags: busy ? 0 : 1,
-      feedback: Material(
-        color: Colors.transparent,
-        child: SizedBox(
-          width: 244,
-          child: Card(
-            elevation: 8,
-            child: Padding(
-              padding: const EdgeInsets.all(12),
-              child: Text(card.title),
-            ),
-          ),
-        ),
-      ),
-      childWhenDragging: Opacity(opacity: .35, child: content),
-      child: content,
-    );
-  }
-
-  Widget _column(KanbanStatus status) => SizedBox(
-    width: 260,
-    child: DragTarget<KanbanCard>(
-      onWillAcceptWithDetails: (details) => _canMove(details.data, status),
-      onAcceptWithDetails: (details) => _move(details.data, status),
-      builder: (context, candidates, rejected) {
-        final highlighted = !busy && candidates.isNotEmpty;
-        final colors = Theme.of(context).colorScheme;
-        return Card(
-          color: highlighted ? colors.primaryContainer : null,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
-            side: BorderSide(
-              color: highlighted ? colors.primary : Colors.transparent,
-              width: 2,
-            ),
-          ),
-          child: Padding(
-            padding: const EdgeInsets.all(8),
-            child: Column(
-              children: [
-                Text(switch (status) {
-                  KanbanStatus.todo => 'Todo',
-                  KanbanStatus.inProgress => 'In Progress',
-                  KanbanStatus.review => 'Review',
-                  KanbanStatus.done => 'Done',
-                }, style: Theme.of(context).textTheme.titleMedium),
-                const SizedBox(height: 8),
-                Expanded(
-                  child: ListView(
-                    children: [
-                      for (final card in board.cards.where(
-                        (card) => card.status == status,
-                      ))
-                        _card(card),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-        );
-      },
-    ),
-  );
-
-  void _close() {
-    if (busy) return;
-    // Only pop this dialog; nested menus/dialogs keep their own routes.
-    Navigator.of(context).maybePop();
+  Future<void> _delete(String id) async {
+    await _api?.deleteSession(id);
+    await _load();
   }
 
   @override
-  Widget build(BuildContext context) => CallbackShortcuts(
-    bindings: {const SingleActivator(LogicalKeyboardKey.escape): _close},
-    child: Focus(
-      autofocus: true,
-      child: AlertDialog(
-        title: Row(
-          children: [
-            const Expanded(child: Text('Agent Kanban')),
-            IconButton(
-              tooltip: 'Close',
-              onPressed: busy ? null : _close,
-              icon: const Icon(Icons.close),
+  Widget build(BuildContext context) => AlertDialog(
+    title: const Text('Agent sessions'),
+    content: SizedBox(
+      width: 520,
+      height: 420,
+      child: _loading
+          ? const Center(child: CircularProgressIndicator())
+          : _error != null
+          ? Center(child: SelectableText(_error!))
+          : _sessions.isEmpty
+          ? const Center(
+              child: Text(
+                'No agent sessions yet. Start one from the Agent sidebar.',
+              ),
+            )
+          : ListView(
+              children: [
+                for (final s in _sessions)
+                  ListTile(
+                    leading: const Icon(Icons.forum_outlined),
+                    title: Text('${s['title'] ?? s['id']}'),
+                    subtitle: Text('${s['id']}'),
+                    trailing: IconButton(
+                      tooltip: 'Delete session',
+                      icon: const Icon(Icons.delete_outline),
+                      onPressed: () => _delete(s['id'] as String),
+                    ),
+                  ),
+              ],
             ),
-          ],
-        ),
-        content: SizedBox(
-          width: 1100,
-          height: MediaQuery.sizeOf(context).height * .72,
-          child: Column(
-            children: [
-              Row(
-                children: [
-                  Expanded(
-                    child: TextField(
-                      controller: title,
-                      enabled: !busy,
-                      textInputAction: TextInputAction.done,
-                      onSubmitted: (_) => _create(),
-                      decoration: const InputDecoration(labelText: 'New task'),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: TextField(
-                      controller: description,
-                      enabled: !busy,
-                      textInputAction: TextInputAction.done,
-                      onSubmitted: (_) => _create(),
-                      decoration: const InputDecoration(
-                        labelText: 'Description',
-                      ),
-                    ),
-                  ),
-                  IconButton(
-                    onPressed: busy ? null : _create,
-                    icon: const Icon(Icons.add),
-                    tooltip: 'Add card',
-                  ),
-                ],
-              ),
-              if (busy) const LinearProgressIndicator(),
-              if (error != null)
-                SelectableText(
-                  error!,
-                  style: TextStyle(color: Theme.of(context).colorScheme.error),
-                ),
-              const SizedBox(height: 8),
-              Text(
-                'Hold a card to drag it to another column.',
-                style: Theme.of(context).textTheme.bodySmall,
-              ),
-              const SizedBox(height: 8),
-              Expanded(
-                child: SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      for (final status in KanbanStatus.values) _column(status),
-                    ],
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: busy ? null : _close,
-            child: const Text('Close'),
-          ),
-        ],
-      ),
     ),
+    actions: [
+      TextButton(
+        onPressed: _loading ? null : _load,
+        child: const Text('Refresh'),
+      ),
+      TextButton(
+        onPressed: () => Navigator.pop(context),
+        child: const Text('Close'),
+      ),
+    ],
   );
 }
