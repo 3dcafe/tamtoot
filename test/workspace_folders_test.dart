@@ -42,6 +42,12 @@ void main() {
       ]);
       expect(session.workspaceRoot, a);
       expect(session.workspaceRoots, [a, b]);
+      for (final root in [a, b]) {
+        expect(
+          await File.fromUri(root.resolve('.gitignore')).readAsString(),
+          contains('**/.tamtoot/cache/'),
+        );
+      }
       expect(session.explorer.roots, [a, b]);
       expect(session.workspaceRootAliases[b], isNotEmpty);
       await session.persistNow();

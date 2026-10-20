@@ -18,6 +18,7 @@ import '../core/themes/ide_theme.dart';
 import '../core/workspace/tamtoot_meta.dart';
 import '../languages/language_registry.dart';
 import '../platform/security_scoped_roots.dart';
+import '../platform/workspace_ignore.dart';
 import '../platform/tamtoot_meta_store.dart';
 import '../workspace/documents/document_service.dart';
 import '../workspace/layout/dock_layout.dart';
@@ -468,6 +469,7 @@ class IdeSession {
       await _subscriptions.remove(document.id)?.cancel();
       await documents.close(document);
     }
+    await _ensureWorkspaceIgnore(root);
     await detectProject();
     recentWorkspaces
       ..remove(root.toString())
@@ -561,9 +563,21 @@ class IdeSession {
       await SecurityScopedRoots.release(root);
       throw StateError(error);
     }
+    await _ensureWorkspaceIgnore(root);
     additionalWorkspaceRoots.add(root);
     log('Added workspace folder ${root.path}');
     changed();
+  }
+
+  Future<void> _ensureWorkspaceIgnore(Uri root) async {
+    try {
+      if (await ensureWorkspaceIgnore(root)) {
+        log('Updated .gitignore for Tamtoot local data in ${root.path}');
+      }
+    } catch (error) {
+      // Read-only workspaces remain usable even when ignore rules cannot be saved.
+      log('Could not update .gitignore in ${root.path}: $error');
+    }
   }
 
   Future<void> removeWorkspaceFolder(Uri root) async {
