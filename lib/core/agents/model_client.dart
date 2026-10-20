@@ -40,13 +40,32 @@ class ModelEmptyAnswerException extends ModelApiException {
       );
 }
 
+class ModelToolCall {
+  const ModelToolCall({required this.name, required this.arguments, this.id});
+  final String? id;
+  final String name;
+  final Object? arguments;
+
+  Map<String, dynamic> action() {
+    final value = arguments is String
+        ? jsonDecode(arguments as String)
+        : arguments;
+    if (value is! Map<String, dynamic>) {
+      throw const FormatException('Tool arguments must be an object.');
+    }
+    return {...value, 'action': name};
+  }
+}
+
 class ModelReply {
   const ModelReply(
     this.text, {
     this.note = '',
     this.usage = const {},
     this.request = const {},
+    this.toolCalls = const [],
   });
+  final List<ModelToolCall> toolCalls;
   final String text, note;
   final Map<String, dynamic> usage;
 
@@ -67,11 +86,56 @@ class ModelClient {
     _client.close();
   }
 
+  /// Probe the selected Ollama model; absence/unknown capabilities means JSON fallback.
+  Future<bool> supportsOllamaTools(
+    ModelProfile profile, {
+    String apiKey = '',
+  }) async {
+    try {
+      final uri = profile.requestUri();
+      final path = uri.path.replaceFirst(
+        RegExp(r'/(v1/(chat/completions|models)|api/(chat|tags|generate))$'),
+        '/api/show',
+      );
+      if (!path.endsWith('/api/show')) return false;
+      var key = apiKey.trim();
+      if (key.toLowerCase().startsWith('bearer ')) {
+        key = key.substring(7).trim();
+      }
+      if (key.contains('\n') || key.contains('\r')) return false;
+      final response = await _client
+          .post(
+            uri.replace(path: path),
+            headers: {
+              'content-type': 'application/json',
+              if (key.isNotEmpty) 'authorization': 'Bearer $key',
+            },
+            body: jsonEncode({'model': profile.model}),
+          )
+          .timeout(const Duration(seconds: 5));
+      if (response.statusCode != 200 ||
+          response.bodyBytes.length > 2 * 1024 * 1024) {
+        return false;
+      }
+      final data = jsonDecode(response.body);
+      return data is Map &&
+          data['capabilities'] is List &&
+          (data['capabilities'] as List).contains('tools');
+    } catch (_) {
+      return false;
+    } finally {
+      _client.close();
+    }
+  }
+
   Future<ModelReply> send(
     ModelProfile profile,
     Map<String, dynamic> prompt, {
     String apiKey = '',
     bool allowNativeToolActions = true,
+    List<Map<String, dynamic>>? tools,
+    List<Map<String, dynamic>>? messages,
+    bool toolChoiceAuto = true,
     List<ModelAttachment> attachments = const [],
     void Function(String delta)? onDelta,
   }) async {
@@ -104,6 +168,9 @@ class ModelClient {
       final body = requestBody(
         profile,
         prompt,
+        tools: tools,
+        messages: messages,
+        toolChoiceAuto: toolChoiceAuto,
         stream: profile.apiFormat == 'ollama' && onDelta != null,
         attachments: attachments,
       );
@@ -130,6 +197,7 @@ class ModelClient {
               profile.apiFormat,
               onDelta: onDelta,
               allowNativeToolActions: allowNativeToolActions,
+              preserveToolCalls: tools != null,
             ),
             _cancelled.future.then<ModelReply>(
               (_) => throw const ModelApiException('Request cancelled.'),
@@ -144,7 +212,16 @@ class ModelClient {
         redact(reply.text),
         note: redact(reply.note),
         usage: reply.usage,
-        request: redactAttachmentPayload(body),
+        request: tools == null
+            ? redactAttachmentPayload(body)
+            : {
+                'model': profile.model,
+                'messages_count': (body['messages'] as List).length,
+                'tools': tools
+                    .map((t) => (t['function'] as Map)['name'])
+                    .toList(),
+              },
+        toolCalls: reply.toolCalls,
       );
     } on ModelApiException catch (e) {
       var safe = redact(e.message);
@@ -233,6 +310,9 @@ class ModelClient {
     ModelProfile p,
     Map<String, dynamic> prompt, {
     bool stream = false,
+    List<Map<String, dynamic>>? tools,
+    List<Map<String, dynamic>>? messages,
+    bool toolChoiceAuto = true,
     List<ModelAttachment> attachments = const [],
   }) {
     p.validate();
@@ -249,7 +329,7 @@ class ModelClient {
     final ollamaOptions = Map<String, dynamic>.from(p.parameters);
     final ollamaThink = ollamaOptions.remove('think');
     final ollamaFormat = ollamaOptions.remove('format');
-    return switch (p.apiFormat) {
+    final body = switch (p.apiFormat) {
       'ollama' => {
         'model': p.model,
         if (ollamaThink != null) 'think': ollamaThink!,
@@ -314,6 +394,43 @@ class ModelClient {
         'stream': false,
       },
     };
+    if (tools != null) {
+      if (!{'ollama', 'chat-completions'}.contains(p.apiFormat)) {
+        throw const ModelApiException(
+          'Native tools are unavailable for this API format.',
+        );
+      }
+      body.remove('format');
+      body.remove('response_format');
+      body['tools'] = tools;
+      if (p.apiFormat == 'ollama' || !toolChoiceAuto) {
+        body.remove('tool_choice');
+      } else {
+        body['tool_choice'] = 'auto';
+      }
+      if (messages != null) {
+        final conversation = [
+          for (final message in messages) Map<String, dynamic>.from(message),
+        ];
+        if (attachments.isNotEmpty) {
+          final firstUser = conversation.indexWhere((m) => m['role'] == 'user');
+          if (firstUser >= 0) {
+            final text = conversation[firstUser]['content'] as String;
+            conversation[firstUser]['content'] = p.apiFormat == 'ollama'
+                ? _ollamaUserContent(text, attachments)
+                : _chatCompletionsContent(text, attachments);
+            if (p.apiFormat == 'ollama' && attachments.any((a) => a.isImage)) {
+              conversation[firstUser]['images'] = [
+                for (final a in attachments)
+                  if (a.isImage) base64Encode(a.bytes),
+              ];
+            }
+          }
+        }
+        body['messages'] = conversation;
+      }
+    }
+    return body;
   }
 
   /// OpenAI / STAR / ai.starimg.ru chat.completions multimodal parts.
@@ -473,6 +590,7 @@ class ModelClient {
     String format, {
     void Function(String delta)? onDelta,
     bool allowNativeToolActions = true,
+    bool preserveToolCalls = false,
   }) async {
     final response = await _client.send(request);
     if (format == 'ollama' && onDelta != null && response.statusCode == 200) {
@@ -524,6 +642,7 @@ class ModelClient {
       format,
       data,
       allowNativeToolActions: allowNativeToolActions,
+      preserveToolCalls: preserveToolCalls,
     );
   }
 
@@ -583,6 +702,7 @@ class ModelClient {
     String format,
     Map<String, dynamic> data, {
     bool allowNativeToolActions = true,
+    bool preserveToolCalls = false,
   }) {
     final parts = <String>[];
     String note = '';
@@ -759,9 +879,46 @@ class ModelClient {
       }
     }
 
+    if (preserveToolCalls) {
+      final calls = <ModelToolCall>[];
+      if (rawToolCalls is List) {
+        if ((rawToolCalls as List).length > 8) {
+          throw const ModelApiException(
+            'Model returned too many tool calls (maximum 8 per turn).',
+          );
+        }
+        for (final raw in rawToolCalls as List) {
+          if (raw is! Map || raw['function'] is! Map) {
+            throw const ModelApiException('Malformed native tool call.');
+          }
+          final fn = raw['function'] as Map;
+          if (fn['name'] is! String) {
+            throw const ModelApiException('Native tool call has no name.');
+          }
+          calls.add(
+            ModelToolCall(
+              id: raw['id'] is String ? raw['id'] as String : null,
+              name: fn['name'] as String,
+              arguments: fn['arguments'],
+            ),
+          );
+        }
+      }
+      if (calls.isNotEmpty || parts.join().trim().isNotEmpty) {
+        return ModelReply(
+          parts.join('\n'),
+          toolCalls: calls,
+          note: note,
+          usage: _usageFrom(data),
+        );
+      }
+    }
+
     // Providers sometimes ignore tool_choice:none and return native tool_calls.
     // Convert a known Tamtoot action into the text JSON the agent engine expects.
-    if (allowNativeToolActions && parts.join().trim().isEmpty) {
+    if (!preserveToolCalls &&
+        allowNativeToolActions &&
+        parts.join().trim().isEmpty) {
       final converted = _actionFromNativeTools(rawToolCalls);
       if (converted != null) {
         parts.add(converted);

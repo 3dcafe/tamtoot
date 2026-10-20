@@ -248,7 +248,12 @@ void main() {
           body['format'],
           AgentGeneration.schemaFor(
             allowedActions: AgentGeneration.actionNames
-                .where((a) => a != 'list_files' && a != 'search_files')
+                .where(
+                  (a) =>
+                      a != 'list_files' &&
+                      a != 'search_files' &&
+                      a != 'mcp_call',
+                )
                 .toSet(),
           ),
         );

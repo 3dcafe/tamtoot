@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import '../git/git_store.dart';
 import 'agent_engine.dart';
+import 'project_memory.dart';
 
 /// Project-local conversation history for the embedded agent.
 ///
@@ -72,5 +73,11 @@ final class AgentHistoryStore {
 
   Future<void> clear() async {
     if (await files.exists(path)) await files.delete(path);
+  }
+
+  /// Start a new conversation without retained knowledge from previous runs.
+  Future<void> clearConversation() async {
+    await clear();
+    await ProjectMemoryStore(files).clear();
   }
 }

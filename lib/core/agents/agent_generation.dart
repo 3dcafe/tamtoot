@@ -47,6 +47,27 @@ class AgentGeneration {
     'newText': {'type': 'string'},
     'text': {'type': 'string'},
     'summary': {'type': 'string'},
+    'requirements': {
+      'type': 'array',
+      'items': {
+        'type': 'object',
+        'properties': {
+          'id': {
+            'type': 'integer',
+            'minimum': 0,
+            'description': 'Zero-based ID from the host requirement checklist.',
+          },
+          'path': {'type': 'string'},
+          'excerpt': {'type': 'string'},
+        },
+        'required': ['id', 'path', 'excerpt'],
+        'additionalProperties': false,
+      },
+    },
+    'unresolved': {
+      'type': 'array',
+      'items': {'type': 'string'},
+    },
     'server': {'type': 'string'},
     'tool': {'type': 'string'},
     'arguments': {'type': 'object'},
@@ -66,6 +87,7 @@ class AgentGeneration {
     'finish': ['summary'],
   };
   static const _optional = {
+    'finish': ['unresolved', 'requirements'],
     'list_files': ['path'],
     'search_files': ['path'],
     'read_file': ['startLine', 'lineCount'],
@@ -129,6 +151,33 @@ class AgentGeneration {
         },
     ],
   };
+
+  static List<Map<String, dynamic>> nativeTools(
+    Map<String, dynamic> schema,
+  ) => [
+    for (final raw in schema['oneOf'] as List)
+      if (raw['properties']['action']['const'] != 'say')
+        {
+          'type': 'function',
+          'function': {
+            'name': raw['properties']['action']['const'],
+            'description': raw['properties']['action']['const'] == 'finish'
+                ? 'Return the explicit final outcome only after verification. Report unresolved work honestly.'
+                : 'Execute ${raw['properties']['action']['const']} in the current workspace. Only host results are authoritative.',
+            'parameters': {
+              'type': 'object',
+              'properties': {
+                for (final entry in (raw['properties'] as Map).entries)
+                  if (entry.key != 'action') entry.key: entry.value,
+              },
+              'required': (raw['required'] as List)
+                  .where((v) => v != 'action')
+                  .toList(),
+              'additionalProperties': false,
+            },
+          },
+        },
+  ];
 
   static void validate(Map<String, dynamic> action) {
     final name = action['action'];

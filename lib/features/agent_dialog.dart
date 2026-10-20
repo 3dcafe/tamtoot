@@ -63,7 +63,9 @@ class _AgentPanelState extends State<AgentPanel> {
   final taskQueue = <String>[];
   int timeoutSeconds = 600, maxMistakes = 3, localMaxTokens = 4096;
   double localTemperature = 0.15;
-  String localResponseFormat = 'auto', localThinking = 'off';
+  String localResponseFormat = 'auto',
+      localThinking = 'off',
+      toolCalling = 'auto';
   int _catalogRevision = -1;
   StreamSubscription<int>? _sessionSub;
   VoidCallback? _stopListeningForDrops;
@@ -71,6 +73,8 @@ class _AgentPanelState extends State<AgentPanel> {
   AgentHistoryStore? _historyStore;
   Future<void> _historyWrites = Future.value();
   bool _historyLoaded = false;
+  bool _clearingConversation = false;
+  int _conversationEpoch = 0;
   AgentTaskEngine? engine;
   McpRegistry? activeMcp;
   late final Uri? root = widget.session.workspaceRoot;
@@ -85,6 +89,7 @@ class _AgentPanelState extends State<AgentPanel> {
   void initState() {
     super.initState();
     enhancedPrivacy = widget.session.settings.get('agentPrivacy') as bool;
+    toolCalling = widget.session.settings.get('agentToolCalling') as String;
     writeAndRunTests =
         widget.session.settings.get('agentWriteAndRunTests') as bool;
     _catalogRevision = widget.session.agentCatalogRevision;
@@ -131,6 +136,7 @@ class _AgentPanelState extends State<AgentPanel> {
 
   Future<void> _load({bool preserveSelection = false}) async {
     final previous = selected;
+    final epoch = _conversationEpoch;
     if (mounted) {
       setState(() {
         loading = true;
@@ -153,7 +159,10 @@ class _AgentPanelState extends State<AgentPanel> {
       _historyStore ??= AgentHistoryStore(git.openStore(root!));
       if (!_historyLoaded) {
         final restored = await _historyStore!.load();
-        if (mounted && events.isEmpty && restored.isNotEmpty) {
+        if (mounted &&
+            epoch == _conversationEpoch &&
+            events.isEmpty &&
+            restored.isNotEmpty) {
           setState(() => events.addAll(restored));
           _scrollToEnd();
         }
@@ -363,25 +372,45 @@ class _AgentPanelState extends State<AgentPanel> {
   }
 
   Future<void> _clearConversation() async {
+    if (_clearingConversation) return;
+    _conversationEpoch++;
     _historySaveTimer?.cancel();
-    // Stop first so a long "thinking" stream cannot refill the log immediately.
-    if (running) engine?.stop();
+    final previousEngine = engine;
+    final previousMcp = activeMcp;
     setState(() {
+      _clearingConversation = true;
+      running = true;
+      engine = null;
+      activeMcp = null;
       events.clear();
+      attachments.clear();
+      task.clear();
       _lastFailure = null;
       _lastTask = null;
       error = null;
       taskQueue.clear();
     });
     try {
+      // Wait for any in-flight memory write before deleting persisted state.
+      await previousEngine?.discardConversation();
+      previousMcp?.close();
       final store = _historyStore;
       if (store != null) {
-        final operation = _historyWrites.then((_) => store.clear());
+        final operation = _historyWrites.then((_) => store.clearConversation());
         _historyWrites = operation.catchError((Object _) {});
         await operation;
       }
     } catch (e) {
-      if (mounted) setState(() => error = 'Could not clear agent history: $e');
+      if (mounted) {
+        setState(() => error = 'Could not clear agent history and memory: $e');
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _clearingConversation = false;
+          running = false;
+        });
+      }
     }
   }
 
@@ -393,9 +422,12 @@ class _AgentPanelState extends State<AgentPanel> {
       _lastFailure != null;
 
   Future<void> _start({bool continuePrevious = false}) async {
+    final epoch = _conversationEpoch;
     final path = selected;
     final typed = task.text.trim();
-    if (running || path == null || root == null) return;
+    if (_clearingConversation || running || path == null || root == null) {
+      return;
+    }
     if (continuePrevious) {
       if (!_canContinue) return;
     } else if (typed.isEmpty && attachments.isEmpty) {
@@ -417,6 +449,7 @@ class _AgentPanelState extends State<AgentPanel> {
       return;
     }
     if (yolo && !await _confirmYolo()) return;
+    if (!mounted || epoch != _conversationEpoch) return;
 
     final originalTask = continuePrevious
         ? _lastTask!.trim()
@@ -444,7 +477,15 @@ class _AgentPanelState extends State<AgentPanel> {
         await mcp.connect();
       }
     } catch (e) {
+      if (!mounted || epoch != _conversationEpoch) {
+        mcp?.close();
+        return;
+      }
       setState(() => error = 'MCP: $e');
+      mcp?.close();
+      return;
+    }
+    if (!mounted || epoch != _conversationEpoch) {
       mcp?.close();
       return;
     }
@@ -468,6 +509,7 @@ class _AgentPanelState extends State<AgentPanel> {
       ),
       attachments: runAttachments,
       onEvent: (event) {
+        if (!mounted || epoch != _conversationEpoch) return;
         final path = event.data['changedPath'];
         if (path is String && !path.startsWith('@')) {
           widget.session.markGitFileChanged(
@@ -507,6 +549,7 @@ class _AgentPanelState extends State<AgentPanel> {
       await runner.run(
         prompt,
         AgentRunOptions(
+          toolCalling: toolCalling,
           writeAndRunTests:
               supportsFlutterTools && writeAndRunTests && !enhancedPrivacy,
           yolo: yolo,
@@ -519,16 +562,17 @@ class _AgentPanelState extends State<AgentPanel> {
           localThinking: localThinking,
         ),
       );
+      if (!mounted || epoch != _conversationEpoch) return;
       await widget.session.refreshExplorer(refreshGit: false);
       await widget.session.ensureGitIndicators();
-      if (mounted) {
+      if (mounted && epoch == _conversationEpoch) {
         setState(() {
           _lastFailure = null;
           error = null;
         });
       }
     } catch (e) {
-      if (mounted) {
+      if (mounted && epoch == _conversationEpoch) {
         setState(() {
           error = '$e';
           _lastFailure = '$e';
@@ -538,8 +582,8 @@ class _AgentPanelState extends State<AgentPanel> {
       }
     } finally {
       // Keep the API key in memory for the Agent panel session.
-      activeMcp?.close();
-      if (mounted) {
+      mcp?.close();
+      if (mounted && epoch == _conversationEpoch) {
         setState(() {
           running = false;
           engine = null;
@@ -642,7 +686,7 @@ class _AgentPanelState extends State<AgentPanel> {
                 onChanged: running ? null : _selectProfile,
               ),
             ),
-            if (events.isNotEmpty)
+            if (events.isNotEmpty || _historyStore != null)
               Padding(
                 padding: const EdgeInsets.fromLTRB(10, 2, 10, 0),
                 child: Row(
@@ -657,9 +701,11 @@ class _AgentPanelState extends State<AgentPanel> {
                     const Spacer(),
                     TextButton.icon(
                       key: const ValueKey('agent-clear-log'),
-                      onPressed: () => unawaited(_clearConversation()),
+                      onPressed: _clearingConversation || loading
+                          ? null
+                          : () => unawaited(_clearConversation()),
                       icon: const Icon(Icons.delete_sweep_outlined, size: 16),
-                      label: const Text('Clear log & history'),
+                      label: const Text('Clear history & memory'),
                       style: TextButton.styleFrom(
                         visualDensity: VisualDensity.compact,
                         padding: const EdgeInsets.symmetric(horizontal: 8),
@@ -899,6 +945,42 @@ class _AgentPanelState extends State<AgentPanel> {
                         onChanged: running
                             ? null
                             : (value) => setState(() => localThinking = value!),
+                      ),
+                    ),
+                    SizedBox(
+                      width: 210,
+                      child: DropdownButtonFormField<String>(
+                        key: const ValueKey('agent-tool-calling'),
+                        isExpanded: true,
+                        initialValue: toolCalling,
+                        decoration: const InputDecoration(
+                          labelText: 'Tool calling',
+                          isDense: true,
+                        ),
+                        items: const [
+                          DropdownMenuItem(
+                            value: 'auto',
+                            child: Text('Auto (Ollama detection)'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'native',
+                            child: Text('Native tools'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'json',
+                            child: Text('JSON actions (fallback)'),
+                          ),
+                        ],
+                        onChanged: running
+                            ? null
+                            : (value) {
+                                setState(() => toolCalling = value!);
+                                widget.session.settings.set(
+                                  'agentToolCalling',
+                                  value!,
+                                );
+                                widget.session.changed();
+                              },
                       ),
                     ),
                     const Text(

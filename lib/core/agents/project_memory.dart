@@ -603,6 +603,13 @@ class ProjectMemoryStore {
   ProjectMemoryStore(this.files);
   final GitRepositoryStore files;
 
+  Future<void> clear() async {
+    await files.validateRegularFilePath(ProjectMemory.storePath);
+    if (await files.exists(ProjectMemory.storePath)) {
+      await files.delete(ProjectMemory.storePath);
+    }
+  }
+
   Future<ProjectMemory> load() async {
     try {
       await files.validateRegularFilePath(ProjectMemory.storePath);

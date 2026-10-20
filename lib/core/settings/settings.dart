@@ -11,6 +11,7 @@ class SettingsService {
     'insertSpaces': true,
     'readOnly': false,
     'agentPrivacy': false,
+    'agentToolCalling': 'auto',
     'agentWriteAndRunTests': false,
     'flutterSdkPath': '',
     'dotnetPath': '',
@@ -23,6 +24,7 @@ class SettingsService {
       key == 'theme' ||
           key == 'agentPrivacy' ||
           key == 'agentWriteAndRunTests' ||
+          key == 'agentToolCalling' ||
           key.startsWith('flutter') ||
           key.startsWith('dotnet')
       ? user[key] ?? defaults[key]!
@@ -37,6 +39,7 @@ class SettingsService {
   static void _validate(String key, Object value) {
     if (!defaults.containsKey(key)) return;
     final valid = switch (key) {
+      'agentToolCalling' => {'auto', 'native', 'json'}.contains(value),
       'projectNaming' => _validNaming(value),
       'dotnetPath' ||
       'flutterSdkPath' ||

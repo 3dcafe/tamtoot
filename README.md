@@ -10,7 +10,7 @@ Tamtoot is a **free code and plain-text editor** and an extensible Flutter IDE f
 
 [Accessibility statement and reporting barriers](ACCESSIBILITY.md)
 
-[Local Ollama agent setup](docs/local-model-agent.md) · [Desktop agent test workflow](docs/agent-testing.md)
+[Native agent tools](docs/agent-native-tools.md) · [Local Ollama agent setup](docs/local-model-agent.md) · [Desktop agent test workflow](docs/agent-testing.md)
 
 ## Release notes
 
