@@ -1169,14 +1169,20 @@ Never claim compilation/tests ran; file reads only check contents.
               !task.contains(path) &&
               !(emptyProject && creationRequested) &&
               !(creationRequested &&
-                  _featurePathMatchesTask(task, path) &&
-                  (_taskArea == null || _areaForPath(path) == _taskArea)) &&
+                  (_featurePathMatchesTask(task, path) ||
+                   _isRequestedHelpComponent(task, path)) &&
+                  (_taskArea == null ||
+                      _areaForPath(path) == _taskArea ||
+                      _isRequestedHelpComponent(task, path))) &&
               !(testsRequested &&
                   RegExp(
                     r'(^|/)(test|tests)/|(_test|\.test|\.spec)\.',
                   ).hasMatch(path))) {
             throw const ModelApiException(
-              'Creating unrelated files is not authorized by this task.',
+              'Creating file $path is not authorized by this task. '
+              'For a requested Help component use a related path under '
+              'frontend/src/app/features/help/ or frontend/src/app/layout/help/. '
+              'Do not invent unrelated paths.',
             );
           }
         }
@@ -1664,26 +1670,32 @@ Never claim compilation/tests ran; file reads only check contents.
               editState.validateRead(path, content);
             }
             if (oldText == newText) {
-              throw const ModelApiException(
-                'Replacement makes no change. Finish or provide a real edit.',
+              throw ModelApiException(
+                'Replacement makes no change in $path. The requested change has NOT been applied. '
+                'Inspect the current implementation and a relevant caller/template, '
+                'then make an actual edit for each unfinished requirement. '
+                'Do not finish claiming success on the basis of this no-op.',
               );
             }
-            if (repairExcerpts.containsKey(path)) {
-              if (repairUsed.contains(path)) {
-                throw const ModelApiException(
-                  'Replacement retry exhausted for this file. Finish and report the unresolved edit.',
-                );
-              }
-              repairUsed.add(path);
-              _blockedEditPaths.add(path);
-              if (!repairExcerpts[path]!.contains(oldText)) {
-                throw const ModelApiException(
-                  'Retry must copy an exact fragment from the verified repair excerpt.',
-                );
-              }
+            // A failed replacement does not make the file permanently read-only.
+            // Validate against actual fresh source, not a line-numbered excerpt:
+            // excerpt text is an aid to the model, not an exact-match oracle.
+            if (repairExcerpts.containsKey(path) &&
+                repairUsed.contains(path)) {
+              throw ModelApiException(
+                'Replacement attempts did not match the current file $path. '
+                'Stop guessing oldText; inspect the exact source and choose a '
+                'different edit location or report the blocker.',
+              );
             }
             final first = content.indexOf(oldText);
             if (first < 0) {
+              // Give one bounded retry after the first mismatch. Do not count
+              // the initial failed replacement as a successful edit.
+              if (repairExcerpts.containsKey(path)) {
+                repairUsed.add(path);
+                _blockedEditPaths.add(path);
+              }
               final excerpt = _fileExcerpt(path, content, {
                 'startLine': _repairStartLine(
                   content,
@@ -1707,8 +1719,17 @@ Never claim compilation/tests ran; file reads only check contents.
                   'Replacement failed; refreshed ${excerpt.description}',
                 ),
               );
-              throw const ModelApiException(
-                'oldText was not found. Current minimal excerpt is in Active file context. Copy its exact unique fragment; only one replacement retry is allowed.',
+              final exactLines = content.split('\n');
+              final start = (_repairStartLine(content, oldText,
+                      focusLinesByPath[path]?.firstOrNull) - 1)
+                  .clamp(0, exactLines.length);
+              final snippet = exactLines.skip(start).take(18).join('\n');
+              throw ModelApiException(
+                'oldText was not found in $path. Copy an exact contiguous '
+                'substring of the CURRENT SOURCE below without line numbers. '
+                'If your requested change is already present, do NOT retry it. '
+                'Continue with another unfinished requirement.\n'
+                'Current source excerpt:\n${_bounded(snippet, 1600)}',
               );
             }
             if (content.indexOf(oldText, first + oldText.length) >= 0) {
@@ -2070,6 +2091,29 @@ Never claim compilation/tests ran; file reads only check contents.
                 );
               }
             }
+            // Completion claims must be grounded in the project, not merely
+            // inferred from a successful menu edit. Only apply this check to
+            // requests that explicitly ask to add a Help component.
+            if (unresolved.isEmpty &&
+                AgentCompletion.isHelpPageTask(task) &&
+                RegExp(r'компонент|component', caseSensitive: false)
+                    .hasMatch(task)) {
+              final candidates = <String>[
+                'frontend/src/app/features/help/help.component.ts',
+                'frontend/src/app/features/help/help.ts',
+              ];
+              final existing = <String>[];
+              for (final candidate in candidates) {
+                if (await store.exists(candidate)) existing.add(candidate);
+              }
+              if (existing.isEmpty) {
+                throw const ModelApiException(
+                  'Help component is missing. Create a Help component under '
+                  'frontend/src/app/features/help/ and integrate it before finish. '
+                  'A menu entry alone is not a component.',
+                );
+              }
+            }
             if (_useNativeTools &&
                 unresolved.isEmpty &&
                 runEditedPaths.isEmpty &&
@@ -2365,7 +2409,7 @@ Never claim compilation/tests ran; file reads only check contents.
     }
     if (_useNativeTools) {
       _nativeSession ??= NativeToolSession(
-        '${_privacy == null ? profile.systemPrompt : defaultSystemPrompt}\nUse the provided tools for all actions. Never emit JSON actions in message.content. Never invent tool results. Read current files before editing, preserve unrelated code and use small exact replacements. After edits read the changed area. Call finish explicitly with actual results and blockers. For numbered task requirements, include requirements evidence (id, path, exact excerpt) in finish; do not mark an unimplemented requirement complete. Stay within the task working area.\n${_privacy == null ? '' : 'Enhanced privacy: preserve masked aliases exactly, read one file with at most 40 lines, do not guess original hosts, and do not use MCP or commands.'}\n${_testingEnabled ? testingPrompt : ''}',
+        '${_privacy == null ? profile.systemPrompt : defaultSystemPrompt}\nUse the provided tools for all actions. Never emit JSON actions in message.content. Never invent tool results. Read current files before editing, preserve unrelated code and use small exact replacements. For multi-part tasks, complete EVERY requested part, not merely the first file edit. When adding a UI component, inspect the component, its parent/root imports and template, and the menu/navigation integration; creating a component file or a menu entry alone does not make a usable page. For menu placement requests, inspect the actual rendering template and CSS: array order does not necessarily control the rightmost visual position. Do not assume a framework-specific routing module exists; follow the navigation scheme already used by the project. An unchanged replacement is NOT progress: inspect the target and choose an actual edit. After edits read the changed area. Call finish explicitly with actual results and blockers. For numbered task requirements, include requirements evidence (id, path, exact excerpt) in finish; do not mark an unimplemented requirement complete. Stay within the task working area.\n${_privacy == null ? '' : 'Enhanced privacy: preserve masked aliases exactly, read one file with at most 40 lines, do not guess original hosts, and do not use MCP or commands.'}\n${_testingEnabled ? testingPrompt : ''}',
         userPrompt,
         'Task: $_nativeTask\n${AgentCompletion.requirementContext(_nativeTask)}\n$_nativeRetainedNotes\nWorking area: ${_taskArea ?? 'determine from real file evidence'}.',
       );
@@ -2553,7 +2597,9 @@ Never claim compilation/tests ran; file reads only check contents.
     }
     user
       ..writeln()
-      ..write('Return the next action only.');
+      ..write(_useNativeTools
+          ? 'Call exactly one appropriate native tool now; do not output JSON actions.'
+          : 'Return the next JSON action only.');
     return await _send(
       recovery: true,
       options: options,
@@ -3201,10 +3247,30 @@ Never claim compilation/tests ran; file reads only check contents.
     ];
   }
 
+  /// Narrow exception for an explicitly requested Help UI component.
+  /// Never grants writes outside the Angular application's Help directories.
+  bool _isRequestedHelpComponent(String task, String path) {
+    if (!RegExp(r'помощ|help', caseSensitive: false).hasMatch(task) ||
+        !RegExp(r'компонент|component|страниц|page|созда|добав',
+                caseSensitive: false).hasMatch(task)) {
+      return false;
+    }
+    final normalized = path.toLowerCase();
+    if (!RegExp(r'^frontend/src/app/(features|layout)/help/')
+        .hasMatch(normalized)) {
+      return false;
+    }
+    return RegExp(r'(^|/)(help[._-]|help/|help$)', caseSensitive: false)
+            .hasMatch(normalized) &&
+        RegExp(r'\.(ts|html|css|scss)$').hasMatch(normalized);
+  }
+
   bool _featurePathMatchesTask(String task, String path) {
     final lower = task.toLowerCase();
     final file = path.toLowerCase();
-    if (AgentCompletion.isHelpPageTask(task) && file.contains('help')) {
+    if (AgentCompletion.isHelpPageTask(task) &&
+        RegExp(r'^frontend/src/app/(features/help/|layout/help/|.*help[^/]*\.(ts|html|css|scss)$)')
+            .hasMatch(file)) {
       return true;
     }
     final tokens = RegExp(r'[a-zа-яё][a-zа-яё0-9_]{3,}', caseSensitive: false)
@@ -3268,11 +3334,19 @@ Never claim compilation/tests ran; file reads only check contents.
     final available = _privacy == null
         ? ((await store.listFiles('')).where(_visible).toList()..sort())
         : <String>[];
+    final missingName = path.split('/').last.toLowerCase();
+    final keyword = missingName.split('.').first;
+    final preferred = available.where((candidate) =>
+        candidate.toLowerCase().contains(keyword) ||
+        (path.startsWith('frontend/') &&
+            candidate.startsWith('frontend/src/app/') &&
+            (candidate.contains('/help/') || candidate.endsWith('/app.ts') ||
+             candidate.endsWith('/app.html')))).take(12).toList();
     final message =
         'File "$path" does not exist. No content was read. '
-        'Do not retry this path or create it merely to inspect the project. '
-        'Use an exact available path below; class libraries need no Program.cs.\n'
-        '${_privacy != null ? 'Use list_files explicitly to discover the relevant directory.' : 'Available project files:\n${_bounded(available.take(80).join('\n'), 6000)}'}';
+        'Do not retry or invent this path. Check the indexed files; '
+        'a requested new component may be created via write_file.\n'
+        '${_privacy != null ? 'Use list_files to discover the relevant directory.' : 'Relevant existing files:\n${preferred.isEmpty ? available.where((p) => p.startsWith(path.split('/').first)).take(12).join('\n') : preferred.join('\n')}'}';
     _rememberObservation(observations, 'Missing file $path', message);
     onEvent(AgentEvent('tool', message));
   }

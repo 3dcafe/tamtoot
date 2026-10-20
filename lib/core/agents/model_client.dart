@@ -930,14 +930,22 @@ class ModelClient {
 
     if (parts.join().trim().isEmpty) {
       throw ModelEmptyAnswerException(
-        _emptyAnswerMessage(
-          finishReason: finishReason,
-          content: rawContent,
-          toolCalls: rawToolCalls,
-          model: responseModel,
-          hints: hints,
-          reasoning: reasoningText,
-        ),
+        preserveToolCalls
+            ? _emptyNativeAnswerMessage(
+                finishReason: finishReason,
+                content: rawContent,
+                toolCalls: rawToolCalls,
+                model: responseModel,
+                reasoning: reasoningText,
+              )
+            : _emptyAnswerMessage(
+                finishReason: finishReason,
+                content: rawContent,
+                toolCalls: rawToolCalls,
+                model: responseModel,
+                hints: hints,
+                reasoning: reasoningText,
+              ),
         finishReason: finishReason ?? '',
         reasoningCharacters: reasoningText?.length ?? 0,
         hadToolCalls: rawToolCalls != null,
@@ -1065,6 +1073,26 @@ class ModelClient {
     return null;
   }
 
+  /// Native tool sessions must never be instructed to emit legacy JSON actions.
+  static String _emptyNativeAnswerMessage({
+    required String? finishReason,
+    required dynamic content,
+    required dynamic toolCalls,
+    required String? model,
+    String? reasoning,
+  }) {
+    return [
+      'Native model response contained neither usable content nor tool calls.',
+      if (finishReason != null) 'finish_reason: $finishReason',
+      'content: ${content == null ? 'null' : 'no usable answer'}',
+      if (toolCalls != null) 'tool_calls: ${_previewDiagnostic(toolCalls)}',
+      if (reasoning != null)
+        'reasoning_content: ${reasoning.length} chars (not displayed)',
+      if (model != null && model.isNotEmpty) 'model: $model',
+      'Retry using a native tool call from the supplied tools.',
+    ].join('\n');
+  }
+
   static String _emptyAnswerMessage({
     required String? finishReason,
     required dynamic content,
@@ -1103,8 +1131,8 @@ class ModelClient {
       );
     } else {
       lines.add(
-        'Empty model content. Retry with one short JSON action, '
-        'or inspect the raw response in Agent logs.',
+        'Empty model content. Retry using the configured response protocol '
+        '(native tool calls when tools were provided, otherwise JSON actions).',
       );
     }
     return lines.join('\n');

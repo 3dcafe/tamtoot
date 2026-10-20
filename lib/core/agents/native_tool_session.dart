@@ -91,7 +91,8 @@ class NativeToolSession {
         },
       });
     }
-    _messages[0] = {'role': 'user', 'content': retainedContext};
+    // Preserve the original user task and indexed context during early turns.
+    // Compaction can later replace the large initial message with retained notes.
     _messages.add({
       'role': 'assistant',
       'content': reply.text,
@@ -123,6 +124,10 @@ class NativeToolSession {
   void _compact() {
     // Drop only complete assistant/tool groups; never orphan a call/result ID.
     while (jsonEncode(_messages).length > 28000 && _messages.length > 3) {
+      // The original repository snapshot can be large. Keep the task and
+      // requirement summary before dropping older complete call groups.
+      _messages[0] = {'role': 'user', 'content': retainedContext};
+      if (jsonEncode(_messages).length <= 28000) break;
       var end = 2;
       while (end < _messages.length && _messages[end]['role'] == 'tool') {
         end++;
@@ -130,7 +135,13 @@ class NativeToolSession {
       if (end >= _messages.length || pending.isNotEmpty) break;
       for (final entry in _messages.sublist(1, end)) {
         if (entry['role'] == 'tool') {
-          final data = jsonDecode(entry['content'] as String);
+          dynamic data;
+          try {
+            data = jsonDecode(entry['content'] as String);
+          } on FormatException {
+            data = {'result': entry['content']};
+          }
+          if (data is! Map) data = {'result': data};
           final detail = (data['error'] ?? data['result'] ?? '')
               .toString()
               .split('\n')
