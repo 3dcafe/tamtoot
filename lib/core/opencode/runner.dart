@@ -202,6 +202,20 @@ class SessionRunner {
         );
 
         final assistant = ChatMessage(id: _newId(), role: 'assistant');
+        // Live streaming: the message joins the session immediately and its
+        // parts grow as provider events arrive, so the panel's poll renders
+        // text and tool calls while the model is still working.
+        session.messages.add(assistant);
+        await store.persist(session);
+        var lastLivePersist = DateTime.now().millisecondsSinceEpoch;
+        void livePersist() {
+          final now = DateTime.now().millisecondsSinceEpoch;
+          if (now - lastLivePersist >= 400) {
+            lastLivePersist = now;
+            unawaited(store.persist(session));
+          }
+        }
+
         TextPart? textPart;
         ReasoningPart? reasoningPart;
         final calls = <LlmToolCall>[];
@@ -224,14 +238,30 @@ class SessionRunner {
               switch (event) {
                 case LlmTextDelta(:final text):
                   outputStarted = true;
-                  textPart ??= TextPart('');
+                  if (textPart == null) {
+                    textPart = TextPart('');
+                    assistant.parts.add(textPart!);
+                  }
                   textPart!.text += text;
+                  livePersist();
                 case LlmReasoningDelta(:final text):
-                  reasoningPart ??= ReasoningPart('');
+                  if (reasoningPart == null) {
+                    reasoningPart = ReasoningPart('');
+                    assistant.parts.insert(0, reasoningPart!);
+                  }
                   reasoningPart!.text += text;
+                  livePersist();
                 case LlmToolCallEvent(:final call):
                   outputStarted = true;
                   calls.add(call);
+                  assistant.parts.add(
+                    ToolPart(
+                      callId: call.id,
+                      tool: call.name,
+                      state: ToolState(status: 'pending', input: call.arguments),
+                    ),
+                  );
+                  livePersist();
                 case LlmFinish(:final reason):
                   finish = reason;
               }
@@ -271,21 +301,17 @@ class SessionRunner {
         if (cancelled) {
           assistant.finish = 'aborted';
           _settleUnsettledTools(session, 'Tool execution interrupted');
-          if (assistant.parts.isNotEmpty) session.messages.add(assistant);
           await store.persist(session);
           return;
         }
 
         if (failure != null && !outputStarted) {
-          _appendError(session, failure!.message);
+          // Nothing streamed: fold the error into this assistant message
+          // instead of leaving an empty bubble behind.
+          assistant.finish = 'error';
+          assistant.parts.add(TextPart('⚠ ${failure!.message}'));
+          await store.persist(session);
           return;
-        }
-
-        if (textPart != null && textPart!.text.isNotEmpty) {
-          assistant.parts.add(textPart!);
-        }
-        if (reasoningPart != null && reasoningPart!.text.isNotEmpty) {
-          assistant.parts.insert(0, reasoningPart!);
         }
 
         if (failure != null && outputStarted) {
@@ -293,14 +319,12 @@ class SessionRunner {
           // note the interruption, stop the drain.
           assistant.finish = 'error';
           assistant.parts.add(TextPart('\n\n[${failure!.message}]'));
-          session.messages.add(assistant);
           await store.persist(session);
           return;
         }
 
         if (finish == 'interrupted') {
           assistant.finish = 'error';
-          session.messages.add(assistant);
           _appendSyntheticUser(session, _continueAfterIncompleteStream);
           await store.persist(session);
           continue;
@@ -315,7 +339,6 @@ class SessionRunner {
         }
 
         assistant.finish = finish;
-        session.messages.add(assistant);
         await store.persist(session);
 
         if (calls.isEmpty) {
@@ -338,14 +361,23 @@ class SessionRunner {
         lengthStreak = 0;
 
         // Execute the requested tools, then loop so the model sees results.
+        // Each call already has a `pending` part from the stream; flip it to
+        // running/completed in place so the panel shows progress live.
         for (var i = 0; i < calls.length; i++) {
           final call = calls[i];
-          final part = ToolPart(
-            callId: call.id,
-            tool: call.name,
-            state: ToolState(status: 'running', input: call.arguments),
+          final part = assistant.parts.whereType<ToolPart>().firstWhere(
+            (part) => part.callId == call.id,
+            orElse: () {
+              final created = ToolPart(
+                callId: call.id,
+                tool: call.name,
+                state: ToolState(status: 'pending', input: call.arguments),
+              );
+              assistant.parts.add(created);
+              return created;
+            },
           );
-          assistant.parts.add(part);
+          part.state.status = 'running';
           await store.persist(session);
           if (cancelled) {
             part.state

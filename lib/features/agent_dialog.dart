@@ -172,8 +172,14 @@ class _AgentPanelState extends State<AgentPanel> {
       final raw = await api.messages(id);
       final status = await api.sessionStatus();
       if (!mounted) return;
+      // Assistant messages are created when a step starts, before the first
+      // token lands; skip them while they are still empty.
+      final entries = [for (final message in raw) _toEntry(message)]
+        ..removeWhere(
+          (entry) => entry.blocks.isEmpty && entry.role != 'user',
+        );
       setState(() {
-        _entries = [for (final message in raw) _toEntry(message)];
+        _entries = entries;
         final state = status[id];
         _busy = state is Map && '${state['type'] ?? state}' != 'idle';
       });
