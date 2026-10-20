@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
 
 import '../app/ide_session.dart';
-import '../core/opencode/opencode_client.dart';
+import '../core/opencode/engine.dart';
 
 /// Project "task board": in the opencode world a task is an agent session.
-/// Lists the project's opencode sessions and lets the user prune them.
+/// Lists the project's agent sessions and lets the user prune them.
 class KanbanDialog extends StatefulWidget {
   const KanbanDialog({super.key, required this.session});
 
@@ -15,8 +15,7 @@ class KanbanDialog extends StatefulWidget {
 }
 
 class _KanbanDialogState extends State<KanbanDialog> {
-  final _server = OpencodeServerManager();
-  OpencodeClient? _api;
+  OpencodeEngine? _api;
   List<Map<String, dynamic>> _sessions = const [];
   String? _error;
   var _loading = true;
@@ -25,12 +24,6 @@ class _KanbanDialogState extends State<KanbanDialog> {
   void initState() {
     super.initState();
     _load();
-  }
-
-  @override
-  void dispose() {
-    _server.stop();
-    super.dispose();
   }
 
   Future<void> _load() async {
@@ -43,10 +36,7 @@ class _KanbanDialogState extends State<KanbanDialog> {
       if (root == null) {
         throw const OpencodeException('Open a project folder first.');
       }
-      final base = await _server.ensureRunning(
-        workingDirectory: root.toFilePath(),
-      );
-      _api = OpencodeClient(base);
+      _api = OpencodeEngine.forProject(root.toFilePath());
       final sessions = await _api!.sessions();
       if (mounted) setState(() => _sessions = sessions);
     } on OpencodeException catch (e) {

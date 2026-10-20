@@ -1,11 +1,10 @@
 import 'package:flutter/material.dart';
 
 import '../app/ide_session.dart';
-import '../core/opencode/opencode_client.dart';
+import '../core/opencode/engine.dart';
 
-/// MCP server status as reported by the opencode server (`GET /mcp`).
-/// MCP servers themselves are configured in the opencode config
-/// (`opencode.json`), which the agent server owns.
+/// MCP server status. MCP is not yet ported to the built-in engine, so the
+/// dialog reports an empty status instead of querying an external server.
 class McpDialog extends StatefulWidget {
   const McpDialog({super.key, required this.session});
 
@@ -16,7 +15,6 @@ class McpDialog extends StatefulWidget {
 }
 
 class _McpDialogState extends State<McpDialog> {
-  final _server = OpencodeServerManager();
   Map<String, dynamic> _status = const {};
   String? _error;
   var _loading = true;
@@ -25,12 +23,6 @@ class _McpDialogState extends State<McpDialog> {
   void initState() {
     super.initState();
     _load();
-  }
-
-  @override
-  void dispose() {
-    _server.stop();
-    super.dispose();
   }
 
   Future<void> _load() async {
@@ -43,10 +35,8 @@ class _McpDialogState extends State<McpDialog> {
       if (root == null) {
         throw const OpencodeException('Open a project folder first.');
       }
-      final base = await _server.ensureRunning(
-        workingDirectory: root.toFilePath(),
-      );
-      final status = await OpencodeClient(base).mcpStatus();
+      final status =
+          await OpencodeEngine.forProject(root.toFilePath()).mcpStatus();
       if (mounted) setState(() => _status = status);
     } on OpencodeException catch (e) {
       if (mounted) setState(() => _error = e.message);
@@ -75,8 +65,7 @@ class _McpDialogState extends State<McpDialog> {
       return const Padding(
         padding: EdgeInsets.all(16),
         child: Text(
-          'No MCP servers are configured. Add them to opencode.json in the '
-          'project (the "mcp" section) and restart the agent.',
+          'MCP servers are not yet supported by the built-in agent engine.',
         ),
       );
     }

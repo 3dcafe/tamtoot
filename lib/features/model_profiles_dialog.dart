@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
 
 import '../app/ide_session.dart';
-import '../core/opencode/opencode_client.dart';
+import '../core/opencode/engine.dart';
 
-/// Provider/model overview reported by the opencode server
-/// (`GET /config/providers`). Model providers are configured by opencode
-/// itself (`opencode auth login`, or `opencode.json` in the project).
+/// Provider/model overview from the built-in engine. Providers are
+/// configured in `.tamtoot/opencode.json` in the project; local Ollama
+/// models are discovered automatically.
 class ModelProfilesSettings extends StatefulWidget {
   const ModelProfilesSettings({super.key, required this.session});
 
@@ -16,7 +16,6 @@ class ModelProfilesSettings extends StatefulWidget {
 }
 
 class _ModelProfilesSettingsState extends State<ModelProfilesSettings> {
-  final _server = OpencodeServerManager();
   List<Map<String, dynamic>> _providers = const [];
   Map<String, dynamic> _defaults = const {};
   String? _error;
@@ -26,12 +25,6 @@ class _ModelProfilesSettingsState extends State<ModelProfilesSettings> {
   void initState() {
     super.initState();
     _load();
-  }
-
-  @override
-  void dispose() {
-    _server.stop();
-    super.dispose();
   }
 
   Future<void> _load() async {
@@ -44,10 +37,8 @@ class _ModelProfilesSettingsState extends State<ModelProfilesSettings> {
       if (root == null) {
         throw const OpencodeException('Open a project folder first.');
       }
-      final base = await _server.ensureRunning(
-        workingDirectory: root.toFilePath(),
-      );
-      final data = await OpencodeClient(base).providers();
+      final data =
+          await OpencodeEngine.forProject(root.toFilePath()).providers();
       if (!mounted) return;
       setState(() {
         final providers = data['providers'];
@@ -95,9 +86,9 @@ class _ModelProfilesSettingsState extends State<ModelProfilesSettings> {
         const Padding(
           padding: EdgeInsets.all(12),
           child: Text(
-            'Model providers are managed by the opencode server. Run '
-            '`opencode auth login` or edit opencode.json in the project to '
-            'add providers. Local Ollama models work out of the box.',
+            'Model providers are managed by the built-in engine. Edit '
+            '.tamtoot/opencode.json in the project to add providers or pick '
+            'a model. Local Ollama models are discovered automatically.',
           ),
         ),
         for (final provider in _providers)
@@ -112,7 +103,7 @@ class _ModelProfilesSettingsState extends State<ModelProfilesSettings> {
         if (_providers.isEmpty)
           const Padding(
             padding: EdgeInsets.all(12),
-            child: Text('The opencode server reported no providers.'),
+            child: Text('No providers are configured.'),
           ),
       ],
     );

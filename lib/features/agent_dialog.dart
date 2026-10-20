@@ -3,7 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../../app/ide_session.dart';
-import '../../core/opencode/opencode_client.dart';
+import '../../core/opencode/engine.dart';
 
 /// Full-screen dialog hosting the opencode-backed agent panel.
 class AgentDialog extends StatelessWidget {
@@ -22,10 +22,11 @@ class AgentDialog extends StatelessWidget {
   );
 }
 
-/// Agent sidebar backed by a headless opencode server (`opencode serve`).
+/// Agent sidebar backed by the in-process opencode engine port.
 ///
-/// All agent logic — tools, permissions, providers, LSP diagnostics — lives in
-/// the opencode server; this panel is a thin chat client over its HTTP API.
+/// All agent logic — model routing, the session step loop, tools — lives in
+/// `lib/core/opencode`, ported from the opencode sources; no external CLI or
+/// server is required.
 class AgentPanel extends StatefulWidget {
   const AgentPanel({super.key, required this.session, required this.visible});
 
@@ -43,10 +44,9 @@ class _ChatEntry {
 }
 
 class _AgentPanelState extends State<AgentPanel> {
-  final _server = OpencodeServerManager();
   final _input = TextEditingController();
   final _scroll = ScrollController();
-  OpencodeClient? _api;
+  OpencodeEngine? _api;
   Timer? _poller;
 
   var _starting = false;
@@ -77,7 +77,6 @@ class _AgentPanelState extends State<AgentPanel> {
     _poller?.cancel();
     _input.dispose();
     _scroll.dispose();
-    _server.stop();
     super.dispose();
   }
 
@@ -103,8 +102,7 @@ class _AgentPanelState extends State<AgentPanel> {
       _error = null;
     });
     try {
-      final base = await _server.ensureRunning(workingDirectory: path);
-      _api = OpencodeClient(base);
+      _api = OpencodeEngine.forProject(path);
       await _loadSessions();
       _sessionId ??= await _api!.createSession(title: 'Tamtoot session');
       await _refresh();
@@ -284,10 +282,11 @@ class _AgentPanelState extends State<AgentPanel> {
                 icon: const Icon(Icons.add, size: 18),
               ),
               IconButton(
-                tooltip: 'Restart server',
+                tooltip: 'Restart engine',
                 onPressed: () {
                   setState(() => _sessionId = null);
-                  _server.stop();
+                  final path = _projectPath;
+                  if (path != null) OpencodeEngine.restart(path);
                   _start();
                 },
                 icon: const Icon(Icons.refresh, size: 18),
@@ -307,7 +306,7 @@ class _AgentPanelState extends State<AgentPanel> {
               ? Center(
                   child: Text(
                     _starting
-                        ? 'Starting the opencode server…'
+                        ? 'Starting the agent engine…'
                         : 'Ask the agent to change something in this project.',
                     style: theme.textTheme.bodySmall,
                   ),
