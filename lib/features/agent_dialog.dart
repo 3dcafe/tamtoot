@@ -1,6 +1,8 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 
 import '../../app/ide_session.dart';
 import '../../core/opencode/engine.dart';
@@ -40,8 +42,19 @@ class AgentPanel extends StatefulWidget {
 class _ChatEntry {
   _ChatEntry({required this.role, required this.blocks});
   final String role;
-  final List<({String kind, String text})> blocks;
+  final List<_Block> blocks;
 }
+
+/// One renderable block inside a chat entry: agent prose (`text`, rendered
+/// as Markdown), a collapsible `reasoning` block, or a structured `tool`
+/// block with status, an input summary and expandable output.
+typedef _Block = ({
+  String kind,
+  String text,
+  String? status,
+  String? detail,
+  String? output,
+});
 
 class _AgentPanelState extends State<AgentPanel> {
   final _input = TextEditingController();
@@ -56,11 +69,20 @@ class _AgentPanelState extends State<AgentPanel> {
   String? _sessionId;
   List<_ChatEntry> _entries = const [];
   var _busy = false;
+  var _stickToBottom = true;
 
   @override
   void initState() {
     super.initState();
+    _scroll.addListener(_trackStickToBottom);
     if (widget.visible) _start();
+  }
+
+  /// Auto-scroll only while the user is already at the bottom; scrolling up
+  /// to read must not be yanked back down by the 1.5 s poll.
+  void _trackStickToBottom() {
+    if (!_scroll.hasClients) return;
+    _stickToBottom = _scroll.position.extentAfter < 80;
   }
 
   @override
@@ -164,7 +186,7 @@ class _AgentPanelState extends State<AgentPanel> {
   _ChatEntry _toEntry(Map<String, dynamic> message) {
     final info = message['info'];
     final role = info is Map ? '${info['role'] ?? 'assistant'}' : 'assistant';
-    final blocks = <({String kind, String text})>[];
+    final blocks = <_Block>[];
     final parts = message['parts'];
     if (parts is List) {
       for (final part in parts) {
@@ -172,19 +194,26 @@ class _AgentPanelState extends State<AgentPanel> {
         switch (part['type']) {
           case 'text':
             final text = '${part['text'] ?? ''}'.trim();
-            if (text.isNotEmpty) blocks.add((kind: 'text', text: text));
+            if (text.isNotEmpty) {
+              blocks.add((kind: 'text', text: text, status: null, detail: null, output: null));
+            }
           case 'reasoning':
             final text = '${part['text'] ?? ''}'.trim();
             if (text.isNotEmpty) {
-              blocks.add((kind: 'reasoning', text: text));
+              blocks.add((kind: 'reasoning', text: text, status: null, detail: null, output: null));
             }
           case 'tool':
             final state = part['state'];
             final status = state is Map ? '${state['status'] ?? ''}' : '';
+            final input = state is Map ? state['input'] : null;
+            final output = state is Map ? state['output'] : null;
+            final error = state is Map ? state['error'] : null;
             blocks.add((
               kind: 'tool',
-              text: '${part['tool'] ?? 'tool'}'
-                  '${status.isEmpty ? '' : ' — $status'}',
+              text: '${part['tool'] ?? 'tool'}',
+              status: status.isEmpty ? null : status,
+              detail: _summarizeInput(input),
+              output: (output ?? error) as String?,
             ));
           case 'step-start' || 'step-finish' || 'snapshot':
             break;
@@ -196,6 +225,27 @@ class _AgentPanelState extends State<AgentPanel> {
     return _ChatEntry(role: role, blocks: blocks);
   }
 
+  /// One-line summary of a tool call's input: the meaningful argument
+  /// (path, command, pattern) when present, otherwise compact JSON.
+  String? _summarizeInput(dynamic input) {
+    if (input is! Map) return null;
+    for (final key in const ['path', 'command', 'pattern', 'workdir']) {
+      final value = input[key];
+      if (value is String && value.isNotEmpty) {
+        return value.length > 120 ? '${value.substring(0, 120)}…' : value;
+      }
+    }
+    final oldString = input['oldString'];
+    if (oldString is String && oldString.isNotEmpty) {
+      final firstLine = oldString.split('\n').first;
+      return firstLine.length > 120
+          ? '${firstLine.substring(0, 120)}…'
+          : firstLine;
+    }
+    final json = jsonEncode(input);
+    return json.length > 120 ? '${json.substring(0, 120)}…' : json;
+  }
+
   Future<void> _send() async {
     final api = _api;
     final id = _sessionId;
@@ -204,9 +254,15 @@ class _AgentPanelState extends State<AgentPanel> {
     _input.clear();
     setState(() {
       _busy = true;
+      _stickToBottom = true;
       _entries = [
         ..._entries,
-        _ChatEntry(role: 'user', blocks: [(kind: 'text', text: text)]),
+        _ChatEntry(
+          role: 'user',
+          blocks: [
+            (kind: 'text', text: text, status: null, detail: null, output: null),
+          ],
+        ),
       ];
     });
     _scrollToEnd();
@@ -242,6 +298,7 @@ class _AgentPanelState extends State<AgentPanel> {
   }
 
   void _scrollToEnd() {
+    if (!_stickToBottom) return;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (_scroll.hasClients) {
         _scroll.jumpTo(_scroll.position.maxScrollExtent);
@@ -399,39 +456,150 @@ class _EntryView extends StatelessWidget {
           children: [
             for (final block in entry.blocks)
               switch (block.kind) {
-                'tool' => Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 2),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(
-                        Icons.build_outlined,
-                        size: 13,
-                        color: theme.colorScheme.outline,
-                      ),
-                      const SizedBox(width: 4),
-                      Flexible(
-                        child: Text(
-                          block.text,
-                          style: theme.textTheme.bodySmall?.copyWith(
-                            color: theme.colorScheme.outline,
-                          ),
-                        ),
-                      ),
-                    ],
+                'tool' => _ToolBlock(block: block),
+                'reasoning' => _ReasoningBlock(text: block.text),
+                _ => MarkdownBody(
+                  data: block.text,
+                  selectable: true,
+                  styleSheet: MarkdownStyleSheet.fromTheme(theme).copyWith(
+                    p: theme.textTheme.bodyMedium,
+                    code: theme.textTheme.bodySmall?.copyWith(
+                      fontFamily: 'monospace',
+                      backgroundColor: theme.colorScheme.surfaceContainer,
+                    ),
+                    codeblockDecoration: BoxDecoration(
+                      color: theme.colorScheme.surfaceContainer,
+                      borderRadius: BorderRadius.circular(6),
+                    ),
                   ),
                 ),
-                'reasoning' => Text(
-                  block.text,
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    fontStyle: FontStyle.italic,
-                    color: theme.colorScheme.outline,
-                  ),
-                ),
-                _ => SelectableText(block.text),
               },
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// Collapsible reasoning block — long chains of thought stay out of the way.
+class _ReasoningBlock extends StatelessWidget {
+  const _ReasoningBlock({required this.text});
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Theme(
+      data: theme.copyWith(dividerColor: Colors.transparent),
+      child: ExpansionTile(
+        dense: true,
+        tilePadding: EdgeInsets.zero,
+        childrenPadding: EdgeInsets.zero,
+        title: Text(
+          'Reasoning',
+          style: theme.textTheme.bodySmall?.copyWith(
+            fontStyle: FontStyle.italic,
+            color: theme.colorScheme.outline,
+          ),
+        ),
+        children: [
+          Align(
+            alignment: Alignment.centerLeft,
+            child: SelectableText(
+              text,
+              style: theme.textTheme.bodySmall?.copyWith(
+                fontStyle: FontStyle.italic,
+                color: theme.colorScheme.outline,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Structured tool block: name, live status, a one-line input summary and
+/// expandable output. Running tools stay expanded, completed ones collapse.
+class _ToolBlock extends StatelessWidget {
+  const _ToolBlock({required this.block});
+  final _Block block;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final running = block.status == 'running' || block.status == 'pending';
+    final failed = block.status == 'error';
+    final icon = running
+        ? SizedBox(
+            width: 13,
+            height: 13,
+            child: CircularProgressIndicator(
+              strokeWidth: 2,
+              color: theme.colorScheme.outline,
+            ),
+          )
+        : Icon(
+            failed ? Icons.error_outline : Icons.build_outlined,
+            size: 13,
+            color: failed ? theme.colorScheme.error : theme.colorScheme.outline,
+          );
+    return Theme(
+      data: theme.copyWith(dividerColor: Colors.transparent),
+      child: ExpansionTile(
+        dense: true,
+        tilePadding: EdgeInsets.zero,
+        childrenPadding: EdgeInsets.zero,
+        initiallyExpanded: running,
+        title: Row(
+          children: [
+            icon,
+            const SizedBox(width: 4),
+            Flexible(
+              child: Text(
+                '${block.text}${block.status == null ? '' : ' — ${block.status}'}',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: failed ? theme.colorScheme.error : null,
+                ),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ],
+        ),
+        subtitle: block.detail == null
+            ? null
+            : Text(
+                block.detail!,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.outline,
+                  fontFamily: 'monospace',
+                  fontSize: 11,
+                ),
+              ),
+        children: [
+          if (block.output != null && block.output!.isNotEmpty)
+            Container(
+              width: double.infinity,
+              margin: const EdgeInsets.only(bottom: 6),
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: theme.colorScheme.surfaceContainer,
+                borderRadius: BorderRadius.circular(6),
+              ),
+              constraints: const BoxConstraints(maxHeight: 220),
+              child: SingleChildScrollView(
+                child: SelectableText(
+                  block.output!,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    fontFamily: 'monospace',
+                    fontSize: 11,
+                  ),
+                ),
+              ),
+            ),
+        ],
       ),
     );
   }
