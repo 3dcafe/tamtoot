@@ -28,6 +28,8 @@ class AgentRunOptions {
     this.timeout = const Duration(minutes: 10),
     this.maxConsecutiveMistakes = 3,
     this.maxIterations = 40,
+    this.maxActions = 32,
+    this.maxNoProgressActions = 8,
     this.maxSearchesBeforeFirstEdit = 5,
     this.maxReadsBeforeFirstEdit = 8,
     this.maxInvestigationIterationsBeforeFirstEdit = 12,
@@ -39,6 +41,7 @@ class AgentRunOptions {
   final bool yolo, enhancedPrivacy, writeAndRunTests;
   final Duration timeout;
   final int maxConsecutiveMistakes, maxIterations;
+  final int maxActions, maxNoProgressActions;
   final int maxSearchesBeforeFirstEdit;
   final int maxReadsBeforeFirstEdit;
   final int maxInvestigationIterationsBeforeFirstEdit;
@@ -110,18 +113,28 @@ class AgentTaskEngine {
   String _responseMode = 'json_object';
   Set<String>? _schemaActions;
   final Set<String> _missingReadPaths = {};
+  final Set<String> _blockedActions = {};
+  final Set<String> _exhaustedReadPaths = {};
+  bool _nativeOllamaRecovery = false;
+  bool _omitNativeThink = false;
+  final Set<String> _blockedEditPaths = {};
   String? _newPathPattern;
   Map<String, dynamic> get _actionSchema => AgentGeneration.schemaFor(
     allowTests: _testingEnabled,
     allowedActions: _schemaActions,
-    missingReadPaths: _missingReadPaths,
+    missingReadPaths: {..._missingReadPaths, ..._exhaustedReadPaths},
+    blockedEditPaths: _blockedEditPaths,
     newPathPattern: _newPathPattern,
   );
 
   bool get _testingEnabled =>
       _generation.writeAndRunTests && commands.available && _privacy == null;
   AgentPrivacy? _privacy;
-  int get _excerptLimit => _privacy == null ? maxExcerptCharacters : 2000;
+  int get _excerptLimit => _privacy != null
+      ? 2000
+      : profile.isLocal
+      ? 4000
+      : maxExcerptCharacters;
   ModelClient? _active;
 
   /// Set while a run is in flight so aborted runs still keep what they learned.
@@ -187,10 +200,10 @@ Actions:
 - say: {"action":"say","text":"..."}
 - list_files: {"action":"list_files","path":"relative/folder"}
 - search_files: {"action":"search_files","query":"literal symbol or text","path":"optional/relative/folder"}
-- read_file: {"action":"read_file","path":"relative/file","startLine":optional,"lineCount":optional}
+- read_file: {"action":"read_file","path":"<existing-project-path>","startLine":optional,"lineCount":optional}
 - read_files: {"action":"read_files","paths":["a.dart","b.dart"],"startLine":optional,"lineCount":optional}
-- replace_in_file: {"action":"replace_in_file","path":"relative/file","oldText":"exact existing text","newText":"replacement text"}
-- write_file: {"action":"write_file","path":"relative/file","content":"..."}
+- replace_in_file: {"action":"replace_in_file","path":"<existing-project-path>","oldText":"exact existing text","newText":"replacement text"}
+- write_file: {"action":"write_file","path":"<existing-project-path>","content":"..."}
 - mcp_call: {"action":"mcp_call","server":"name","tool":"tool_name","arguments":{}}
 - finish: {"action":"finish","summary":"..."}
 Relative paths only. Never touch .git or .tamtoot.
@@ -274,7 +287,10 @@ Never claim compilation/tests ran; file reads only check contents.
     if (task.trim().isEmpty) {
       throw const ModelApiException('Enter an agent task.');
     }
-    if (options.maxConsecutiveMistakes < 1 || options.maxIterations < 1) {
+    if (options.maxConsecutiveMistakes < 1 ||
+        options.maxIterations < 1 ||
+        options.maxActions < 1 ||
+        options.maxNoProgressActions < 1) {
       throw const ModelApiException('Agent limits must be positive.');
     }
     if (options.localMaxTokens < 256 ||
@@ -365,6 +381,11 @@ Never claim compilation/tests ran; file reads only check contents.
     const contextCompactor = AgentContextCompactor();
     final activeFiles = <String, String>{};
     _missingReadPaths.clear();
+    _blockedActions.clear();
+    _blockedEditPaths.clear();
+    _exhaustedReadPaths.clear();
+    _nativeOllamaRecovery = false;
+    _omitNativeThink = false;
     final observations = <String, String>{};
     final indexedPaths =
         (_privacy != null
@@ -458,6 +479,47 @@ Never claim compilation/tests ran; file reads only check contents.
     var searchesBeforeEdit = 0;
     var filesReadBeforeEdit = 0;
     var hasEdited = false;
+    var actionCount = 0;
+    var noProgress = 0;
+    final progressKeys = <String>{};
+    final readCounts = <String, int>{};
+    final blockedReadVersions = <String, String>{};
+    final actionAttempts = <String, int>{};
+    final repairExcerpts = <String, String>{};
+    final repairUsed = <String>{};
+    final verifiedEdits = <String>{};
+    final verificationMarkers = <String, String>{};
+    final testsRequested =
+        _testingEnabled ||
+        RegExp(r'\btests?\b|тест', caseSensitive: false).hasMatch(task);
+    final creationRequested =
+        RegExp(
+          r'create|scaffold|new file|созда|новый файл',
+          caseSensitive: false,
+        ).hasMatch(task) ||
+        testsRequested;
+    void checkRead(String path, String content, Map<String, dynamic> args) {
+      if (!profile.isLocal) return;
+      final version = ProjectMemory.fingerprintText(content);
+      final key =
+          '$path:$version:${args['startLine'] ?? 0}:${args['lineCount'] ?? 0}';
+      final count = (readCounts[key] ?? 0) + 1;
+      if (count > 2) {
+        throw const ModelApiException(
+          'Unchanged file already read twice. Edit using loaded context or finish.',
+        );
+      }
+      readCounts[key] = count;
+      if (count == 2) {
+        _exhaustedReadPaths.add(path);
+        blockedReadVersions[path] = version;
+      }
+      // A different range can add context; an identical repeated read cannot.
+      if (progressKeys.add('$key:${args['startLine']}:${args['lineCount']}')) {
+        noProgress = 0;
+      }
+    }
+
     var finalReadUsed = false;
     var testsAttempted = false;
     var testVerification = '';
@@ -507,7 +569,26 @@ Never claim compilation/tests ran; file reads only check contents.
       if (_stopped) {
         throw const ModelApiException('Agent stopped.');
       }
+      if (profile.isLocal &&
+          (actionCount >= options.maxActions ||
+              noProgress >= options.maxNoProgressActions)) {
+        throw const ModelApiException(
+          'Agent stopped: action budget exhausted or no progress. No further tools were executed.',
+        );
+      }
+      noProgress++;
       onEvent(AgentEvent('iteration', 'Iteration $iteration'));
+      for (final path in _exhaustedReadPaths.toList()) {
+        if (await store.exists(path)) {
+          final bytes = await store.readBytes(path);
+          if (bytes.length <= 1024 * 1024) {
+            final version = ProjectMemory.fingerprintText(utf8.decode(bytes));
+            if (blockedReadVersions[path] != version) {
+              _exhaustedReadPaths.remove(path);
+            }
+          }
+        }
+      }
       _schemaActions = null;
       _newPathPattern = null;
       if (emptyProject && profile.isLocal) {
@@ -539,6 +620,21 @@ Never claim compilation/tests ran; file reads only check contents.
         );
       }
 
+      if (profile.isLocal) {
+        _schemaActions ??= AgentGeneration.actionNames.toSet();
+        _schemaActions!.removeAll(_blockedActions);
+        if (!creationRequested && !emptyProject) {
+          _schemaActions!.remove('write_file');
+        }
+        if (requireReadAfterSearch ||
+            consecutiveSearches >= 2 ||
+            runEditedPaths.any((p) => !verifiedEdits.contains(p))) {
+          _schemaActions!.removeAll({'search_files', 'list_files'});
+        }
+        if (listedDirectories.isNotEmpty) _schemaActions!.remove('list_files');
+        if (hasEdited) _schemaActions!.remove('say');
+      }
+
       final budgetReached =
           !hasEdited &&
           _investigationExhausted(
@@ -547,6 +643,12 @@ Never claim compilation/tests ran; file reads only check contents.
             iteration: iteration,
             options: options,
           );
+      if (profile.isLocal && budgetReached) {
+        _schemaActions!.removeAll({'search_files', 'list_files'});
+        if (finalReadUsed) {
+          _schemaActions!.removeAll({'read_file', 'read_files'});
+        }
+      }
       if (!hasEdited) {
         _injectInvestigationBudget(
           transcript,
@@ -594,10 +696,10 @@ Never claim compilation/tests ran; file reads only check contents.
                   memoryPrompt,
                   compactedContext,
                 )
-              : 'Task: ${_bounded(task, 2000)}\n$repairHint\nKnown paths: ${indexedPaths.take(12).join(', ')}\nEmit one complete small JSON action. Never invent tool results.',
+              : 'Task: ${_bounded(task, 2000)}\n$repairHint\nKnown paths: ${indexedPaths.take(12).join(', ')}\nCurrent exact excerpts:\n${activeFiles.entries.toList().reversed.take(2).map((e) => '${e.key}:\n${e.value}').join('\n\n')}\nEmit one complete small JSON action. Never invent tool results.',
           attachments: iteration == 1 ? attachments : const [],
           // Empty content is answered by a tiny request instead of a full
-          // agent turn: no transcript, no file context, no reasoning echo.
+          // agent turn: bounded exact excerpts, no transcript or reasoning echo.
           onEmptyAnswer: (failure) {
             return _recoveryRequest(
               options: options,
@@ -605,6 +707,7 @@ Never claim compilation/tests ran; file reads only check contents.
               jsonMode: jsonMode,
               implementationPhase: implementationPhase,
               task: task,
+              currentExcerpts: activeFiles,
               knownFiles: _knownRelevantFiles(
                 activeFiles: activeFiles,
                 searches: completedSearches,
@@ -638,6 +741,7 @@ Never claim compilation/tests ran; file reads only check contents.
         }
         if (e is ModelEmptyAnswerException ||
             e.message.startsWith('Model still returned empty content') ||
+            e.message.startsWith('Model recovery failed') ||
             {401, 403, 404, 405}.contains(e.statusCode)) {
           onEvent(AgentEvent('error', e.message));
           rethrow;
@@ -737,11 +841,62 @@ Never claim compilation/tests ran; file reads only check contents.
           );
         }
         name = action['action'] as String;
+        final actionKey =
+            '${jsonEncode(_canonicalAction(action))}:${{'search_files', 'list_files'}.contains(name) ? jsonEncode(_canonicalAction(runFingerprints)) : runFingerprints[action['path']] ?? ''}';
+        actionCount++;
+        if (profile.isLocal &&
+            name != 'read_file' &&
+            name != 'read_files' &&
+            name != 'finish') {
+          final attempts = (actionAttempts[actionKey] ?? 0) + 1;
+          actionAttempts[actionKey] = attempts;
+          if (attempts > 2) {
+            throw const ModelApiException(
+              'Repeated identical action without a new file version. Edit using existing context or finish.',
+            );
+          }
+        }
+        if (profile.isLocal &&
+            (name == 'write_file' || name == 'replace_in_file')) {
+          final path = _path(action['path']);
+          if (_blockedEditPaths.contains(path)) {
+            throw const ModelApiException(
+              'Replacement retry exhausted. No more edits to this file are permitted in this run.',
+            );
+          }
+          if (RegExp(
+            r'(^|/)relative/(file|results\.txt)(/|$)|^actual/project/path$|[<>]',
+          ).hasMatch(path)) {
+            throw const ModelApiException(
+              'Template placeholder paths cannot be written. Use the actual task file.',
+            );
+          }
+          if (name == 'write_file' &&
+              !await store.exists(path) &&
+              !task.contains(path) &&
+              !(emptyProject && creationRequested) &&
+              !(testsRequested &&
+                  RegExp(
+                    r'(^|/)(test|tests)/|(_test|\.test|\.spec)\.',
+                  ).hasMatch(path))) {
+            throw const ModelApiException(
+              'Creating unrelated files is not authorized by this task.',
+            );
+          }
+        }
         if (name == 'replace_in_file' || name == 'write_file') {
           _assertCompactEditPayload(name, action);
         }
-        int? readLineBudget = options.enhancedPrivacy ? 40 : null;
-        var readFileBudget = options.enhancedPrivacy ? 1 : 4;
+        int? readLineBudget = options.enhancedPrivacy
+            ? 40
+            : profile.isLocal
+            ? 60
+            : null;
+        var readFileBudget = options.enhancedPrivacy
+            ? 1
+            : profile.isLocal
+            ? 2
+            : 4;
         final isRead = name == 'read_file' || name == 'read_files';
         if (budgetReached && isRead) {
           if (finalReadUsed) {
@@ -854,7 +1009,13 @@ Never claim compilation/tests ran; file reads only check contents.
             final files = await store.listFiles(path);
             final visible = files
                 .where(_useful)
-                .take(_privacy == null ? 120 : 20)
+                .take(
+                  _privacy != null
+                      ? 20
+                      : profile.isLocal
+                      ? 40
+                      : 120,
+                )
                 .join('\n');
             final hint = path.replaceFirst(RegExp(r'^\.+/?'), '');
             final alternatives = visible.isEmpty && hint.isNotEmpty
@@ -1005,6 +1166,7 @@ Never claim compilation/tests ran; file reads only check contents.
               );
             }
             final content = utf8.decode(bytes);
+            checkRead(path, content, action);
             final excerpt = _fileExcerpt(
               path,
               content,
@@ -1012,6 +1174,12 @@ Never claim compilation/tests ran; file reads only check contents.
               focusLines: focusLinesByPath[path],
               maxLines: readLineBudget,
             );
+            if (runEditedPaths.contains(path) &&
+                excerpt.content.contains(verificationMarkers[path] ?? '') &&
+                ProjectMemory.fingerprintText(content) ==
+                    runFingerprints[path]) {
+              verifiedEdits.add(path);
+            }
             _rememberFile(
               activeFiles,
               excerpt.key,
@@ -1073,6 +1241,7 @@ Never claim compilation/tests ran; file reads only check contents.
                 );
               }
               final content = utf8.decode(bytes);
+              checkRead(path, content, action);
               final excerpt = _fileExcerpt(
                 path,
                 content,
@@ -1080,6 +1249,12 @@ Never claim compilation/tests ran; file reads only check contents.
                 focusLines: focusLinesByPath[path],
                 maxLines: readLineBudget,
               );
+              if (runEditedPaths.contains(path) &&
+                  excerpt.content.contains(verificationMarkers[path] ?? '') &&
+                  ProjectMemory.fingerprintText(content) ==
+                      runFingerprints[path]) {
+                verifiedEdits.add(path);
+              }
               _rememberFile(
                 activeFiles,
                 excerpt.key,
@@ -1112,6 +1287,11 @@ Never claim compilation/tests ran; file reads only check contents.
             consecutiveSays = 0;
             consecutiveSearches = 0;
             final path = _path(action['path']);
+            if (profile.isLocal && !runReadPaths.contains(path)) {
+              throw const ModelApiException(
+                'Read the target file before replacing its contents.',
+              );
+            }
             final oldText = _string(action, 'oldText');
             final newText = action['newText'];
             if (newText is! String) {
@@ -1127,10 +1307,50 @@ Never claim compilation/tests ran; file reads only check contents.
               continue;
             }
             final content = await store.readText(path);
+            if (oldText == newText) {
+              throw const ModelApiException(
+                'Replacement makes no change. Finish or provide a real edit.',
+              );
+            }
+            if (repairExcerpts.containsKey(path)) {
+              if (repairUsed.contains(path)) {
+                throw const ModelApiException(
+                  'Replacement retry exhausted for this file. Finish and report the unresolved edit.',
+                );
+              }
+              repairUsed.add(path);
+              _blockedEditPaths.add(path);
+              if (!repairExcerpts[path]!.contains(oldText)) {
+                throw const ModelApiException(
+                  'Retry must copy an exact fragment from the verified repair excerpt.',
+                );
+              }
+            }
             final first = content.indexOf(oldText);
             if (first < 0) {
+              final excerpt = _fileExcerpt(path, content, {
+                'startLine': _repairStartLine(
+                  content,
+                  oldText,
+                  focusLinesByPath[path]?.firstOrNull,
+                ),
+                'lineCount': 40,
+              }, maxLines: 40);
+              repairExcerpts[path] = excerpt.content;
+              _rememberFile(
+                activeFiles,
+                excerpt.key,
+                excerpt.content,
+                transcript,
+              );
+              onEvent(
+                AgentEvent(
+                  'tool',
+                  'Replacement failed; refreshed ${excerpt.description}',
+                ),
+              );
               throw const ModelApiException(
-                'oldText was not found. Read the current file and copy the exact text.',
+                'oldText was not found. Current minimal excerpt is in Active file context. Copy its exact unique fragment; only one replacement retry is allowed.',
               );
             }
             if (content.indexOf(oldText, first + oldText.length) >= 0) {
@@ -1149,6 +1369,18 @@ Never claim compilation/tests ran; file reads only check contents.
               );
             }
             await store.writeText(path, updated);
+            final changedLine =
+                '\n'.allMatches(updated.substring(0, first)).length + 1;
+            focusLinesByPath[path] = [changedLine];
+            verificationMarkers[path] = newText.isNotEmpty
+                ? newText.substring(0, newText.length.clamp(0, 120))
+                : updated.substring(
+                    first,
+                    (first + 80).clamp(first, updated.length),
+                  );
+            repairExcerpts.remove(path);
+            repairUsed.remove(path);
+            _blockedEditPaths.remove(path);
             activeFiles.removeWhere(
               (key, _) => key == path || key.startsWith('$path ['),
             );
@@ -1161,6 +1393,18 @@ Never claim compilation/tests ran; file reads only check contents.
               'Tool replace_in_file result: edited $path successfully. Read the changed area before finishing.',
             );
             hasEdited = true;
+            verifiedEdits.remove(path);
+            _exhaustedReadPaths.remove(path);
+            _blockedActions.clear();
+            if (profile.isLocal) {
+              completedSearches.removeWhere(
+                (search) =>
+                    search.path.isEmpty ||
+                    path == search.path ||
+                    path.startsWith('${search.path}/'),
+              );
+            }
+            noProgress = 0;
             testsAttempted = false;
             listedDirectories.clear();
           case 'write_file':
@@ -1168,6 +1412,19 @@ Never claim compilation/tests ran; file reads only check contents.
             consecutiveSearches = 0;
             final path = _path(action['path']);
             final content = _string(action, 'content');
+            if (profile.isLocal && await store.exists(path)) {
+              final current = await store.readText(path);
+              if (current == content) {
+                throw const ModelApiException(
+                  'File already has this content. Verify or finish.',
+                );
+              }
+              if (!runReadPaths.contains(path)) {
+                throw const ModelApiException(
+                  'Read an existing file before overwriting it.',
+                );
+              }
+            }
             if (utf8.encode(content).length > 1024 * 1024) {
               throw const ModelApiException(
                 'Write exceeds the 1 MiB agent limit.',
@@ -1183,6 +1440,11 @@ Never claim compilation/tests ran; file reads only check contents.
             }
             await store.validateRegularFilePath(path);
             await store.writeText(path, content);
+            verificationMarkers[path] = content.substring(
+              0,
+              content.length.clamp(0, 120),
+            );
+            focusLinesByPath[path] = [1];
             _missingReadPaths.remove(path);
             observations.remove('Missing file $path');
             activeFiles.removeWhere(
@@ -1205,6 +1467,18 @@ Never claim compilation/tests ran; file reads only check contents.
               'Tool write_file result: wrote $path successfully. Inspect it before finishing.',
             );
             hasEdited = true;
+            verifiedEdits.remove(path);
+            _exhaustedReadPaths.remove(path);
+            _blockedActions.clear();
+            if (profile.isLocal) {
+              completedSearches.removeWhere(
+                (search) =>
+                    search.path.isEmpty ||
+                    path == search.path ||
+                    path.startsWith('${search.path}/'),
+              );
+            }
+            noProgress = 0;
             testsAttempted = false;
             listedDirectories.clear();
           case 'run_tests':
@@ -1292,6 +1566,12 @@ Never claim compilation/tests ran; file reads only check contents.
               'MCP $server/$tool result:\n${_bounded(jsonEncode(result), 12000)}',
             );
           case 'finish':
+            if (profile.isLocal &&
+                runEditedPaths.any((p) => !verifiedEdits.contains(p))) {
+              throw const ModelApiException(
+                'Read the changed area to verify each edited file before finish.',
+              );
+            }
             if (_testingEnabled && hasEdited && !testsAttempted) {
               throw const ModelApiException(
                 'Testing was requested: write meaningful tests and request run_tests before finish. If its SDK is missing, report the actual unavailable-runner result.',
@@ -1312,7 +1592,7 @@ Never claim compilation/tests ran; file reads only check contents.
               }
             }
             final summary =
-                '${_string(action, 'summary')}${testVerification.isEmpty ? '' : '\n\n$testVerification'}';
+                '${_string(action, 'summary')}${testVerification.isEmpty ? '' : '\n\n$testVerification'}${repairExcerpts.isEmpty ? '' : '\n\nUnresolved replacements: ${repairExcerpts.keys.join(', ')}. The failed replacements were not applied.'}';
             _flushMemoryOnFailure = null;
             await _persistProjectMemory(
               memoryStore: memoryStore,
@@ -1327,9 +1607,10 @@ Never claim compilation/tests ran; file reads only check contents.
             onEvent(AgentEvent('done', summary));
             return AgentRunResult(
               success:
-                  testExitCode == null ||
-                  testExitCode == 0 ||
-                  testExitCode == 127,
+                  repairExcerpts.isEmpty &&
+                  (testExitCode == null ||
+                      testExitCode == 0 ||
+                      testExitCode == 127),
               message: summary,
               iterations: iteration,
             );
@@ -1345,6 +1626,11 @@ Never claim compilation/tests ran; file reads only check contents.
           if (post.context.isNotEmpty) {
             transcript.add('Hook context:\n${post.context}');
           }
+        }
+        if (profile.isLocal &&
+            !{'say', 'read_file', 'read_files'}.contains(name) &&
+            progressKeys.add(actionKey)) {
+          noProgress = 0;
         }
         mistakes = 0;
       } catch (e) {
@@ -1403,11 +1689,21 @@ Never claim compilation/tests ran; file reads only check contents.
     } on ModelEmptyAnswerException catch (e) {
       if (onEmptyAnswer == null) rethrow;
       onEvent(AgentEvent('error', e.message));
-      return await onEmptyAnswer(e);
+      try {
+        return await onEmptyAnswer(e);
+      } on ModelEmptyAnswerException {
+        rethrow;
+      } on ModelApiException catch (failure) {
+        throw ModelApiException(
+          'Model recovery failed: ${failure.message}',
+          statusCode: failure.statusCode,
+        );
+      }
     }
   }
 
   Future<ModelReply> _send({
+    bool recovery = false,
     required AgentRunOptions options,
     required int maxTokens,
     required bool jsonMode,
@@ -1438,7 +1734,11 @@ Never claim compilation/tests ran; file reads only check contents.
     _active = client;
     try {
       return await client.send(
-        _agentRequestProfile(maxTokens: maxTokens, jsonMode: jsonMode),
+        _agentRequestProfile(
+          maxTokens: maxTokens,
+          jsonMode: jsonMode,
+          recovery: recovery,
+        ),
         {
           'systemPrompt': _privacy?.mask(systemPrompt) ?? systemPrompt,
           'userPrompt': _privacy?.mask(userPrompt) ?? userPrompt,
@@ -1447,6 +1747,40 @@ Never claim compilation/tests ran; file reads only check contents.
         allowNativeToolActions: !profile.isLocal,
         attachments: _privacy?.prepareAttachments(attachments) ?? attachments,
       );
+    } on ModelApiException catch (error) {
+      final native = _nativeOllamaRecovery || profile.apiFormat == 'ollama';
+      if (native &&
+          _generation.localThinking == 'off' &&
+          !_omitNativeThink &&
+          error.statusCode == 400 &&
+          error.message.toLowerCase().contains('think')) {
+        _omitNativeThink = true;
+        onEvent(
+          AgentEvent(
+            'context',
+            'Model does not support think; retrying native Ollama once without that parameter.',
+          ),
+        );
+        return await _send(
+          recovery: true,
+          options: options,
+          maxTokens: agentRecoveryTokens,
+          jsonMode: jsonMode,
+          systemPrompt: systemPrompt,
+          userPrompt: userPrompt,
+          attachments: attachments,
+        );
+      }
+      if (native &&
+          _omitNativeThink &&
+          error.statusCode == 400 &&
+          error.message.toLowerCase().contains('think')) {
+        throw ModelApiException(
+          'Model recovery failed: ${error.message}',
+          statusCode: error.statusCode,
+        );
+      }
+      rethrow;
     } finally {
       _active = null;
     }
@@ -1463,27 +1797,48 @@ Never claim compilation/tests ran; file reads only check contents.
     required bool implementationPhase,
     required String task,
     required List<String> knownFiles,
-  }) {
+    Map<String, String> currentExcerpts = const {},
+  }) async {
+    if ((failure.reasoningOnly || failure.finishReason == 'length') &&
+        profile.isLocal &&
+        profile.isOllama &&
+        profile.apiFormat == 'chat-completions' &&
+        _generation.localThinking == 'off') {
+      _nativeOllamaRecovery = true;
+    }
     onEvent(
       AgentEvent(
         'context',
         'Recovery request after '
             '${failure.reasoningOnly ? 'a reasoning-only reply' : 'empty content'} '
-            '(minimal prompt, ${profile.isLocal ? _generation.localMaxTokens : agentRecoveryTokens} tokens)',
+            '(minimal prompt, at most $agentRecoveryTokens tokens)',
       ),
     );
     const system =
         'Return exactly one JSON action in message.content.\n'
         'Do not explain. Do not use reasoning_content.\n'
         'Shapes:\n'
-        '{"action":"read_file","path":"relative/file","startLine":1,"lineCount":60}\n'
-        '{"action":"replace_in_file","path":"relative/file","oldText":"...","newText":"..."}\n'
-        '{"action":"write_file","path":"relative/file","content":"..."}\n'
+        '{"action":"read_file","path":"<existing-project-path>","startLine":1,"lineCount":60}\n'
+        '{"action":"replace_in_file","path":"<existing-project-path>","oldText":"...","newText":"..."}\n'
+        '{"action":"write_file","path":"<existing-project-path>","content":"..."}\n'
         '{"action":"search_files","query":"literal text"}\n'
         '{"action":"finish","summary":"..."}';
-    final allowed = implementationPhase
-        ? const ['read_file', 'replace_in_file', 'write_file', 'finish']
-        : const ['search_files', 'read_file', 'finish'];
+    final allowed =
+        (implementationPhase
+                ? const [
+                    'read_file',
+                    'read_files',
+                    'replace_in_file',
+                    'write_file',
+                    'run_tests',
+                    'finish',
+                  ]
+                : const ['search_files', 'read_file', 'read_files', 'finish'])
+            .where(
+              (name) =>
+                  (_schemaActions == null || _schemaActions!.contains(name)) &&
+                  (name != 'run_tests' || _testingEnabled),
+            );
     final user = StringBuffer()
       ..writeln('Previous response failed because content was empty.')
       ..writeln(_testingEnabled ? testingPrompt : '')
@@ -1505,10 +1860,16 @@ Never claim compilation/tests ran; file reads only check contents.
         user.writeln('- $path');
       }
     }
+    for (final entry in currentExcerpts.entries.toList().reversed.take(2)) {
+      user
+        ..writeln('Current exact excerpt ${entry.key}:')
+        ..writeln(entry.value);
+    }
     user
       ..writeln()
       ..write('Return the next action only.');
-    return _send(
+    return await _send(
+      recovery: true,
       options: options,
       maxTokens: agentRecoveryTokens,
       jsonMode: jsonMode,
@@ -1848,6 +2209,32 @@ Never claim compilation/tests ran; file reads only check contents.
     return out.toString();
   }
 
+  Object? _canonicalAction(Object? value) {
+    if (value is Map) {
+      final keys = value.keys.cast<String>().toList()..sort();
+      return {for (final key in keys) key: _canonicalAction(value[key])};
+    }
+    if (value is List) return value.map(_canonicalAction).toList();
+    return value;
+  }
+
+  int _repairStartLine(String content, String oldText, int? focus) {
+    final tokens = RegExp(
+      r'[A-Za-z_][A-Za-z_0-9]{2,}',
+    ).allMatches(oldText).map((m) => m[0]!).toSet().take(32).toList();
+    final lines = content.split('\n');
+    var best = focus ?? 1;
+    var score = 0;
+    for (var i = 0; i < lines.length; i++) {
+      final matched = tokens.where(lines[i].contains).length;
+      if (matched > score) {
+        best = (i - 10).clamp(0, lines.length - 1) + 1;
+        score = matched;
+      }
+    }
+    return best;
+  }
+
   Future<void> _reportMissingRead(
     String path,
     Map<String, String> observations,
@@ -1915,13 +2302,16 @@ Never claim compilation/tests ran; file reads only check contents.
   ModelProfile _agentRequestProfile({
     required int maxTokens,
     required bool jsonMode,
+    bool recovery = false,
   }) {
-    final format = profile.apiFormat;
+    final format = _nativeOllamaRecovery ? 'ollama' : profile.apiFormat;
     final params = Map<String, dynamic>.from(profile.parameters);
     // Each API format names the completion budget differently.
     params.removeWhere((key, _) => ModelClient.tokenBudgetKeys.contains(key));
     params[ModelClient.tokenBudgetKey(format)] = profile.isLocal
-        ? _generation.localMaxTokens
+        ? (recovery
+              ? _generation.localMaxTokens.clamp(256, agentRecoveryTokens)
+              : _generation.localMaxTokens)
         : maxTokens;
     if (profile.isLocal) params['temperature'] = _generation.localTemperature;
     for (final entry in ModelClient.disableThinkingParameters(
@@ -1945,7 +2335,7 @@ Never claim compilation/tests ran; file reads only check contents.
         params.remove(key);
       }
       if (_generation.localThinking != 'default') {
-        if (format == 'ollama') {
+        if (format == 'ollama' && !_omitNativeThink) {
           params['think'] = _generation.localThinking == 'on';
         }
         // Ollama-compatible endpoints support this standard field; no template kwargs.
@@ -1987,7 +2377,17 @@ Never claim compilation/tests ran; file reads only check contents.
           ? params
           : _privacy!.maskValue(params) as Map<String, dynamic>,
       apiFormat: format,
-      endpoint: profile.endpoint,
+      endpoint: _nativeOllamaRecovery
+          ? profile
+                .requestUri()
+                .replace(
+                  path: profile.requestUri().path.replaceFirst(
+                    RegExp(r'/(v1/chat/completions|api/(tags|chat|generate))$'),
+                    '/api/chat',
+                  ),
+                )
+                .toString()
+          : profile.endpoint,
     );
   }
 
@@ -2154,6 +2554,7 @@ Never claim compilation/tests ran; file reads only check contents.
   }
 
   void _softRejectSearch(List<String> transcript, String tool, String message) {
+    if (profile.isLocal) _blockedActions.add(tool);
     onEvent(AgentEvent('denied', '$tool blocked'));
     _replaceNote(transcript, 'Host note:', 'Host note: $message');
   }

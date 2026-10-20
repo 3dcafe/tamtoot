@@ -79,6 +79,7 @@ class AgentGeneration {
     Set<String>? allowedActions,
     String? newPathPattern,
     Set<String> missingReadPaths = const {},
+    Set<String> blockedEditPaths = const {},
   }) => {
     'type': 'object',
     'oneOf': [
@@ -93,9 +94,16 @@ class AgentGeneration {
             'action': {'type': 'string', 'const': name},
             for (final field in [..._required[name]!, ...?_optional[name]])
               field:
-                  name == 'read_file' &&
+                  {'replace_in_file', 'write_file'}.contains(name) &&
                       field == 'path' &&
-                      missingReadPaths.isNotEmpty
+                      blockedEditPaths.isNotEmpty
+                  ? {
+                      'type': 'string',
+                      'not': {'enum': blockedEditPaths.toList()},
+                    }
+                  : name == 'read_file' &&
+                        field == 'path' &&
+                        missingReadPaths.isNotEmpty
                   ? {
                       'type': 'string',
                       'not': {'enum': missingReadPaths.toList()},
