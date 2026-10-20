@@ -181,8 +181,9 @@ class SessionRunner {
         if (resolved == null) {
           _appendError(
             session,
-            'No model is configured. Start Ollama, or set `model` and '
-            '`providers` in .tamtoot/opencode.json.',
+            'No model is configured. Open the model settings to choose an '
+            'Ollama server and model, or set `model` and `providers` in '
+            '.tamtoot/opencode.json.',
           );
           return;
         }

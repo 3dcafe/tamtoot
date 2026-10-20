@@ -15,13 +15,11 @@ class OpencodeException implements Exception {
 }
 
 class OpencodeEngine {
-  OpencodeEngine._(this.projectRoot)
-    : _store = SessionStore(projectRoot),
-      _configFuture = OpencodeConfig.load(projectRoot);
+  OpencodeEngine._(this.projectRoot) : _store = SessionStore(projectRoot);
 
   final String projectRoot;
   final SessionStore _store;
-  final Future<OpencodeConfig> _configFuture;
+  OpencodeConfig? _config;
   SessionRunner? _runner;
 
   static final _instances = <String, OpencodeEngine>{};
@@ -34,12 +32,23 @@ class OpencodeEngine {
   /// and sessions reload from disk on next use.
   static void restart(String projectRoot) => _instances.remove(projectRoot);
 
+  Future<OpencodeConfig> readConfig() async =>
+      _config ??= await OpencodeConfig.load(projectRoot);
+
+  /// Persist a new configuration and drop the runner so the next prompt
+  /// picks it up (the settings editor saves through here).
+  Future<void> saveConfig(OpencodeConfig config) async {
+    await config.save(projectRoot);
+    _config = config;
+    _runner = null;
+  }
+
   Future<SessionRunner> _resolveRunner() async {
     final existing = _runner;
     if (existing != null) return existing;
     final runner = SessionRunner(
       root: projectRoot,
-      config: await _configFuture,
+      config: await readConfig(),
       store: _store,
     );
     _runner = runner;
@@ -103,7 +112,7 @@ class OpencodeEngine {
   /// Configured providers plus live Ollama model discovery, the port of
   /// `GET /config/providers`.
   Future<Map<String, dynamic>> providers() async {
-    final config = await _configFuture;
+    final config = await readConfig();
     final ollamaModels = await OpencodeConfig.discoverOllamaModels(
       config.providers['ollama'],
     );
