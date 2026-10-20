@@ -176,6 +176,21 @@ class LlmRequest {
   final String toolChoice;
 }
 
+/// Short, sanitized error text for UI and history: never includes the
+/// offending value (ArgumentError's toString dumps it — that is how a full
+/// serialized request flooded the chat). Bounded to 500 characters.
+String briefError(Object error) {
+  final String text;
+  if (error is LlmException) {
+    text = error.message;
+  } else if (error is ArgumentError) {
+    text = '${error.name == null ? '' : '${error.name}: '}${error.message}';
+  } else {
+    text = '$error';
+  }
+  return text.length > 500 ? '${text.substring(0, 500)}…' : text;
+}
+
 /// Streaming LLM client over `dart:io` HTTP.
 class LlmClient {
   LlmClient({HttpClient? httpClient})
@@ -205,29 +220,34 @@ class LlmClient {
   }
 
   LlmException _classifyTransport(Object error) {
-    final text = '$error';
     if (error is SocketException ||
         error is HandshakeException ||
         error is HttpException) {
-      return LlmException('Provider connection failed: $text', retryable: true);
+      return LlmException(
+        'Provider connection failed: ${briefError(error)}',
+        retryable: true,
+      );
     }
     if (error is TimeoutException) {
       return LlmException(
-        'Provider request timed out: $text',
+        'Provider request timed out: ${briefError(error)}',
         retryable: true,
         isTimeout: true,
       );
     }
-    return LlmException(text);
+    return LlmException(briefError(error));
   }
 
   Future<HttpClientResponse> _post(Uri url, Map<String, dynamic> body, {String? apiKey}) async {
     final request = await _http.postUrl(url);
-    request.headers.set(HttpHeaders.contentTypeHeader, 'application/json');
+    request.headers.contentType = ContentType.json;
     if (apiKey != null && apiKey.isNotEmpty) {
       request.headers.set(HttpHeaders.authorizationHeader, 'Bearer $apiKey');
     }
-    request.write(jsonEncode(body));
+    // Send explicit UTF-8 bytes: dart:io's request.write(String) encodes
+    // with Latin-1 by default and throws "Contains invalid characters" on
+    // any Cyrillic or CJK text (root cause of the transport failure).
+    request.add(utf8.encode(jsonEncode(body)));
     final response = await request.close().timeout(
       const Duration(minutes: 5),
       onTimeout: () => throw const LlmException(

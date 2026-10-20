@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 
 import '../../app/ide_session.dart';
@@ -291,6 +292,54 @@ class _AgentPanelState extends State<AgentPanel> {
     await _refresh();
   }
 
+  /// Copy the whole session as a plain-text log: roles, prose, reasoning
+  /// and tool calls with inputs and outputs — for pasting into an issue or
+  /// another tool for analysis.
+  Future<void> _copyLog() async {
+    final api = _api;
+    final id = _sessionId;
+    if (api == null || id == null) return;
+    final raw = await api.messages(id);
+    final buffer = StringBuffer();
+    for (final message in raw) {
+      final entry = _toEntry(message);
+      if (entry.blocks.isEmpty) continue;
+      buffer.writeln('[${entry.role}]');
+      for (final block in entry.blocks) {
+        switch (block.kind) {
+          case 'tool':
+            buffer.writeln(
+              '  <tool ${block.text}${block.status == null ? '' : ' — ${block.status}'}>',
+            );
+            if (block.detail != null) buffer.writeln('  input: ${block.detail}');
+            if (block.output != null && block.output!.isNotEmpty) {
+              buffer.writeln('  output:');
+              buffer.writeln(
+                block.output!
+                    .split('\n')
+                    .map((line) => '    $line')
+                    .join('\n'),
+              );
+            }
+          case 'reasoning':
+            buffer.writeln('  <reasoning> ${block.text}');
+          default:
+            buffer.writeln(block.text);
+        }
+      }
+      buffer.writeln();
+    }
+    await Clipboard.setData(ClipboardData(text: buffer.toString()));
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Session log copied to the clipboard.'),
+          duration: Duration(seconds: 2),
+        ),
+      );
+    }
+  }
+
   Future<void> _newSession() async {
     final api = _api;
     if (api == null) return;
@@ -353,6 +402,11 @@ class _AgentPanelState extends State<AgentPanel> {
                 tooltip: 'New session',
                 onPressed: _api == null ? null : _newSession,
                 icon: const Icon(Icons.add, size: 18),
+              ),
+              IconButton(
+                tooltip: 'Copy session log',
+                onPressed: _api == null ? null : _copyLog,
+                icon: const Icon(Icons.copy_all_outlined, size: 18),
               ),
               IconButton(
                 tooltip: 'Restart engine',

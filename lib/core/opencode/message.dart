@@ -101,6 +101,12 @@ class ChatMessage {
   /// `SessionEvent.Synthetic` inserts.
   bool synthetic = false;
 
+  /// Marks harness-generated error notes (transport failures, configuration
+  /// problems). Diagnostics render in the panel but are excluded from the
+  /// transcript sent back to the model, so failures never amplify into
+  /// subsequent requests.
+  bool diagnostic = false;
+
   Map<String, dynamic> toJson() => {
     'info': {
       'id': id,
@@ -108,6 +114,7 @@ class ChatMessage {
       'time': {'created': createdMs},
       if (finish != null) 'finish': finish,
       if (synthetic) 'synthetic': true,
+      if (diagnostic) 'diagnostic': true,
     },
     'parts': [for (final part in parts) part.toJson()],
   };
@@ -131,6 +138,7 @@ class ChatMessage {
     }
     message.finish = info['finish'] as String?;
     message.synthetic = info['synthetic'] == true;
+    message.diagnostic = info['diagnostic'] == true;
     return message;
   }
 

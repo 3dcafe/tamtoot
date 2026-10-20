@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:math' as math;
 
 import 'config.dart';
@@ -306,20 +307,24 @@ class SessionRunner {
         }
 
         if (failure != null && !outputStarted) {
-          // Nothing streamed: fold the error into this assistant message
-          // instead of leaving an empty bubble behind.
+          // Nothing streamed: this message is a pure diagnostic. It renders
+          // in the panel but never re-enters the transcript, so failures
+          // cannot amplify into subsequent requests.
           assistant.finish = 'error';
-          assistant.parts.add(TextPart('⚠ ${failure!.message}'));
+          assistant.diagnostic = true;
+          assistant.parts.add(TextPart('⚠ ${briefError(failure!)}'));
           await store.persist(session);
+          unawaited(_logDiagnostic(session, failure!));
           return;
         }
 
         if (failure != null && outputStarted) {
-          // Partial output then unrecoverable failure: keep what streamed,
-          // note the interruption, stop the drain.
+          // Partial genuine model output stays in history; the error note
+          // goes into a separate diagnostic message.
           assistant.finish = 'error';
-          assistant.parts.add(TextPart('\n\n[${failure!.message}]'));
           await store.persist(session);
+          _appendError(session, briefError(failure!));
+          unawaited(_logDiagnostic(session, failure!));
           return;
         }
 
@@ -427,6 +432,18 @@ class SessionRunner {
       LlmMessage(role: 'system', text: _systemPrompt(tools, root)),
     ];
     for (final message in session.messages) {
+      // Diagnostics never re-enter the prompt; neither do legacy error
+      // notes saved before the diagnostic flag existed (an assistant
+      // message that failed and carries only "⚠" text).
+      if (message.diagnostic) continue;
+      if (message.role == 'assistant' && message.finish == 'error') {
+        final texts = message.parts.whereType<TextPart>().toList();
+        final errorOnly =
+            texts.isNotEmpty &&
+            texts.every((part) => part.text.trimLeft().startsWith('⚠')) &&
+            message.parts.whereType<ToolPart>().isEmpty;
+        if (errorOnly) continue;
+      }
       final text = message.parts
           .whereType<TextPart>()
           .map((part) => part.text)
@@ -494,8 +511,25 @@ class SessionRunner {
       parts: [TextPart('⚠ $message')],
     );
     assistant.finish = 'error';
+    assistant.diagnostic = true;
     session.messages.add(assistant);
     unawaited(store.persist(session));
+  }
+
+  /// Full error details go to a separate diagnostics log, never into the
+  /// conversation history.
+  Future<void> _logDiagnostic(AgentSession session, Object error) async {
+    try {
+      final sep = Platform.pathSeparator;
+      final dir = Directory([root, '.tamtoot', 'opencode'].join(sep));
+      await dir.create(recursive: true);
+      await File('${dir.path}${sep}diagnostics.log').writeAsString(
+        '${DateTime.now().toIso8601String()} [${session.id}] $error\n',
+        mode: FileMode.append,
+      );
+    } catch (_) {
+      // Diagnostics must never break the session.
+    }
   }
 
   /// Settle tool parts left running by an earlier interrupted drain,
