@@ -14,13 +14,60 @@ class AgentCompletion {
         : 'Host requirement checklist (zero-based IDs): ${items.asMap().entries.map((e) => '[${e.key}] ${e.value}').join('; ')}';
   }
 
+  /// True only for tasks that CREATE a Help page. A fix task that merely
+  /// mentions the Help component (e.g. an NG8001 error naming `app-help`)
+  /// must not inherit the Help-page acceptance checks.
   static bool isHelpPageTask(String task) =>
+      RegExp(
+        r'add|create|implement|добав|созда|реализ',
+        caseSensitive: false,
+      ).hasMatch(task) &&
       RegExp(r'help|помощ|справ', caseSensitive: false).hasMatch(task) &&
       RegExp(
         r'page|component|страниц|компонент',
         caseSensitive: false,
       ).hasMatch(task) &&
-      RegExp(r'angular|frontend|фронт', caseSensitive: false).hasMatch(task);
+      RegExp(r'angular|frontend|фронт', caseSensitive: false).hasMatch(task) &&
+      !RegExp(
+        r'fix|исправ|error|ошибк|NG\s?\d{3,}|TS\s?\d{3,}',
+        caseSensitive: false,
+      ).hasMatch(task);
+
+  /// Angular template mistakes the host can prove from source alone.
+  /// Returns a corrective error message, or null when the edit is acceptable.
+  static String? angularComponentEditError(
+    String path,
+    String previous,
+    String updated,
+  ) {
+    if (!path.endsWith('.ts') || !updated.contains('@Component')) {
+      return null;
+    }
+    if (!previous.contains('CUSTOM_ELEMENTS_SCHEMA') &&
+        updated.contains('CUSTOM_ELEMENTS_SCHEMA')) {
+      return 'Do not suppress Angular template errors with CUSTOM_ELEMENTS_SCHEMA. '
+          'An unknown element such as <app-help> means its component class is '
+          'missing: read the component file, find its exported class, and '
+          'import that class into @Component.imports.';
+    }
+    for (final match in RegExp(
+      r'imports\s*:\s*\[([^\]]*)\]',
+    ).allMatches(updated)) {
+      for (final entry in match.group(1)!.split(',')) {
+        final symbol = entry.trim();
+        if (symbol.isEmpty) continue;
+        if (symbol.contains('-') ||
+            symbol.contains('"') ||
+            symbol.contains("'")) {
+          return '"$symbol" is an HTML selector, not a TypeScript symbol. '
+              'Selectors such as app-help must never appear in '
+              '@Component.imports. Read the component file, find its exported '
+              'class (e.g. HelpComponent), and import that class name instead.';
+        }
+      }
+    }
+    return null;
+  }
 
   static Map<String, bool> helpChecks(
     Map<String, String> files,

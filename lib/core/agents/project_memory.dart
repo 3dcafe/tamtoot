@@ -294,7 +294,9 @@ class ProjectMemory {
     final out = StringBuffer('Relevant retained project knowledge:\n');
     out.writeln(
       'Treat this as a navigation hint, not guaranteed current truth. '
-      'Verify the smallest relevant current excerpt before editing.',
+      'Verify the smallest relevant current excerpt before editing. '
+      'Unresolved entries belong to earlier tasks: they are background '
+      'information, never requirements of the current task.',
     );
     for (final edit in selection.recentEdits) {
       final stale = stalePaths.contains(edit.path) ? ' (possibly stale)' : '';

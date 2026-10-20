@@ -29,7 +29,11 @@ void validateAgentTestCommand(String executable, List<String> arguments) {
     'cargo' || 'go' || 'mvn' => first == 'test',
     'npm' || 'pnpm' || 'yarn' =>
       first == 'test' ||
-          (arguments.length > 1 && first == 'run' && arguments[1] == 'test'),
+          (arguments.length > 1 &&
+              first == 'run' &&
+              // 'build' runs the frontend compiler; its TypeScript/Angular
+              // diagnostics verify whether a compilation fix worked.
+              {'test', 'build'}.contains(arguments[1])),
     'python' || 'python3' =>
       arguments.length >= 2 &&
           first == '-m' &&

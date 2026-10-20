@@ -6,6 +6,7 @@ import 'package:tamtoot/core/agents/agent_engine.dart';
 import 'package:tamtoot/core/agents/model_client.dart';
 import 'package:tamtoot/core/agents/model_profile.dart';
 import 'package:tamtoot/core/agents/native_tool_session.dart';
+import 'package:tamtoot/core/agents/test_command.dart';
 import 'agent_engine_test.dart' show AgentGit, NoHooks;
 import 'agent_local_models_test.dart' show localProfile, answer;
 import 'explorer_test.dart' show RepositoryMemory;
@@ -107,6 +108,9 @@ Map<String, dynamic> toolResult(Map body, String id) => jsonDecode(
 );
 
 void main() {
+  qwenJsonToolCallGroup();
+  completionValidationGroup();
+  taskScopeGroup();
   for (final task in [
     'Change frontend. Do not modify backend.',
     'Frontend only: change navigation. Read backend for reference.',
@@ -966,5 +970,756 @@ void main() {
       false,
     );
     expect(await store.readText(app), contains('// external edit'));
+  });
+}
+
+// ---------------------------------------------------------------------------
+// qwen2.5-coder on Ollama emits tool calls as JSON in message.content instead
+// of native message.tool_calls. The engine must detect, validate and execute
+// those, and never execute anything unregistered.
+// ---------------------------------------------------------------------------
+
+http.Response jsonContentReply(Map<String, dynamic> toolCall) =>
+    reply([], text: jsonEncode(toolCall), ollama: true);
+
+List<Map<String, dynamic>> toolMessages(Map<String, dynamic> body) =>
+    (body['messages'] as List)
+        .where((m) => m['role'] == 'tool')
+        .cast<Map<String, dynamic>>()
+        .toList();
+
+void qwenJsonToolCallGroup() {
+  test(
+    'qwen-style JSON tool call in content executes end to end: list_files, '
+    'tool result, edit, finish',
+    () async {
+      final store = RepositoryMemory();
+      await seed(store);
+      final bodies = <Map<String, dynamic>>[];
+      final events = <AgentEvent>[];
+      final turns = [
+        jsonContentReply({
+          'name': 'list_files',
+          'arguments': {'path': '.'},
+        }),
+        reply([
+          call('read', 'read_file', {'path': app}),
+        ], ollama: true),
+        reply([
+          call('edit', 'replace_in_file', {
+            'path': app,
+            'oldText': 'signOut() {}',
+            'newText': 'signOut() { console.log("bye"); }',
+          }),
+        ], ollama: true),
+        reply([
+          call('verify', 'read_file', {'path': app}),
+        ], ollama: true),
+        reply([
+          call('end', 'finish', {'summary': 'Listed, read, edited, finished.'}),
+        ], ollama: true),
+      ];
+      var requests = 0;
+      final run = runner(
+        store,
+        (r) async {
+          bodies.add(jsonDecode(r.body) as Map<String, dynamic>);
+          return turns[requests++];
+        },
+        profile: localProfile('ollama'),
+        events: events,
+      );
+      final result = await run.run(
+        'List the project files, then change the sign-out handler in the frontend',
+        native,
+      );
+      expect(result.success, isTrue);
+      expect(requests, turns.length);
+      // The conversion was reported.
+      expect(
+        events.any(
+          (e) =>
+              e.type == 'protocol' &&
+              e.text.contains('as JSON in content'),
+        ),
+        isTrue,
+      );
+      // The model received the actual list_files tool result (README content).
+      final delivered = toolMessages(bodies[1]);
+      expect(delivered, hasLength(1));
+      expect(
+        jsonDecode(delivered.single['content'] as String)['result'],
+        contains('README.md'),
+      );
+      // The edit went through.
+      expect(
+        await store.readText(app),
+        contains('signOut() { console.log("bye"); }'),
+      );
+    },
+  );
+
+  test(
+    'unregistered tool names in content are never executed',
+    () async {
+      final store = RepositoryMemory();
+      await seed(store);
+      final events = <AgentEvent>[];
+      final turns = [
+        jsonContentReply({
+          'name': 'shell_exec',
+          'arguments': {'command': 'rm -rf /'},
+        }),
+        jsonContentReply({
+          'name': 'delete_files',
+          'arguments': {'paths': ['frontend/src/app/app.ts']},
+        }),
+      ];
+      var requests = 0;
+      final run = runner(
+        store,
+        (r) async {
+          return turns[requests++];
+        },
+        profile: localProfile('ollama'),
+        events: events,
+      );
+      await expectLater(
+        run.run('Change the frontend sign-out button', native),
+        throwsA(
+          isA<ModelApiException>().having(
+            (e) => e.message,
+            'message',
+            contains('Native protocol stopped'),
+          ),
+        ),
+      );
+      expect(requests, turns.length);
+      // No conversion was attempted and no file was harmed.
+      expect(
+        events.any(
+          (e) => e.type == 'protocol' && e.text.contains('as JSON in content'),
+        ),
+        isFalse,
+      );
+      expect(await store.readText(app), appSource);
+    },
+  );
+
+  test(
+    'ordinary JSON answers in content are not executed as tool calls',
+    () async {
+      final store = RepositoryMemory();
+      await seed(store);
+      final bodies = <Map<String, dynamic>>[];
+      final turns = [
+        // JSON-actions shape, not a tool-call shape: must stay plain text.
+        jsonContentReply({'action': 'finish', 'summary': 'all done'}),
+        reply([
+          call('end', 'finish', {'summary': 'Real finish.'}),
+        ], ollama: true),
+      ];
+      var requests = 0;
+      final run = runner(
+        store,
+        (r) async {
+          bodies.add(jsonDecode(r.body) as Map<String, dynamic>);
+          return turns[requests++];
+        },
+        profile: localProfile('ollama'),
+      );
+      final result = await run.run(
+        'Explain the frontend structure',
+        native,
+      );
+      expect(result.success, isTrue);
+      // The first turn was not executed: the host asked for an explicit tool.
+      expect(requests, 2);
+      expect(bodies[1]['messages'].toString(), contains('No tool executed'));
+    },
+  );
+
+  test(
+    'arguments failing the registered tool schema are rejected, not executed',
+    () async {
+      final store = RepositoryMemory();
+      await seed(store);
+      final bodies = <Map<String, dynamic>>[];
+      final turns = [
+        jsonContentReply({
+          'name': 'read_file',
+          'arguments': {'path': 42},
+        }),
+        reply([
+          call('end', 'finish', {'summary': 'Read nothing; finishing.'}),
+        ], ollama: true),
+      ];
+      var requests = 0;
+      final run = runner(
+        store,
+        (r) async {
+          bodies.add(jsonDecode(r.body) as Map<String, dynamic>);
+          return turns[requests++];
+        },
+        profile: localProfile('ollama'),
+      );
+      final result = await run.run('Inspect the frontend', native);
+      expect(result.success, isTrue);
+      expect(requests, 2);
+      // No tool result was sent back for the invalid read_file attempt.
+      expect(toolMessages(bodies[1]), isEmpty);
+      expect(bodies[1]['messages'].toString(), contains('No tool executed'));
+    },
+  );
+
+  test(
+    'arguments encoded as a JSON string are accepted and validated',
+    () async {
+      final store = RepositoryMemory();
+      await seed(store);
+      final bodies = <Map<String, dynamic>>[];
+      final turns = [
+        jsonContentReply({
+          'name': 'list_files',
+          'arguments': '{"path":"."}',
+        }),
+        reply([
+          call('end', 'finish', {'summary': 'Listed via string arguments.'}),
+        ], ollama: true),
+      ];
+      var requests = 0;
+      final run = runner(
+        store,
+        (r) async {
+          bodies.add(jsonDecode(r.body) as Map<String, dynamic>);
+          return turns[requests++];
+        },
+        profile: localProfile('ollama'),
+      );
+      final result = await run.run('List project files', native);
+      expect(result.success, isTrue);
+      final delivered = toolMessages(bodies[1]);
+      expect(delivered, hasLength(1));
+      expect(
+        jsonDecode(delivered.single['content'] as String)['result'],
+        contains('README.md'),
+      );
+    },
+  );
+
+  test(
+    'native message.tool_calls take precedence over JSON content',
+    () async {
+      final store = RepositoryMemory();
+      await seed(store);
+      final events = <AgentEvent>[];
+      var requests = 0;
+      final run = runner(
+        store,
+        (r) async {
+          requests++;
+          // Malicious-looking content alongside a legitimate native call: the
+          // native call must win and the content must not be executed.
+          return reply(
+            [
+              call('end', 'finish', {'summary': 'Finished via native call.'}),
+            ],
+            text: jsonEncode({
+              'name': 'shell_exec',
+              'arguments': {'command': 'evil'},
+            }),
+            ollama: true,
+          );
+        },
+        profile: localProfile('ollama'),
+        events: events,
+      );
+      final result = await run.run('Explain the frontend', native);
+      expect(result.success, isTrue);
+      expect(requests, 1);
+      expect(
+        events.any(
+          (e) => e.type == 'protocol' && e.text.contains('as JSON in content'),
+        ),
+        isFalse,
+      );
+    },
+  );
+}
+
+
+// ---------------------------------------------------------------------------
+// Completion-validation regression: an edit → read → finish sequence must
+// complete without repeated reads, stale evidence must name the file, and
+// unverified compilation must be reported instead of implied.
+// ---------------------------------------------------------------------------
+
+void completionValidationGroup() {
+  test(
+    'edit → read → finish with numbered requirements completes without repeated reads',
+    () async {
+      final store = RepositoryMemory();
+      await seed(store);
+      final bodies = <Map<String, dynamic>>[];
+      var requests = 0;
+      final turns = [
+        [
+          call('read', 'read_file', {'path': app}),
+        ],
+        [
+          call('edit', 'replace_in_file', {
+            'path': app,
+            'oldText': "selectedPage = 'home'",
+            'newText': "selectedPage = 'settings'",
+          }),
+        ],
+        [
+          call('verify', 'read_file', {'path': app}),
+        ],
+        [
+          call('end', 'finish', {
+            'summary': 'Changed the default page; handler untouched.',
+            'requirements': [
+              {'id': 0, 'path': app, 'excerpt': "selectedPage = 'settings'"},
+              {'id': 1, 'path': app, 'excerpt': '(click)="signOut()"'},
+            ],
+          }),
+        ],
+      ];
+      final run = runner(store, (r) async {
+        bodies.add(jsonDecode(r.body) as Map<String, dynamic>);
+        return reply(turns[requests++], ollama: true);
+      }, profile: localProfile('ollama'));
+      final result = await run.run(
+        'Fix the frontend defaults:\n1. Change the default page\n2. Keep the sign-out handler intact',
+        native,
+      );
+      expect(result.success, isTrue);
+      // Exactly one post-edit read was enough: no read loop was required.
+      expect(requests, turns.length);
+      // Native Ollama requests keep think disabled.
+      for (final body in bodies) {
+        expect(body['think'], isFalse);
+        expect(body['tools'], isNotEmpty);
+      }
+    },
+  );
+
+  test(
+    'whitespace-rewrapped requirement evidence still matches the file',
+    () async {
+      final store = RepositoryMemory();
+      await seed(store);
+      var requests = 0;
+      final turns = [
+        [
+          call('read', 'read_file', {'path': app}),
+        ],
+        [
+          call('edit', 'replace_in_file', {
+            'path': app,
+            'oldText': 'signOut() {}',
+            'newText': "signOut() {\n      console.log('bye');\n    }",
+          }),
+        ],
+        [
+          call('verify', 'read_file', {'path': app}),
+        ],
+        [
+          call('end', 'finish', {
+            'summary': 'Handler now logs on sign out.',
+            'requirements': [
+              // The model re-wrapped the multi-line edit onto one line.
+              {'id': 0, 'path': app, 'excerpt': "signOut() { console.log('bye'); }"},
+              {'id': 1, 'path': app, 'excerpt': "selectedPage = 'home'"},
+            ],
+          }),
+        ],
+      ];
+      final run = runner(
+        store,
+        (_) async => reply(turns[requests++], ollama: true),
+        profile: localProfile('ollama'),
+      );
+      final result = await run.run(
+        'Update the frontend handler:\n1. Log on sign out\n2. Keep the default page selection',
+        native,
+      );
+      expect(result.success, isTrue);
+      expect(requests, turns.length);
+    },
+  );
+
+  test(
+    'evidence missing from the file names the requirement and path, never claims stale',
+    () async {
+      final store = RepositoryMemory();
+      await seed(store);
+      var requests = 0;
+      final turns = [
+        [
+          call('read', 'read_file', {'path': app}),
+        ],
+        [
+          call('premature', 'finish', {
+            'summary': 'Both requirements done.',
+            'requirements': [
+              {'id': 0, 'path': app, 'excerpt': 'some imaginary code here'},
+              {'id': 1, 'path': app, 'excerpt': '(click)="signOut()"'},
+            ],
+          }),
+        ],
+        [
+          call('end', 'finish', {
+            'summary': 'Cannot evidence the first requirement.',
+            'unresolved': ['Default page change remains'],
+          }),
+        ],
+      ];
+      final run = runner(store, (r) async {
+        if (requests == 2) {
+          final error = toolResult(jsonDecode(r.body), 'premature')['error'];
+          expect(error, contains('[0]'));
+          expect(error, contains(app));
+          expect(error, isNot(contains('stale')));
+          expect(error, contains('unresolved'));
+        }
+        return reply(turns[requests++]);
+      });
+      // The agent may always finish with an explicit unresolved list.
+      expect(
+        (await run.run(
+          'Change the frontend:\n1. Change the default page\n2. Keep the sign-out handler',
+          native,
+        )).success,
+        isFalse,
+      );
+      expect(requests, turns.length);
+    },
+  );
+
+  test(
+    'stale evidence allows exactly one re-read and then completes',
+    () async {
+      final store = RepositoryMemory();
+      await seed(store);
+      var requests = 0;
+      final edited = appSource.replaceFirst(
+        "selectedPage = 'home'",
+        "selectedPage = 'settings'",
+      );
+      final run = runner(store, (r) async {
+        requests++;
+        switch (requests) {
+          case 1:
+            return reply([
+              call('read', 'read_file', {'path': app}),
+            ], ollama: true);
+          case 2:
+            return reply([
+              call('edit', 'replace_in_file', {
+                'path': app,
+                'oldText': "selectedPage = 'home'",
+                'newText': "selectedPage = 'settings'",
+              }),
+            ], ollama: true);
+          case 3:
+            return reply([
+              call('verify', 'read_file', {'path': app}),
+            ], ollama: true);
+          case 4:
+            // External change after verification: evidence is now stale.
+            await store.writeText(app, '$edited\n// external edit');
+            return reply([
+              call('stale-finish', 'finish', {
+                'summary': 'Done.',
+                'requirements': [
+                  {'id': 0, 'path': app, 'excerpt': "selectedPage = 'settings'"},
+                  {'id': 1, 'path': app, 'excerpt': '(click)="signOut()"'},
+                ],
+              }),
+            ], ollama: true);
+          case 5:
+            return reply([
+              call('reread', 'read_file', {'path': app}),
+            ], ollama: true);
+          default:
+            return reply([
+              call('end', 'finish', {
+                'summary': 'Re-read and verified the current source.',
+                'requirements': [
+                  {'id': 0, 'path': app, 'excerpt': "selectedPage = 'settings'"},
+                  {'id': 1, 'path': app, 'excerpt': '// external edit'},
+                ],
+              }),
+            ], ollama: true);
+        }
+      }, profile: localProfile('ollama'));
+      final result = await run.run(
+        'Change the frontend:\n1. Change the default page\n2. Note the external marker',
+        native,
+      );
+      expect(result.success, isTrue);
+      expect(requests, 6);
+    },
+  );
+
+  test(
+    'finish after an edit without a test run reports compilation was not verified',
+    () async {
+      final store = RepositoryMemory();
+      await seed(store);
+      var requests = 0;
+      final turns = [
+        [
+          call('read', 'read_file', {'path': app}),
+        ],
+        [
+          call('edit', 'replace_in_file', {
+            'path': app,
+            'oldText': "selectedPage = 'home'",
+            'newText': "selectedPage = 'settings'",
+          }),
+        ],
+        [
+          call('verify', 'read_file', {'path': app}),
+        ],
+        [
+          call('end', 'finish', {'summary': 'Changed the default page.'}),
+        ],
+      ];
+      final run = runner(store, (_) async => reply(turns[requests++]));
+      final result = await run.run('Change frontend default page', native);
+      expect(result.success, isTrue);
+      expect(result.message, contains('Compilation was not verified'));
+      expect(result.message, contains('no build or test tool is available'));
+    },
+  );
+}
+
+
+// ---------------------------------------------------------------------------
+// Task-scope regression: a fix task must not inherit Help-page acceptance
+// checks, Angular edits must import component classes (never selectors or
+// CUSTOM_ELEMENTS_SCHEMA suppression), and repeated identical finish
+// rejections must stop the run instead of looping.
+// ---------------------------------------------------------------------------
+
+void taskScopeGroup() {
+  test(
+    'a fix task naming the Help component does not inherit Help-page requirements',
+    () async {
+      final store = RepositoryMemory();
+      await seed(store);
+      var requests = 0;
+      final events = <AgentEvent>[];
+      final turns = [
+        [
+          call('read', 'read_file', {'path': app}),
+        ],
+        [
+          call('edit', 'replace_in_file', {
+            'path': app,
+            'oldText': "import { Component } from '@angular/core';",
+            'newText':
+                "import { Component } from '@angular/core';\nimport { HelpComponent } from './help/help.component';",
+          }),
+        ],
+        [
+          call('verify', 'read_file', {'path': app}),
+        ],
+        [
+          call('end', 'finish', {
+            'summary': 'Imported HelpComponent; NG8001 cause removed.',
+          }),
+        ],
+      ];
+      final run = runner(
+        store,
+        (_) async => reply(turns[requests++]),
+        events: events,
+      );
+      final result = await run.run(
+        'Fix the Angular NG8001 error: app-help is not a known element in the app component',
+        native,
+      );
+      expect(result.success, isTrue);
+      expect(requests, turns.length);
+      // The Help-page acceptance checks belong to a Help-page task only.
+      expect(
+        events.where((e) => e.text.contains('Help-page checks')),
+        isEmpty,
+      );
+    },
+  );
+
+  test(
+    'an HTML selector in @Component.imports is rejected with corrective guidance',
+    () async {
+      final store = RepositoryMemory();
+      await seed(store);
+      var requests = 0;
+      final turns = [
+        [
+          call('read', 'read_file', {'path': app}),
+        ],
+        [
+          call('bad-import', 'replace_in_file', {
+            'path': app,
+            'oldText': 'imports: [RouterLink, RouterOutlet]',
+            'newText': 'imports: [RouterLink, RouterOutlet, app-help]',
+          }),
+        ],
+        [
+          call('good-import', 'replace_in_file', {
+            'path': app,
+            'oldText': 'imports: [RouterLink, RouterOutlet]',
+            'newText': 'imports: [RouterLink, RouterOutlet, HelpComponent]',
+          }),
+        ],
+        [
+          call('verify', 'read_file', {'path': app}),
+        ],
+        [
+          call('end', 'finish', {
+            'summary': 'Registered the HelpComponent class in imports.',
+          }),
+        ],
+      ];
+      final run = runner(store, (r) async {
+        if (requests == 2) {
+          final error = toolResult(jsonDecode(r.body), 'bad-import')['error'];
+          expect(error, contains('HTML selector'));
+          expect(error, contains('app-help'));
+        }
+        return reply(turns[requests++]);
+      });
+      expect(
+        (await run.run('Fix the Angular NG8001 error for app-help', native))
+            .success,
+        isTrue,
+      );
+      expect(requests, turns.length);
+      final current = await store.readText(app);
+      expect(current, contains('imports: [RouterLink, RouterOutlet, HelpComponent]'));
+      expect(current, isNot(contains('app-help]')));
+    },
+  );
+
+  test(
+    'CUSTOM_ELEMENTS_SCHEMA suppression is rejected in favor of a real import',
+    () async {
+      final store = RepositoryMemory();
+      await seed(store);
+      var requests = 0;
+      final turns = [
+        [
+          call('read', 'read_file', {'path': app}),
+        ],
+        [
+          call('schemas', 'replace_in_file', {
+            'path': app,
+            'oldText': 'standalone: true,',
+            'newText':
+                'standalone: true, schemas: [CUSTOM_ELEMENTS_SCHEMA],',
+          }),
+        ],
+        [
+          call('end', 'finish', {
+            'summary': 'Could not resolve the component import.',
+            'unresolved': ['Correct HelpComponent import remains'],
+          }),
+        ],
+      ];
+      final run = runner(store, (r) async {
+        if (requests == 2) {
+          final error = toolResult(jsonDecode(r.body), 'schemas')['error'];
+          expect(error, contains('CUSTOM_ELEMENTS_SCHEMA'));
+          expect(error, contains('exported class'));
+        }
+        return reply(turns[requests++]);
+      });
+      expect(
+        (await run.run('Fix the Angular NG8001 error for app-help', native))
+            .success,
+        isFalse,
+      );
+      expect(requests, turns.length);
+      expect(
+        await store.readText(app),
+        isNot(contains('CUSTOM_ELEMENTS_SCHEMA')),
+      );
+    },
+  );
+
+  test(
+    'three identical finish rejections stop the run instead of looping',
+    () async {
+      final store = RepositoryMemory();
+      await seed(store);
+      var requests = 0;
+      final turns = [
+        [
+          call('read', 'read_file', {'path': app}),
+        ],
+        [
+          call('bad1', 'finish', {
+            'summary': 'Both requirements done.',
+            'requirements': [
+              {'id': 0, 'path': app, 'excerpt': 'no such code anywhere'},
+              {'id': 1, 'path': app, 'excerpt': '(click)="signOut()"'},
+            ],
+          }),
+        ],
+        [
+          call('bad2', 'finish', {
+            'summary': 'Both requirements done.',
+            'requirements': [
+              {'id': 0, 'path': app, 'excerpt': 'no such code anywhere'},
+              {'id': 1, 'path': app, 'excerpt': '(click)="signOut()"'},
+            ],
+          }),
+        ],
+        [
+          call('bad3', 'finish', {
+            'summary': 'Both requirements done.',
+            'requirements': [
+              {'id': 0, 'path': app, 'excerpt': 'no such code anywhere'},
+              {'id': 1, 'path': app, 'excerpt': '(click)="signOut()"'},
+            ],
+          }),
+        ],
+      ];
+      final run = runner(store, (_) async => reply(turns[requests++]));
+      await expectLater(
+        run.run(
+          'Change the frontend:\n1. Change the default page\n2. Keep the sign-out handler',
+          native,
+        ),
+        throwsA(
+          isA<ModelApiException>().having(
+            (e) => e.message,
+            'message',
+            contains('finish was rejected'),
+          ),
+        ),
+      );
+      // One read plus three rejected finishes: no endless read/finish cycle.
+      expect(requests, 4);
+    },
+  );
+
+  test('npm run build is accepted as a verification command', () {
+    validateAgentTestCommand('npm', ['run', 'build']);
+    validateAgentTestCommand('pnpm', ['run', 'build']);
+    validateAgentTestCommand('npm', ['run', 'build', '--configuration=production']);
+    expect(
+      () => validateAgentTestCommand('npm', ['run', 'deploy']),
+      throwsFormatException,
+    );
+    expect(
+      () => validateAgentTestCommand('npm', ['run', 'build', '/etc/passwd']),
+      throwsFormatException,
+    );
   });
 }

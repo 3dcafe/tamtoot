@@ -102,13 +102,14 @@ class NativeToolSession {
   void hostNote(String note) =>
       _messages.add({'role': 'user', 'content': note});
 
-  void requestExplicitTool() {
-    _messages.add({
-      'role': 'user',
-      'content':
-          'No tool executed. Use an available tool or call finish with the actual outcome and unresolved requirements. Do not invent tool results.',
-    });
-  }
+  void requestExplicitTool([String outstanding = '']) => _messages.add({
+    'role': 'user',
+    'content':
+        'No tool executed. ${outstanding.isEmpty ? '' : '$outstanding '}'
+        'Continue the task now using the available tools; do not ask the user '
+        'for permission or confirmation. Call finish only with the actual '
+        'outcome and unresolved requirements. Do not invent tool results.',
+  });
 
   void result(NativeToolInvocation invocation, String result) {
     _messages.add({

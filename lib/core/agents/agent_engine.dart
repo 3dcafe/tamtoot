@@ -580,6 +580,11 @@ Never claim compilation/tests ran; file reads only check contents.
     var actionCount = 0;
     var noProgress = 0;
     var lastBlocker = '';
+    // Identical finish rejections must terminate the run instead of looping
+    // read → finish → reject forever. A successful edit resets the counter.
+    var finishRejections = 0;
+    var lastFinishRejection = '';
+    String? executingName;
     final progressKeys = <String>{};
     final readCounts = <String, int>{};
     final blockedReadVersions = <String, String>{};
@@ -619,6 +624,15 @@ Never claim compilation/tests ran; file reads only check contents.
       if (progressKeys.add('$key:${args['startLine']}:${args['lineCount']}')) {
         noProgress = 0;
       }
+    }
+
+    /// Finish validation may legitimately require one fresh look at a file
+    /// whose reads were already exhausted. Permit exactly that instead of
+    /// creating an impossible "finish needs a read, reads are blocked" state.
+    void allowEvidenceReRead(String path) {
+      _exhaustedReadPaths.remove(path);
+      blockedReadVersions.remove(path);
+      readCounts.removeWhere((key, _) => key.startsWith('$path:'));
     }
 
     var finalReadUsed = false;
@@ -821,7 +835,7 @@ Never claim compilation/tests ran; file reads only check contents.
           ),
         );
       }
-      late final ModelReply reply;
+      late ModelReply reply;
       NativeToolInvocation? invocation;
       var naturalFinal = false;
       if (_useNativeTools && (_nativeSession?.pending.isNotEmpty ?? false)) {
@@ -835,10 +849,13 @@ Never claim compilation/tests ran; file reads only check contents.
                 ? agentEditTokens
                 : agentActionTokens,
             jsonMode: jsonMode,
-            systemPrompt: repairHint == null
+            // repairHint is a JSON-mode mechanism; native sessions already get
+            // the failure through tool results and host notes, so their prompt
+            // must keep requiring tools instead of legacy JSON actions.
+            systemPrompt: repairHint == null || _useNativeTools
                 ? systemPrompt
                 : 'Return exactly one valid JSON action in message.content. No explanation.\n${profile.isLocal ? localProtocol : protocol}\n${_testingEnabled ? testingPrompt : ''}',
-            userPrompt: repairHint == null
+            userPrompt: repairHint == null || _useNativeTools
                 ? _buildPrompt(
                     transcript,
                     activeFiles,
@@ -929,6 +946,40 @@ Never claim compilation/tests ran; file reads only check contents.
           continue;
         }
         if (_useNativeTools) {
+          if (reply.toolCalls.isEmpty) {
+            // qwen-style Ollama models sometimes answer a native-tools
+            // request with the tool call serialized as JSON in
+            // message.content instead of message.tool_calls.
+            final tools = AgentGeneration.nativeTools(_actionSchema);
+            final converted = _jsonContentToolCall(
+              reply.text,
+              allowed: {
+                for (final tool in tools)
+                  tool['function']['name'] as String: {
+                    for (final key
+                        in ((tool['function']['parameters'] as Map)['properties']
+                                as Map)
+                            .keys)
+                      key as String,
+                  },
+              },
+            );
+            if (converted != null) {
+              onEvent(
+                AgentEvent(
+                  'protocol',
+                  'Model returned the tool call as JSON in content; executing ${converted.name} natively.',
+                ),
+              );
+              reply = ModelReply(
+                reply.text,
+                note: reply.note,
+                usage: reply.usage,
+                request: reply.request,
+                toolCalls: [converted],
+              );
+            }
+          }
           _nativeSession!.accept(reply);
           if (_nativeSession!.pending.isNotEmpty) {
             emptyToolTurns = 0;
@@ -942,6 +993,9 @@ Never claim compilation/tests ran; file reads only check contents.
             naturalFinal =
                 reply.text.trim().isNotEmpty &&
                 repairExcerpts.isEmpty &&
+                // Numbered requirements need an explicit finish call with
+                // source evidence; prose alone cannot complete the task.
+                requiredItems.length < 2 &&
                 ((hasEdited && runEditedPaths.every(verifiedEdits.contains)) ||
                     (!modificationTask && runReadPaths.isNotEmpty));
             if (emptyToolTurns >= 2 && !naturalFinal) {
@@ -949,7 +1003,13 @@ Never claim compilation/tests ran; file reads only check contents.
                 'Native protocol stopped: model returned no tool calls twice; task was not completed.',
               );
             }
-            if (!naturalFinal) _nativeSession!.requestExplicitTool();
+            if (!naturalFinal) {
+              _nativeSession!.requestExplicitTool(
+                requiredItems.length > 1
+                    ? 'Unverified requirements: ${requiredItems.asMap().entries.map((e) => '[${e.key}] ${e.value}').join('; ')}. finish requires per-requirement source evidence (id, path, exact excerpt from a file read this run).'
+                    : '',
+              );
+            }
           }
         }
       }
@@ -996,6 +1056,7 @@ Never claim compilation/tests ran; file reads only check contents.
       final beforeObservations = Map<String, String>.of(observations);
       String? toolFailure;
       var toolCompleted = false;
+      executingName = null;
       try {
         if (invocation != null) {
           action = invocation.call.action();
@@ -1073,6 +1134,7 @@ Never claim compilation/tests ran; file reads only check contents.
           );
         }
         name = action['action'] as String;
+        executingName = name;
         final actionKey =
             '${jsonEncode(_canonicalAction(action))}:${{'search_files', 'list_files'}.contains(name) ? jsonEncode(_canonicalAction(runFingerprints)) : runFingerprints[action['path']] ?? ''}';
         actionCount++;
@@ -1444,10 +1506,12 @@ Never claim compilation/tests ran; file reads only check contents.
               focusLines: focusLinesByPath[path],
               maxLines: readLineBudget,
             );
+            final fingerprint = ProjectMemory.fingerprintText(content);
+            // Any successful post-edit read refreshes the verification
+            // evidence: the marker proves the edit is present in the content
+            // the model just saw. Change-after-read is caught at finish time.
             if (runEditedPaths.contains(path) &&
-                excerpt.content.contains(verificationMarkers[path] ?? '') &&
-                ProjectMemory.fingerprintText(content) ==
-                    runFingerprints[path]) {
+                content.contains(verificationMarkers[path] ?? '')) {
               verifiedEdits.add(path);
             }
             _rememberFile(
@@ -1458,7 +1522,7 @@ Never claim compilation/tests ran; file reads only check contents.
             );
             onEvent(AgentEvent('tool', 'Read $path'));
             runReadPaths.add(path);
-            runFingerprints[path] = ProjectMemory.fingerprintText(content);
+            runFingerprints[path] = fingerprint;
             _replaceNote(
               transcript,
               'Tool read_file result:',
@@ -1529,10 +1593,12 @@ Never claim compilation/tests ran; file reads only check contents.
                 focusLines: focusLinesByPath[path],
                 maxLines: readLineBudget,
               );
+              final fingerprint = ProjectMemory.fingerprintText(content);
+              // Any successful post-edit read refreshes the verification
+              // evidence: the marker proves the edit is present in the content
+              // the model just saw. Change-after-read is caught at finish time.
               if (runEditedPaths.contains(path) &&
-                  excerpt.content.contains(verificationMarkers[path] ?? '') &&
-                  ProjectMemory.fingerprintText(content) ==
-                      runFingerprints[path]) {
+                  content.contains(verificationMarkers[path] ?? '')) {
                 verifiedEdits.add(path);
               }
               _rememberFile(
@@ -1543,7 +1609,7 @@ Never claim compilation/tests ran; file reads only check contents.
               );
               descriptions.add(excerpt.description);
               runReadPaths.add(path);
-              runFingerprints[path] = ProjectMemory.fingerprintText(content);
+              runFingerprints[path] = fingerprint;
             }
             onEvent(
               AgentEvent(
@@ -1660,6 +1726,14 @@ Never claim compilation/tests ran; file reads only check contents.
                 'Edited file exceeds the 1 MiB agent limit.',
               );
             }
+            final angularEditError = AgentCompletion.angularComponentEditError(
+              path,
+              content,
+              updated,
+            );
+            if (angularEditError != null) {
+              throw ModelApiException(angularEditError);
+            }
             if (profile.isLocal || _useNativeTools) {
               editState.validate(path, content, updated);
             }
@@ -1695,6 +1769,8 @@ Never claim compilation/tests ran; file reads only check contents.
             verifiedEdits.remove(path);
             _exhaustedReadPaths.remove(path);
             _blockedActions.clear();
+            finishRejections = 0;
+            lastFinishRejection = '';
             if (_guarded) {
               completedSearches.removeWhere(
                 (search) =>
@@ -1746,6 +1822,14 @@ Never claim compilation/tests ran; file reads only check contents.
             if (_guarded && await store.exists(path)) {
               editState.validate(path, await store.readText(path), content);
             }
+            final angularWriteError = AgentCompletion.angularComponentEditError(
+              path,
+              await store.exists(path) ? await store.readText(path) : '',
+              content,
+            );
+            if (angularWriteError != null) {
+              throw ModelApiException(angularWriteError);
+            }
             await store.writeText(path, content);
             editState.wrote(path, content);
             verificationMarkers[path] = content.substring(
@@ -1778,6 +1862,8 @@ Never claim compilation/tests ran; file reads only check contents.
             verifiedEdits.remove(path);
             _exhaustedReadPaths.remove(path);
             _blockedActions.clear();
+            finishRejections = 0;
+            lastFinishRejection = '';
             if (_guarded) {
               completedSearches.removeWhere(
                 (search) =>
@@ -1907,27 +1993,49 @@ Never claim compilation/tests ran; file reads only check contents.
                 final id = proof['id'] as int;
                 final path = _path(proof['path']);
                 final excerpt = proof['excerpt'] as String;
-                if (id < 0 ||
-                    id >= requiredItems.length ||
-                    !seen.add(id) ||
-                    !runReadPaths.contains(path) ||
-                    excerpt.trim().length < 8) {
-                  throw const ModelApiException(
-                    'Invalid, duplicate or unread requirement evidence.',
+                if (id < 0 || id >= requiredItems.length) {
+                  throw ModelApiException(
+                    'Invalid requirement id [$id]; valid ids are 0..${requiredItems.length - 1}.',
+                  );
+                }
+                if (!seen.add(id)) {
+                  throw ModelApiException(
+                    'Duplicate evidence for requirement [$id]; provide each id once.',
+                  );
+                }
+                if (!runReadPaths.contains(path)) {
+                  throw ModelApiException(
+                    'Requirement [$id] evidence points to $path, which was not read this run. Read $path first, then quote from it.',
+                  );
+                }
+                if (excerpt.trim().length < 8) {
+                  throw ModelApiException(
+                    'Requirement [$id] evidence excerpt is too short; quote at least 8 exact characters from $path.',
                   );
                 }
                 final current = await store.readText(path);
-                if (!current.contains(excerpt) ||
-                    runFingerprints[path] !=
-                        ProjectMemory.fingerprintText(current)) {
-                  throw const ModelApiException(
-                    'Requirement evidence is missing or stale. Read the actual current source.',
+                // Freshness and completeness are separate failures with
+                // separate fixes; never report one as the other.
+                if (runFingerprints[path] !=
+                    ProjectMemory.fingerprintText(current)) {
+                  allowEvidenceReRead(path);
+                  throw ModelApiException(
+                    'Requirement [$id] evidence is stale: $path changed after the last read. Re-read $path once, then finish with an exact excerpt from its current content.',
+                  );
+                }
+                if (!_containsEvidence(current, excerpt)) {
+                  throw ModelApiException(
+                    'Requirement [$id] evidence was not found in $path. Quote a short unique line exactly as it appears in the current file — do not paraphrase. If requirement [$id] is not implemented, list it in finish.unresolved instead of retrying.',
                   );
                 }
               }
               if (seen.length != requiredItems.length) {
-                throw const ModelApiException(
-                  'Task incomplete: not all numbered requirements have verified source evidence.',
+                final missing = [
+                  for (var i = 0; i < requiredItems.length; i++)
+                    if (!seen.contains(i)) '[$i] ${requiredItems[i]}',
+                ];
+                throw ModelApiException(
+                  'Task incomplete: no verified source evidence for ${missing.join('; ')}. Provide it in finish.requirements or list the requirement in finish.unresolved.',
                 );
               }
               onEvent(
@@ -1981,8 +2089,16 @@ Never claim compilation/tests ran; file reads only check contents.
             if ((profile.isLocal || _useNativeTools) &&
                 unresolved.isEmpty &&
                 runEditedPaths.any((p) => !verifiedEdits.contains(p))) {
-              throw const ModelApiException(
-                'Read the changed area to verify each edited file before finish.',
+              final unverified = runEditedPaths
+                  .where((p) => !verifiedEdits.contains(p))
+                  .toList();
+              // Permit exactly one fresh read per file instead of demanding a
+              // read that the repeat-guard would forbid.
+              for (final path in unverified) {
+                allowEvidenceReRead(path);
+              }
+              throw ModelApiException(
+                'Verify the edited files before finish: read ${unverified.join(', ')} once, then finish. Unchanged files do not need repeated reads.',
               );
             }
             if ((_useNativeTools || profile.isLocal) && unresolved.isEmpty) {
@@ -1991,13 +2107,17 @@ Never claim compilation/tests ran; file reads only check contents.
                 if (ProjectMemory.fingerprintBytes(current) !=
                     runFingerprints[path]) {
                   verifiedEdits.remove(path);
+                  allowEvidenceReRead(path);
                   throw ModelApiException(
-                    'Edited file changed after verification: $path. Read its current contents before finish.',
+                    'Edited file changed after verification: $path. Read its current contents once before finish.',
                   );
                 }
               }
             }
-            if (_testingEnabled && hasEdited && !testsAttempted) {
+            if (_testingEnabled &&
+                hasEdited &&
+                !testsAttempted &&
+                unresolved.isEmpty) {
               throw const ModelApiException(
                 'Testing was requested: write meaningful tests and request run_tests before finish. If its SDK is missing, report the actual unavailable-runner result.',
               );
@@ -2016,8 +2136,13 @@ Never claim compilation/tests ran; file reads only check contents.
                 );
               }
             }
+            // Edits without any executed build/test must say so in the
+            // result instead of implying verification that never happened.
+            final verificationNote = hasEdited && testVerification.isEmpty
+                ? '\n\nCompilation was not verified: ${_testingEnabled ? 'no verification command was run' : 'no build or test tool is available in this session'}.'
+                : '';
             final summary =
-                '${_string(action, 'summary')}${unresolved.isEmpty ? '' : '\nUnresolved: ${unresolved.join('; ')}'}${testVerification.isEmpty ? '' : '\n\n$testVerification'}${repairExcerpts.isEmpty ? '' : '\n\nUnresolved replacements: ${repairExcerpts.keys.join(', ')}. The failed replacements were not applied.'}';
+                '${_string(action, 'summary')}${unresolved.isEmpty ? '' : '\nUnresolved: ${unresolved.join('; ')}'}$verificationNote${testVerification.isEmpty ? '' : '\n\n$testVerification'}${repairExcerpts.isEmpty ? '' : '\n\nUnresolved replacements: ${repairExcerpts.keys.join(', ')}. The failed replacements were not applied.'}';
             _flushMemoryOnFailure = null;
             await _persistProjectMemory(
               memoryStore: memoryStore,
@@ -2077,6 +2202,18 @@ Never claim compilation/tests ran; file reads only check contents.
             ? 'Malformed tool/action arguments: ${e.message}'
             : '$e';
         toolFailure = message;
+        if (executingName == 'finish') {
+          final reason = _bounded(_firstLine(message), 120);
+          finishRejections = reason == lastFinishRejection
+              ? finishRejections + 1
+              : 1;
+          lastFinishRejection = reason;
+          if (finishRejections >= 3) {
+            throw ModelApiException(
+              'Agent stopped: finish was rejected $finishRejections times for the same reason: $reason. Resolve the named requirement, or finish with it in the unresolved list.',
+            );
+          }
+        }
         if (_useNativeTools && invocation == null) {
           _nativeSession?.hostNote(
             'Final response/action rejected by host: $message',
@@ -2094,12 +2231,15 @@ Never claim compilation/tests ran; file reads only check contents.
                 message.contains('too large') ||
                 message.contains('incomplete JSON') ||
                 message.contains('invalid agent action')
-            ? '\nFor code changes: emit replace_in_file with a few-line unique '
-                  'oldText/newText only. Do not rewrite whole files in one JSON action.'
+            ? _useNativeTools
+                  ? '\nFor code changes: call replace_in_file with a few-line unique '
+                        'oldText/newText only. Do not rewrite whole files in one call.'
+                  : '\nFor code changes: emit replace_in_file with a few-line unique '
+                        'oldText/newText only. Do not rewrite whole files in one JSON action.'
             : '';
         transcript.add(
           'Tool/action error: $message$editHint\n'
-          'Fix the mistake and continue with one short JSON action.',
+          '${_useNativeTools ? 'Fix the mistake and continue with one tool call; never emit JSON actions in message.content.' : 'Fix the mistake and continue with one short JSON action.'}',
         );
         if (mistakes >= options.maxConsecutiveMistakes) {
           throw ModelApiException(
@@ -2347,15 +2487,18 @@ Never claim compilation/tests ran; file reads only check contents.
             '(minimal prompt, at most $agentRecoveryTokens tokens)',
       ),
     );
-    const system =
-        'Return exactly one JSON action in message.content.\n'
-        'Do not explain. Do not use reasoning_content.\n'
-        'Shapes:\n'
-        '{"action":"read_file","path":"<existing-project-path>","startLine":1,"lineCount":60}\n'
-        '{"action":"replace_in_file","path":"<existing-project-path>","oldText":"...","newText":"..."}\n'
-        '{"action":"write_file","path":"<existing-project-path>","content":"..."}\n'
-        '{"action":"search_files","query":"literal text"}\n'
-        '{"action":"finish","summary":"..."}';
+    final system = _useNativeTools
+        ? 'Use the provided tools for the next step. '
+              'Never emit JSON actions in message.content. '
+              'Do not explain. Do not use reasoning_content.'
+        : 'Return exactly one JSON action in message.content.\n'
+              'Do not explain. Do not use reasoning_content.\n'
+              'Shapes:\n'
+              '{"action":"read_file","path":"<existing-project-path>","startLine":1,"lineCount":60}\n'
+              '{"action":"replace_in_file","path":"<existing-project-path>","oldText":"...","newText":"..."}\n'
+              '{"action":"write_file","path":"<existing-project-path>","content":"..."}\n'
+              '{"action":"search_files","query":"literal text"}\n'
+              '{"action":"finish","summary":"..."}';
     final allowed =
         (implementationPhase
                 ? const [
@@ -2372,6 +2515,16 @@ Never claim compilation/tests ran; file reads only check contents.
                   (_schemaActions == null || _schemaActions!.contains(name)) &&
                   (name != 'run_tests' || _testingEnabled),
             );
+    if (_useNativeTools) {
+      // Native mode resends the session messages, so this note is what
+      // actually changes the conversation and lets the retry succeed.
+      // It must never ask for legacy JSON actions.
+      _nativeSession?.hostNote(
+        'Recovery after ${failure.reasoningOnly ? 'a reasoning-only reply' : 'empty content'}. '
+        'Continue the task now using the provided tools: ${allowed.join(', ')}. '
+        'Never emit JSON actions in message.content. Do not invent tool results.',
+      );
+    }
     final user = StringBuffer()
       ..writeln('Previous response failed because content was empty.')
       ..writeln(_testingEnabled ? testingPrompt : '')
@@ -2440,11 +2593,10 @@ Never claim compilation/tests ran; file reads only check contents.
       ].join(', ');
       return 'Previous reply left message.content empty'
           '${details.isEmpty ? '' : ' ($details)'}. '
-          'Write one short JSON action into message.content. '
-          'First character must be {. No analysis, no reasoning_content.';
+          '${_useNativeTools ? 'Call one tool now. Do not explain, do not emit JSON actions in message.content.' : 'Write one short JSON action into message.content. First character must be {. No analysis, no reasoning_content.'}';
     }
     return 'Model request failed: ${_bounded(_firstLine(e.message), 200)}. '
-        'Emit exactly one short JSON action next. First character must be {.';
+        '${_useNativeTools ? 'Call one tool next; never emit JSON actions in message.content.' : 'Emit exactly one short JSON action next. First character must be {.'}';
   }
 
   static String _firstLine(String value) {
@@ -2452,11 +2604,72 @@ Never claim compilation/tests ran; file reads only check contents.
     return index < 0 ? value : value.substring(0, index);
   }
 
+  /// Exact match first; a whitespace-normalized fallback accepts excerpts the
+  /// model re-wrapped across lines, without accepting paraphrased text.
+  static bool _containsEvidence(String content, String excerpt) {
+    if (content.contains(excerpt)) return true;
+    String squash(String value) =>
+        value.replaceAll(RegExp(r'\s+'), ' ').trim();
+    return squash(content).contains(squash(excerpt));
+  }
+
   Future<HookResult> _hook(String type, Map<String, dynamic> input) async {
     if (_privacy != null) return const HookResult();
     final result = await hooks.run(type, input);
     onEvent(AgentEvent('hook', '$type: ${result.cancel ? 'blocked' : 'ok'}'));
     return result;
+  }
+
+  /// Some Ollama models (e.g. qwen2.5-coder) answer a native-tools request
+  /// with the tool call serialized as a JSON object in message.content
+  /// (`{"name": ..., "arguments": {...}}`) instead of message.tool_calls.
+  ///
+  /// Accept only the exact registered tool names, allow only argument keys
+  /// the registered tool schema declares, and run the existing action
+  /// validation. Anything else — including unregistered tools, arbitrary
+  /// commands and ordinary JSON answers — returns null and is never executed.
+  static ModelToolCall? _jsonContentToolCall(
+    String text, {
+    required Map<String, Set<String>> allowed,
+  }) {
+    final source = text
+        .trim()
+        .replaceFirst(RegExp(r'^```(?:json)?\s*'), '')
+        .replaceFirst(RegExp(r'\s*```$'), '');
+    if (source.length < 8 ||
+        source.length > 16000 ||
+        !source.startsWith('{')) {
+      return null;
+    }
+    Object? decoded;
+    try {
+      decoded = jsonDecode(source);
+    } on FormatException {
+      return null;
+    }
+    if (decoded is! Map<String, dynamic>) return null;
+    final name = decoded['name'];
+    if (name is! String || !allowed.containsKey(name)) return null;
+    var arguments = decoded['arguments'];
+    if (arguments == null) {
+      arguments = <String, dynamic>{};
+    } else if (arguments is String) {
+      try {
+        arguments = jsonDecode(arguments);
+      } on FormatException {
+        return null;
+      }
+    }
+    if (arguments is! Map<String, dynamic>) return null;
+    if (arguments.keys.any((key) => !allowed[name]!.contains(key))) {
+      return null;
+    }
+    try {
+      AgentGeneration.validate({...arguments, 'action': name});
+    } on FormatException {
+      return null;
+    }
+    return ModelToolCall(name: name, arguments: arguments);
   }
 
   Map<String, dynamic> _decodeActionObject(String source) {
