@@ -78,6 +78,7 @@ class AgentGeneration {
     bool allowTests = false,
     Set<String>? allowedActions,
     String? newPathPattern,
+    Set<String> missingReadPaths = const {},
   }) => {
     'type': 'object',
     'oneOf': [
@@ -92,9 +93,26 @@ class AgentGeneration {
             'action': {'type': 'string', 'const': name},
             for (final field in [..._required[name]!, ...?_optional[name]])
               field:
-                  name == 'write_file' &&
+                  name == 'read_file' &&
                       field == 'path' &&
-                      newPathPattern != null
+                      missingReadPaths.isNotEmpty
+                  ? {
+                      'type': 'string',
+                      'not': {'enum': missingReadPaths.toList()},
+                    }
+                  : name == 'read_files' &&
+                        field == 'paths' &&
+                        missingReadPaths.isNotEmpty
+                  ? {
+                      'type': 'array',
+                      'items': {
+                        'type': 'string',
+                        'not': {'enum': missingReadPaths.toList()},
+                      },
+                    }
+                  : name == 'write_file' &&
+                        field == 'path' &&
+                        newPathPattern != null
                   ? {'type': 'string', 'pattern': newPathPattern}
                   : _fields[field],
           },

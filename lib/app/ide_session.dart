@@ -531,6 +531,21 @@ class IdeSession {
     changed();
   }
 
+  Future<void> openWorkspaceFolders(Iterable<Uri> folders) async {
+    final roots = folders
+        .map(
+          (root) =>
+              Uri.parse('${root.toString().replaceAll(RegExp(r'/+$'), '')}/'),
+        )
+        .toSet()
+        .toList();
+    if (roots.isEmpty) return;
+    await openWorkspaceFolder(roots.first);
+    for (final root in roots.skip(1)) {
+      await addWorkspaceFolder(root);
+    }
+  }
+
   Future<void> addWorkspaceFolder(Uri root) async {
     if (workspaceRoot == null) {
       await openWorkspaceFolder(root);

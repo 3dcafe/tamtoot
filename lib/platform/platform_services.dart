@@ -22,7 +22,8 @@ class PreferenceStore implements PersistenceStore {
   }
 }
 
-class PlatformFiles implements FileSystemProvider, FileDialogs {
+class PlatformFiles
+    implements FileSystemProvider, FileDialogs, WorkspaceFolderDialogs {
   final _opened = <Uri, XFile>{};
   final _androidDocuments = <Uri>{};
   static const _android = MethodChannel('dev.tamtoot/documents');
@@ -108,6 +109,19 @@ class PlatformFiles implements FileSystemProvider, FileDialogs {
       return WorkspaceRoots.listEntries(directory);
     }
     return listLocal(directory);
+  }
+
+  @override
+  Future<List<Uri>> openWorkspaceFolders() async {
+    if (!supportsDirectories) {
+      throw UnsupportedError('Directory selection is unavailable.');
+    }
+    final paths = await getDirectoryPaths();
+    final roots = paths.whereType<String>().map(Uri.directory).toSet().toList();
+    for (final root in roots) {
+      await SecurityScopedRoots.rememberPickedFolder(root);
+    }
+    return roots;
   }
 
   @override

@@ -14,6 +14,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import '../app/ide_session.dart';
+import '../core/filesystem/filesystem.dart';
 import '../app/session_commands.dart';
 import '../core/git/git_service.dart';
 import '../platform/clone_paths.dart';
@@ -1417,7 +1418,7 @@ class _OpenProjectDialogState extends State<OpenProjectDialog> {
                 Navigator.pop(ctx);
                 unawaited(_browse());
               },
-              child: const Text('Choose folder…'),
+              child: const Text('Choose folders…'),
             ),
           ],
         ),
@@ -1426,10 +1427,11 @@ class _OpenProjectDialogState extends State<OpenProjectDialog> {
   }
 
   Future<void> _browse() async {
-    final picked = await widget.session.documents.dialogs.openWorkspace();
-    if (picked == null) return;
+    final picked = await widget.session.documents.dialogs
+        .selectWorkspaceFolders();
+    if (picked.isEmpty) return;
     try {
-      await widget.session.openWorkspaceFolder(picked);
+      await widget.session.openWorkspaceFolders(picked);
       if (mounted) Navigator.pop(context);
     } catch (e) {
       if (!mounted) return;
@@ -1466,7 +1468,7 @@ class _OpenProjectDialogState extends State<OpenProjectDialog> {
             if (items.isEmpty) {
               return const Center(
                 child: Text(
-                  'No projects yet.\n\nFile → New project… to create one,\nor Clone repository… to download one,\nor Choose folder… below.',
+                  'No projects yet.\n\nFile → New project… to create one,\nor Clone repository… to download one,\nor Choose folders… below.',
                   textAlign: TextAlign.center,
                 ),
               );
@@ -1507,7 +1509,7 @@ class _OpenProjectDialogState extends State<OpenProjectDialog> {
         if (widget.session.documents.dialogs.supportsDirectories)
           FilledButton(
             onPressed: () => unawaited(_browse()),
-            child: const Text('Choose folder…'),
+            child: const Text('Choose folders…'),
           ),
       ],
     );

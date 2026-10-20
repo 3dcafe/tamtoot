@@ -24,6 +24,21 @@ abstract interface class FileDialogs {
   bool get supportsDirectories;
 }
 
+/// Optional capability for providers with a native multi-directory picker.
+abstract interface class WorkspaceFolderDialogs {
+  Future<List<Uri>> openWorkspaceFolders();
+}
+
+extension WorkspaceFolderSelection on FileDialogs {
+  Future<List<Uri>> selectWorkspaceFolders() async {
+    if (this is WorkspaceFolderDialogs) {
+      return (this as WorkspaceFolderDialogs).openWorkspaceFolders();
+    }
+    final root = await openWorkspace();
+    return root == null ? [] : [root];
+  }
+}
+
 abstract interface class PersistenceStore {
   Future<String?> read(String key);
   Future<void> write(String key, String value);

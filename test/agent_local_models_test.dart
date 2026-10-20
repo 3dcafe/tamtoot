@@ -58,6 +58,47 @@ AgentTaskEngine engine(
   clientFactory: () => ModelClient(client: MockClient(respond)),
 );
 void main() {
+  for (final batch in [false, true]) {
+    test(
+      'missing ${batch ? "batch" : "single"} read recovers using actual library files',
+      () async {
+        final store = RepositoryMemory();
+        await store.writeText(
+          'Dialog.DAL.csproj',
+          '<Project Sdk="Microsoft.NET.Sdk" />',
+        );
+        await store.writeText('Repository.cs', 'public class Repository {}');
+        final actions = [
+          batch
+              ? {
+                  'action': 'read_files',
+                  'paths': ['Program.cs', 'Repository.cs'],
+                }
+              : {'action': 'read_file', 'path': 'Program.cs'},
+          {'action': 'read_file', 'path': 'Dialog.DAL.csproj'},
+          {'action': 'finish', 'summary': 'This project is a class library.'},
+        ];
+        final events = <AgentEvent>[];
+        var requests = 0;
+        final run = engine(store, (request) async {
+          if (requests == 1) {
+            expect(request.body, contains('does not exist'));
+            expect(request.body, contains('Repository.cs'));
+          }
+          return answer(jsonEncode(actions[requests++]));
+        }, events: events);
+        final result = await run.run(
+          'О чем этот проект',
+          const AgentRunOptions(maxConsecutiveMistakes: 1),
+        );
+        expect(result.success, true);
+        expect(requests, 3);
+        expect(await store.exists('Program.cs'), false);
+        expect(events.where((e) => e.type == 'error'), isEmpty);
+      },
+    );
+  }
+
   test(
     'phase schema requires complete writes and excludes unavailable tools',
     () {

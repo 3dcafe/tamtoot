@@ -109,10 +109,12 @@ class AgentTaskEngine {
   AgentRunOptions _generation = const AgentRunOptions();
   String _responseMode = 'json_object';
   Set<String>? _schemaActions;
+  final Set<String> _missingReadPaths = {};
   String? _newPathPattern;
   Map<String, dynamic> get _actionSchema => AgentGeneration.schemaFor(
     allowTests: _testingEnabled,
     allowedActions: _schemaActions,
+    missingReadPaths: _missingReadPaths,
     newPathPattern: _newPathPattern,
   );
 
@@ -222,7 +224,7 @@ Read existing files before modifying them. New files may be written directly.
 If the project index is empty, do not search/list it; write the requested files.
 After a successful write do not repeat it: create the next missing file, read the changed files once, then finish.
 Preserve unrelated code. Use small unique replace_in_file edits for existing files.
-C# console projects need both a .csproj and Program.cs. C# language version and .NET target version are distinct.
+C# console projects need a .csproj and an entry point. Existing class libraries may have no Program.cs; inspect actual indexed files and never assume a filename exists. C# language version and .NET target version are distinct.
 Never claim compilation/tests ran; file reads only check contents.
 ''';
 
@@ -362,6 +364,7 @@ Never claim compilation/tests ran; file reads only check contents.
     final compactedContext = <String>[];
     const contextCompactor = AgentContextCompactor();
     final activeFiles = <String, String>{};
+    _missingReadPaths.clear();
     final observations = <String, String>{};
     final indexedPaths =
         (_privacy != null
@@ -990,6 +993,11 @@ Never claim compilation/tests ran; file reads only check contents.
             consecutiveSearches = 0;
             requireReadAfterSearch = false;
             final path = _path(action['path']);
+            if (!await store.exists(path)) {
+              await _reportMissingRead(path, observations);
+              break;
+            }
+            _missingReadPaths.remove(path);
             final bytes = await store.readBytes(path);
             if (bytes.length > 1024 * 1024) {
               throw const ModelApiException(
@@ -1053,6 +1061,11 @@ Never claim compilation/tests ran; file reads only check contents.
             final descriptions = <String>[];
             for (final raw in requestedPaths) {
               final path = _path(raw);
+              if (!await store.exists(path)) {
+                await _reportMissingRead(path, observations);
+                continue;
+              }
+              _missingReadPaths.remove(path);
               final bytes = await store.readBytes(path);
               if (bytes.length > 1024 * 1024) {
                 throw ModelApiException(
@@ -1080,7 +1093,7 @@ Never claim compilation/tests ran; file reads only check contents.
             onEvent(
               AgentEvent(
                 'tool',
-                'Read ${requestedPaths.length} files: ${descriptions.join('; ')}',
+                'Read ${descriptions.length} files: ${descriptions.join('; ')}',
               ),
             );
             _replaceNote(
@@ -1170,6 +1183,8 @@ Never claim compilation/tests ran; file reads only check contents.
             }
             await store.validateRegularFilePath(path);
             await store.writeText(path, content);
+            _missingReadPaths.remove(path);
+            observations.remove('Missing file $path');
             activeFiles.removeWhere(
               (key, _) => key == path || key.startsWith('$path ['),
             );
@@ -1831,6 +1846,28 @@ Never claim compilation/tests ran; file reads only check contents.
       }
     }
     return out.toString();
+  }
+
+  Future<void> _reportMissingRead(
+    String path,
+    Map<String, String> observations,
+  ) async {
+    if (!_missingReadPaths.add(path)) {
+      throw ModelApiException(
+        'File "$path" was already reported missing. Read an exact path from the available files instead.',
+      );
+    }
+    // Refresh only after a missing read: files may have moved since indexing.
+    final available = _privacy == null
+        ? ((await store.listFiles('')).where(_useful).toList()..sort())
+        : <String>[];
+    final message =
+        'File "$path" does not exist. No content was read. '
+        'Do not retry this path or create it merely to inspect the project. '
+        'Use an exact available path below; class libraries need no Program.cs.\n'
+        '${_privacy != null ? 'Use list_files explicitly to discover the relevant directory.' : 'Available project files:\n${_bounded(available.take(80).join('\n'), 6000)}'}';
+    _rememberObservation(observations, 'Missing file $path', message);
+    onEvent(AgentEvent('tool', message));
   }
 
   Future<String> _projectIndex(List<String> paths) async {

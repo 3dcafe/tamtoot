@@ -280,11 +280,10 @@ void registerSessionCommands(IdeSession s, PresentationActions ui) {
   });
   add(
     'workspace.open',
-    'Open folder…',
+    'Open folders…',
     (_) async {
-      final root = await s.documents.dialogs.openWorkspace();
-      if (root == null) return;
-      await s.openWorkspaceFolder(root);
+      final roots = await s.documents.dialogs.selectWorkspaceFolders();
+      await s.openWorkspaceFolders(roots);
     },
     enabled: () => s.documents.dialogs.supportsDirectories,
     visible: () => s.documents.dialogs.supportsDirectories,
