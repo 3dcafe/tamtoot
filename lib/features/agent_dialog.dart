@@ -63,6 +63,7 @@ class _AgentPanelState extends State<AgentPanel> {
   OpencodeEngine? _api;
   Timer? _poller;
 
+  AgentMode _mode = AgentMode.agent;
   var _starting = false;
   String? _error;
   String? _modelLabel;
@@ -89,7 +90,15 @@ class _AgentPanelState extends State<AgentPanel> {
   @override
   void didUpdateWidget(covariant AgentPanel oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (widget.visible && !oldWidget.visible) {
+    if (_api != null && _api!.projectRoot != _projectPath) {
+      _poller?.cancel();
+      _api = null;
+      _sessionId = null;
+      _entries = const [];
+      _modelLabel = null;
+      _busy = false;
+    }
+    if (widget.visible && (!oldWidget.visible || _api == null)) {
       _start();
     } else if (!widget.visible && oldWidget.visible) {
       _poller?.cancel();
@@ -172,13 +181,14 @@ class _AgentPanelState extends State<AgentPanel> {
     try {
       final raw = await api.messages(id);
       final status = await api.sessionStatus();
-      if (!mounted) return;
+      if (!mounted || id != _sessionId || api != _api) return;
       // Assistant messages are created when a step starts, before the first
       // token lands; skip them while they are still empty.
-      final entries = [for (final message in raw) _toEntry(message)]
-        ..removeWhere(
-          (entry) => entry.blocks.isEmpty && entry.role != 'user',
-        );
+      final entries = [
+        for (final message in raw)
+          if (message['info'] is! Map || message['info']['synthetic'] != true)
+            _toEntry(message),
+      ]..removeWhere((entry) => entry.blocks.isEmpty && entry.role != 'user');
       setState(() {
         _entries = entries;
         final state = status[id];
@@ -202,12 +212,24 @@ class _AgentPanelState extends State<AgentPanel> {
           case 'text':
             final text = '${part['text'] ?? ''}'.trim();
             if (text.isNotEmpty) {
-              blocks.add((kind: 'text', text: text, status: null, detail: null, output: null));
+              blocks.add((
+                kind: 'text',
+                text: text,
+                status: null,
+                detail: null,
+                output: null,
+              ));
             }
           case 'reasoning':
             final text = '${part['text'] ?? ''}'.trim();
             if (text.isNotEmpty) {
-              blocks.add((kind: 'reasoning', text: text, status: null, detail: null, output: null));
+              blocks.add((
+                kind: 'reasoning',
+                text: text,
+                status: null,
+                detail: null,
+                output: null,
+              ));
             }
           case 'tool':
             final state = part['state'];
@@ -257,7 +279,7 @@ class _AgentPanelState extends State<AgentPanel> {
     final api = _api;
     final id = _sessionId;
     final text = _input.text.trim();
-    if (api == null || id == null || text.isEmpty) return;
+    if (api == null || id == null || text.isEmpty || _busy) return;
     _input.clear();
     setState(() {
       _busy = true;
@@ -267,14 +289,21 @@ class _AgentPanelState extends State<AgentPanel> {
         _ChatEntry(
           role: 'user',
           blocks: [
-            (kind: 'text', text: text, status: null, detail: null, output: null),
+            (
+              kind: 'text',
+              text: text,
+              status: null,
+              detail: null,
+              output: null,
+            ),
           ],
         ),
       ];
     });
     _scrollToEnd();
     try {
-      await api.promptAsync(id, text);
+      await api.promptAsync(id, text, mode: _mode);
+      await _loadSessions();
     } on OpencodeException catch (e) {
       setState(() {
         _busy = false;
@@ -311,14 +340,13 @@ class _AgentPanelState extends State<AgentPanel> {
             buffer.writeln(
               '  <tool ${block.text}${block.status == null ? '' : ' — ${block.status}'}>',
             );
-            if (block.detail != null) buffer.writeln('  input: ${block.detail}');
+            if (block.detail != null) {
+              buffer.writeln('  input: ${block.detail}');
+            }
             if (block.output != null && block.output!.isNotEmpty) {
               buffer.writeln('  output:');
               buffer.writeln(
-                block.output!
-                    .split('\n')
-                    .map((line) => '    $line')
-                    .join('\n'),
+                block.output!.split('\n').map((line) => '    $line').join('\n'),
               );
             }
           case 'reasoning':
@@ -352,6 +380,23 @@ class _AgentPanelState extends State<AgentPanel> {
     await _refresh();
   }
 
+  Future<void> _deleteSession() async {
+    final api = _api;
+    final id = _sessionId;
+    if (api == null || id == null) return;
+    await api.deleteSession(id);
+    if (!mounted || _api != api || _sessionId != id) return;
+    setState(() {
+      _sessionId = null;
+      _entries = const [];
+      _busy = false;
+      _error = null;
+    });
+    await _loadSessions();
+    if (_sessionId == null) await _newSession();
+    await _refresh();
+  }
+
   void _scrollToEnd() {
     if (!_stickToBottom) return;
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -380,24 +425,45 @@ class _AgentPanelState extends State<AgentPanel> {
                 ),
               ),
               if (_sessions.length > 1)
-                DropdownButton<String>(
-                  value: _sessionId,
-                  hint: const Text('Session'),
-                  items: [
-                    for (final s in _sessions)
-                      DropdownMenuItem(
-                        value: s['id'] as String,
-                        child: Text(
-                          '${s['title'] ?? s['id']}',
-                          overflow: TextOverflow.ellipsis,
+                Flexible(
+                  child: DropdownButton<String>(
+                    isExpanded: true,
+                    value: _sessionId,
+                    hint: const Text('Session'),
+                    items: [
+                      for (final s in _sessions)
+                        DropdownMenuItem(
+                          value: s['id'] as String,
+                          child: Text(
+                            '${s['title'] ?? s['id']}',
+                            overflow: TextOverflow.ellipsis,
+                          ),
                         ),
-                      ),
-                  ],
-                  onChanged: (value) {
-                    setState(() => _sessionId = value);
-                    _refresh();
-                  },
+                    ],
+                    onChanged: (value) {
+                      setState(() => _sessionId = value);
+                      _refresh();
+                    },
+                  ),
                 ),
+              DropdownButton<AgentMode>(
+                value: _mode,
+                items: const [
+                  DropdownMenuItem(
+                    value: AgentMode.agent,
+                    child: Text('Agent'),
+                  ),
+                  DropdownMenuItem(value: AgentMode.chat, child: Text('Chat')),
+                ],
+                onChanged: _busy
+                    ? null
+                    : (value) => setState(() => _mode = value!),
+              ),
+              IconButton(
+                tooltip: 'Delete session',
+                onPressed: _sessionId == null ? null : _deleteSession,
+                icon: const Icon(Icons.delete_outline, size: 18),
+              ),
               IconButton(
                 tooltip: 'New session',
                 onPressed: _api == null ? null : _newSession,
@@ -427,11 +493,7 @@ class _AgentPanelState extends State<AgentPanel> {
         const Divider(height: 1),
         Expanded(
           child: _error != null
-              ? _ErrorView(
-                  message: _error!,
-                  busy: _starting,
-                  onRetry: _start,
-                )
+              ? _ErrorView(message: _error!, busy: _starting, onRetry: _start)
               : _entries.isEmpty
               ? Center(
                   child: Text(
@@ -445,12 +507,10 @@ class _AgentPanelState extends State<AgentPanel> {
                   controller: _scroll,
                   padding: const EdgeInsets.all(12),
                   itemCount: _entries.length,
-                  itemBuilder: (_, index) =>
-                      _EntryView(entry: _entries[index]),
+                  itemBuilder: (_, index) => _EntryView(entry: _entries[index]),
                 ),
         ),
-        if (_busy)
-          const LinearProgressIndicator(minHeight: 2),
+        if (_busy) const LinearProgressIndicator(minHeight: 2),
         const Divider(height: 1),
         Padding(
           padding: const EdgeInsets.all(8),

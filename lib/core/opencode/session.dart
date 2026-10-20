@@ -8,9 +8,12 @@ import 'message.dart';
 /// file per session under `.tamtoot/opencode/sessions/`.
 
 class AgentSession {
-  AgentSession({required this.id, required this.title, List<ChatMessage>? messages})
-    : messages = messages ?? [],
-      createdMs = DateTime.now().millisecondsSinceEpoch;
+  AgentSession({
+    required this.id,
+    required this.title,
+    List<ChatMessage>? messages,
+  }) : messages = messages ?? [],
+       createdMs = DateTime.now().millisecondsSinceEpoch;
 
   final String id;
   String title;
@@ -53,12 +56,21 @@ class SessionStore {
   final String root;
   final Map<String, AgentSession> _sessions = {};
   var _loaded = false;
+  final _deleted = <String>{};
+  Future<void> _writes = Future.value();
+
+  Future<void> _serialize(Future<void> Function() operation) {
+    final next = _writes.then((_) => operation());
+    _writes = next.then<void>(
+      (_) {},
+      onError: (Object error, StackTrace stack) {},
+    );
+    return next;
+  }
 
   Directory get _dir {
     final sep = Platform.pathSeparator;
-    return Directory(
-      [root, '.tamtoot', 'opencode', 'sessions'].join(sep),
-    );
+    return Directory([root, '.tamtoot', 'opencode', 'sessions'].join(sep));
   }
 
   Future<void> _ensureLoaded() async {
@@ -71,9 +83,7 @@ class SessionStore {
       try {
         final data = jsonDecode(await entity.readAsString());
         if (data is! Map) continue;
-        final session = AgentSession.fromJson(
-          Map<String, dynamic>.from(data),
-        );
+        final session = AgentSession.fromJson(Map<String, dynamic>.from(data));
         if (session.id.isNotEmpty) _sessions[session.id] = session;
       } catch (_) {
         // A corrupt session file is skipped, never fatal.
@@ -105,17 +115,23 @@ class SessionStore {
   Future<void> delete(String id) async {
     await _ensureLoaded();
     _sessions.remove(id);
-    final sep = Platform.pathSeparator;
-    final file = File('${_dir.path}$sep$id.json');
-    if (file.existsSync()) await file.delete();
+    _deleted.add(id);
+    await _serialize(() async {
+      if (!RegExp(r'^ses_[a-zA-Z0-9_]+$').hasMatch(id)) return;
+      final sep = Platform.pathSeparator;
+      final file = File('${_dir.path}$sep$id.json');
+      if (file.existsSync()) await file.delete();
+    });
   }
 
-  Future<void> persist(AgentSession session) async {
-    final dir = _dir;
-    await dir.create(recursive: true);
-    final sep = Platform.pathSeparator;
-    await File('${dir.path}$sep${session.id}.json').writeAsString(
-      jsonEncode(session.toJson()),
-    );
+  Future<void> persist(AgentSession session) {
+    final snapshot = jsonEncode(session.toJson());
+    return _serialize(() async {
+      if (_deleted.contains(session.id)) return;
+      final dir = _dir;
+      await dir.create(recursive: true);
+      final sep = Platform.pathSeparator;
+      await File('${dir.path}$sep${session.id}.json').writeAsString(snapshot);
+    });
   }
 }

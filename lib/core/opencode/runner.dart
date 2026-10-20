@@ -28,9 +28,12 @@ import 'tools.dart';
 /// degraded): context-window compaction, permissions/approvals, snapshots,
 /// subagents, MCP tools.
 
-const _maxSteps = 200;
+const _maxSteps = 40;
 
-const _maxStepsPrompt = 'CRITICAL - MAXIMUM STEPS REACHED\n'
+enum AgentMode { agent, chat }
+
+const _maxStepsPrompt =
+    'CRITICAL - MAXIMUM STEPS REACHED\n'
     '\n'
     'The maximum number of steps allowed for this task has been reached. '
     'Tools are disabled until next user input. Respond with text only.\n'
@@ -61,6 +64,10 @@ const _continueAfterOutputLimit =
 /// block is rendered by [_systemPrompt] like opencode's
 /// SessionSystemPrompt.make.
 String _systemPrompt(List<Tool> tools, String root) {
+  if (tools.isEmpty) {
+    return 'You are Tamtoot in Chat mode. No repository tools are available in this mode. '
+        'Respond in the user’s language. Do not claim to have read or edited project files.';
+  }
   final names = [for (final tool in tools) tool.name];
   final guidance = <String>[
     if (names.contains('shell')) ...[
@@ -84,6 +91,9 @@ String _systemPrompt(List<Tool> tools, String root) {
       '# Communication\n'
       '- Use clear file paths when referring to files.\n'
       '- Keep responses clear and concise, and avoid unnecessary technical jargon.\n'
+      '- Respond in the user’s language. Ground project claims in files actually read.\n'
+      '- Never add frameworks, dependencies, file contents or verification claims not established by tool results. If a test command is documented, quote the command without guessing its underlying test framework.\n'
+      '- For repository questions, inspect README.md first, then relevant source. For changes: investigate, edit, verify, and report the result.\n'
       '\n'
       '# Working in codebases\n'
       '- Keep changes consistent with the structure, naming, style, and patterns of the surrounding code.\n'
@@ -137,6 +147,12 @@ class SessionRunner {
 
   final _busy = <String>{};
   final _aborts = <String, void Function()>{};
+  final _runs = <String, Future<void>>{};
+
+  Future<void> stop(String id) async {
+    abort(id);
+    await _runs[id];
+  }
 
   bool isBusy(String sessionId) => _busy.contains(sessionId);
 
@@ -146,21 +162,35 @@ class SessionRunner {
 
   /// Append the user message and drain the session. Fire-and-forget from the
   /// caller's perspective; message state is polled through the store.
-  Future<void> prompt(AgentSession session, String text) async {
+  Future<void> prompt(
+    AgentSession session,
+    String text, {
+    AgentMode mode = AgentMode.agent,
+  }) async {
     if (_busy.contains(session.id)) {
       throw ToolFailure('The agent is already working on this session.');
     }
+    _busy.add(session.id);
     session.messages.add(
       ChatMessage(id: _newId(), role: 'user', parts: [TextPart(text)]),
     );
     if (session.messages.where((m) => m.role == 'user').length == 1) {
       session.title = text.length > 48 ? '${text.substring(0, 48)}…' : text;
     }
+    final run = _drain(session, mode, text);
+    _runs[session.id] = run;
+    unawaited(run.whenComplete(() => _runs.remove(session.id)));
     await store.persist(session);
-    unawaited(_drain(session));
   }
 
-  Future<void> _drain(AgentSession session) async {
+  Future<void> _drain(AgentSession session, AgentMode mode, String task) async {
+    final activeTools = mode == AgentMode.agent ? tools : <Tool>[];
+    final turnStart = session.messages.length;
+    var groundingRetried = false;
+    final repositoryTask = RegExp(
+      r"проект|репозитор|файл|код|project|repository|codebase|readme",
+      caseSensitive: false,
+    ).hasMatch(task);
     _busy.add(session.id);
     var cancelled = false;
     void Function()? cancelActiveStream;
@@ -170,12 +200,16 @@ class SessionRunner {
     };
     try {
       var step = 0;
+      var actions = 0;
+      var toolErrors = 0;
+      final reads = <String, int>{};
       var lengthStreak = 0;
       var maxStepsEntered = false;
       while (true) {
         if (cancelled) return;
         step++;
-        final stepLimitReached = step >= _maxSteps && !maxStepsEntered;
+        final stepLimitReached =
+            (step >= _maxSteps || actions >= _maxSteps) && !maxStepsEntered;
         if (stepLimitReached) maxStepsEntered = true;
 
         final resolved = await config.resolveModel();
@@ -188,7 +222,7 @@ class SessionRunner {
           );
           return;
         }
-        final transcript = _transcript(session);
+        final transcript = _transcript(session, activeTools);
         if (stepLimitReached) {
           // Ported from runner/llm.ts: the boundary prompt rides as an
           // assistant message with tools disabled.
@@ -198,8 +232,10 @@ class SessionRunner {
           provider: resolved.provider,
           model: resolved.model,
           messages: transcript,
-          tools: tools.map((tool) => tool.definition()).toList(),
-          toolChoice: maxStepsEntered ? 'none' : 'auto',
+          tools: activeTools.map((tool) => tool.definition()).toList(),
+          toolChoice: maxStepsEntered || mode == AgentMode.chat
+              ? 'none'
+              : 'auto',
         );
 
         final assistant = ChatMessage(id: _newId(), role: 'assistant');
@@ -259,7 +295,10 @@ class SessionRunner {
                     ToolPart(
                       callId: call.id,
                       tool: call.name,
-                      state: ToolState(status: 'pending', input: call.arguments),
+                      state: ToolState(
+                        status: 'pending',
+                        input: call.arguments,
+                      ),
                     ),
                   );
                   livePersist();
@@ -268,9 +307,7 @@ class SessionRunner {
               }
             },
             onError: (Object error) {
-              failure = error is LlmException
-                  ? error
-                  : LlmException('$error');
+              failure = error is LlmException ? error : LlmException('$error');
               if (!done.isCompleted) done.complete();
             },
             onDone: () {
@@ -347,6 +384,52 @@ class SessionRunner {
         await store.persist(session);
 
         if (calls.isEmpty) {
+          final readFile = session.messages
+              .skip(turnStart)
+              .expand((message) => message.parts.whereType<ToolPart>())
+              .any(
+                (part) =>
+                    part.tool == 'read' &&
+                    part.state.status == 'completed' &&
+                    (part.state.output ?? '').startsWith('Read file '),
+              );
+          final refusesAccess = RegExp(
+            r"cannot (?:directly )?access|can't (?:directly )?access|не (?:могу|имею).*доступ",
+            caseSensitive: false,
+          ).hasMatch(textPart?.text ?? '');
+          if (mode == AgentMode.agent &&
+              !maxStepsEntered &&
+              !readFile &&
+              (repositoryTask || refusesAccess)) {
+            // A fluent answer is not evidence of repository access. A single
+            // recovery turn must use the same native tool execution pipeline.
+            assistant.diagnostic = true;
+            if (groundingRetried) {
+              _appendError(
+                session,
+                'The model did not read a project file. No repository analysis was verified.',
+              );
+              await store.persist(session);
+              return;
+            }
+            groundingRetried = true;
+            _appendSyntheticUser(
+              session,
+              'Use the available native read tool now: read README.md relative to the project root. '
+              'If it is missing, read the root directory and inspect an existing source file. '
+              'Answer the original question in the user’s language using only successful tool results.',
+            );
+            await store.persist(session);
+            continue;
+          }
+          if ((textPart?.text.trim().isEmpty ?? true) && finish != 'length') {
+            _appendError(
+              session,
+              'The model returned an empty response. Try another model or start a new session.',
+            );
+            await store.persist(session);
+            return;
+          }
           if (finish == 'length') {
             lengthStreak++;
             if (lengthStreak >= 3) {
@@ -392,14 +475,44 @@ class SessionRunner {
             return;
           }
           try {
-            final tool = tools.firstWhere((tool) => tool.name == call.name);
+            if (maxStepsEntered) {
+              throw const ToolFailure('Action budget reached.');
+            }
+            final tool = activeTools.firstWhere(
+              (tool) => tool.name == call.name,
+            );
+            if (++actions > _maxSteps) {
+              throw const ToolFailure('Action budget reached.');
+            }
+            if (call.name == 'read') {
+              final path = ToolContext(
+                root: root,
+                sessionId: session.id,
+                callId: call.id,
+              ).resolve('${call.arguments['path'] ?? ''}').absolute;
+              final file = File(path);
+              final stat = await file.stat();
+              final version =
+                  '${stat.modified.microsecondsSinceEpoch}:${stat.changed.microsecondsSinceEpoch}:${stat.size}';
+              final key =
+                  '$path|${call.arguments['offset'] ?? 1}|${call.arguments['limit'] ?? 2000}|$version';
+              final count = reads.update(key, (n) => n + 1, ifAbsent: () => 1);
+              if (count > 2) {
+                throw const ToolFailure(
+                  'This unchanged range was already read twice. Use existing results, change the file, or finish.',
+                );
+              }
+            }
             final result = await tool.execute(
               call.arguments,
               ToolContext(root: root, sessionId: session.id, callId: call.id),
             );
+            toolErrors = 0;
             part.state
               ..status = 'completed'
-              ..output = result.content;
+              ..output = result.content.length > 24000
+                  ? '${result.content.substring(0, 24000)}\n[Truncated: request a smaller range]'
+                  : result.content;
           } on StateError {
             part.state
               ..status = 'error'
@@ -415,9 +528,26 @@ class SessionRunner {
               ..status = 'error'
               ..error = 'Tool failed: $e';
           }
+          if (part.state.status == 'error') toolErrors++;
           await store.persist(session);
+          if (toolErrors >= 3) {
+            _appendError(
+              session,
+              'Stopped after three consecutive tool errors; inspect the tool results before retrying.',
+            );
+            await store.persist(session);
+            return;
+          }
+        }
+        if (maxStepsEntered) {
+          _appendError(session, 'Action budget reached; execution stopped.');
+          await store.persist(session);
+          return;
         }
       }
+    } catch (error) {
+      _appendError(session, briefError(error));
+      await store.persist(session);
     } finally {
       _busy.remove(session.id);
       _aborts.remove(session.id);
@@ -427,9 +557,9 @@ class SessionRunner {
   /// Conversation → provider messages, ported from to-llm-message.ts
   /// (attachments and provider metadata are out of scope for this port;
   /// reasoning history is not sent back to the provider).
-  List<LlmMessage> _transcript(AgentSession session) {
+  List<LlmMessage> _transcript(AgentSession session, List<Tool> activeTools) {
     final messages = <LlmMessage>[
-      LlmMessage(role: 'system', text: _systemPrompt(tools, root)),
+      LlmMessage(role: 'system', text: _systemPrompt(activeTools, root)),
     ];
     for (final message in session.messages) {
       // Diagnostics never re-enter the prompt; neither do legacy error

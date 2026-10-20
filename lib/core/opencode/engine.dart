@@ -2,6 +2,8 @@ import 'config.dart';
 import 'runner.dart';
 import 'session.dart';
 
+export 'runner.dart' show AgentMode;
+
 /// In-process port of the opencode agent engine (model routing, session
 /// loop, tools). Exposes the same surface the Tamtoot UI consumed from the
 /// `opencode serve` HTTP API, so panels work unchanged against a local
@@ -67,7 +69,10 @@ class OpencodeEngine {
   Future<String> createSession({String? title}) async =>
       (await _store.create(title: title ?? 'Tamtoot session')).id;
 
-  Future<void> deleteSession(String id) => _store.delete(id);
+  Future<void> deleteSession(String id) async {
+    await _runner?.stop(id);
+    await _store.delete(id);
+  }
 
   Future<List<Map<String, dynamic>>> messages(String sessionId) async {
     final session = await _store.get(sessionId);
@@ -83,6 +88,7 @@ class OpencodeEngine {
     String? providerId,
     String? modelId,
     String? agent,
+    AgentMode mode = AgentMode.agent,
   }) async {
     final session = await _store.get(sessionId);
     if (session == null) {
@@ -90,7 +96,7 @@ class OpencodeEngine {
     }
     final runner = await _resolveRunner();
     try {
-      await runner.prompt(session, text);
+      await runner.prompt(session, text, mode: mode);
     } on Exception catch (e) {
       throw OpencodeException('$e');
     }
@@ -136,9 +142,7 @@ class OpencodeEngine {
     final resolved = await config.resolveModel();
     return {
       'providers': providers,
-      'default': {
-        if (resolved != null) resolved.provider.id: resolved.model,
-      },
+      'default': {if (resolved != null) resolved.provider.id: resolved.model},
     };
   }
 

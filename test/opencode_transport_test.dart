@@ -130,11 +130,51 @@ void main() {
 
       final sent = mock.capturedBodies.single['tools'] as List;
       expect(sent, hasLength(6));
-      expect(
-        sent.map((t) => t['function']['name']),
-        ['read', 'write', 'edit', 'shell', 'glob', 'grep'],
-      );
+      expect(sent.map((t) => t['function']['name']), [
+        'read',
+        'write',
+        'edit',
+        'shell',
+        'glob',
+        'grep',
+      ]);
       expect(sent.first['function']['parameters']['type'], 'object');
+    });
+
+    test('returns named tool results using the Ollama wire format', () async {
+      final mock = _MockOllama(responder: (_) => _textReply('готово'));
+      final port = await mock.start();
+      addTearDown(mock.stop);
+      await for (final _ in LlmClient().stream(
+        LlmRequest(
+          provider: _provider(port),
+          model: 'qwen3:14b',
+          messages: [
+            LlmMessage(
+              role: 'assistant',
+              toolCalls: [
+                LlmToolCall(
+                  id: 'r1',
+                  name: 'read',
+                  arguments: {'path': 'README.md'},
+                ),
+              ],
+            ),
+            LlmMessage(
+              role: 'tool',
+              toolCallId: 'r1',
+              toolName: 'read',
+              text: 'Read file README.md: real content',
+            ),
+          ],
+        ),
+      )) {}
+      final result =
+          (mock.capturedBodies.single['messages'] as List).last as Map;
+      expect(result['role'], 'tool');
+      expect(result['tool_name'], 'read');
+      expect(result.containsKey('name'), isFalse);
+      expect(result['content'], contains('real content'));
     });
 
     test('parses native tool_calls from the stream', () async {
@@ -184,7 +224,11 @@ void main() {
   group('error containment', () {
     test('ArgumentError brief text is bounded and value-free', () {
       final huge = jsonEncode({'messages': List.filled(50, 'x' * 100)});
-      final error = ArgumentError.value(huge, 'string', 'Contains invalid characters.');
+      final error = ArgumentError.value(
+        huge,
+        'string',
+        'Contains invalid characters.',
+      );
       final brief = briefError(error);
       expect(brief.length, lessThanOrEqualTo(501));
       expect(brief, isNot(contains('xxx')));

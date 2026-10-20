@@ -76,7 +76,11 @@ class LlmToolDef {
 
   Map<String, dynamic> toJson() => {
     'type': 'function',
-    'function': {'name': name, 'description': description, 'parameters': parameters},
+    'function': {
+      'name': name,
+      'description': description,
+      'parameters': parameters,
+    },
   };
 }
 
@@ -194,7 +198,9 @@ String briefError(Object error) {
 /// Streaming LLM client over `dart:io` HTTP.
 class LlmClient {
   LlmClient({HttpClient? httpClient})
-    : _http = httpClient ?? (HttpClient()..connectionTimeout = const Duration(seconds: 30));
+    : _http =
+          httpClient ??
+          (HttpClient()..connectionTimeout = const Duration(seconds: 30));
 
   final HttpClient _http;
 
@@ -238,7 +244,11 @@ class LlmClient {
     return LlmException(briefError(error));
   }
 
-  Future<HttpClientResponse> _post(Uri url, Map<String, dynamic> body, {String? apiKey}) async {
+  Future<HttpClientResponse> _post(
+    Uri url,
+    Map<String, dynamic> body, {
+    String? apiKey,
+  }) async {
     final request = await _http.postUrl(url);
     request.headers.contentType = ContentType.json;
     if (apiKey != null && apiKey.isNotEmpty) {
@@ -289,7 +299,10 @@ class LlmClient {
       );
     }
     if (status >= 500) {
-      return LlmException('Provider error (HTTP $status): $short', retryable: true);
+      return LlmException(
+        'Provider error (HTTP $status): $short',
+        retryable: true,
+      );
     }
     return LlmException('Provider rejected the request (HTTP $status): $short');
   }
@@ -301,7 +314,7 @@ class LlmClient {
       if (message.role == 'tool')
         {
           'role': 'tool',
-          if (message.toolName != null) 'name': message.toolName,
+          if (message.toolName != null) 'tool_name': message.toolName,
           'content': message.text,
         }
       else if (message.role == 'assistant' && message.toolCalls.isNotEmpty)
@@ -330,6 +343,7 @@ class LlmClient {
       if (request.tools.isNotEmpty && request.toolChoice != 'none')
         'tools': [for (final tool in request.tools) tool.toJson()],
       'stream': true,
+      'options': {'num_ctx': 16384, 'num_predict': 4096},
       if (request.provider.think != null) 'think': request.provider.think,
     });
 
@@ -369,9 +383,7 @@ class LlmClient {
                 LlmToolCall(
                   id: 'call_${DateTime.now().microsecondsSinceEpoch}_${callCounter++}',
                   name: '${function['name'] ?? ''}',
-                  arguments: function['arguments'] is Map
-                      ? Map<String, dynamic>.from(function['arguments'] as Map)
-                      : const {},
+                  arguments: _toolArguments(function['arguments']),
                 ),
               ),
             );
@@ -392,7 +404,11 @@ class LlmClient {
       LlmFinish(
         sawToolCall
             ? 'tool-calls'
-            : (finishReason == 'length' ? 'length' : 'stop'),
+            : (finishReason == 'length'
+                  ? 'length'
+                  : finishReason == null
+                  ? 'unknown'
+                  : 'stop'),
         inputTokens: inputTokens,
         outputTokens: outputTokens,
       ),
@@ -548,6 +564,20 @@ class LlmClient {
         outputTokens: outputTokens,
       ),
     );
+  }
+
+  Map<String, dynamic> _toolArguments(dynamic value) {
+    if (value is String) {
+      try {
+        value = jsonDecode(value);
+      } catch (_) {
+        throw const LlmException('Invalid JSON in tool arguments.');
+      }
+    }
+    if (value is! Map) {
+      throw const LlmException('Tool arguments must be an object.');
+    }
+    return Map<String, dynamic>.from(value);
   }
 
   Stream<String> _lines(HttpClientResponse response) =>
