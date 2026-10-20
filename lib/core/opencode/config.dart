@@ -42,38 +42,71 @@ class OpencodeConfig {
   static File _file(String root) =>
       File('$root${Platform.pathSeparator}.tamtoot${Platform.pathSeparator}opencode.json');
 
-  static Future<OpencodeConfig> load(String root) async {
-    final file = _file(root);
-    if (!file.existsSync()) return OpencodeConfig();
-    try {
-      final data = jsonDecode(await file.readAsString());
-      if (data is! Map) return OpencodeConfig();
-      final providers = <String, ProviderConfig>{};
-      final rawProviders = data['providers'];
-      if (rawProviders is Map) {
-        for (final entry in rawProviders.entries) {
-          if (entry.value is Map) {
-            providers['${entry.key}'] = ProviderConfig.fromJson(
-              '${entry.key}',
-              Map<String, dynamic>.from(entry.value as Map),
-            );
-          }
+  /// User-global config, the port of opencode's global
+  /// `~/.config/opencode/opencode.json`. The project file overrides it.
+  static File _globalFile() {
+    final home = Platform.environment['HOME'] ??
+        Platform.environment['USERPROFILE'] ??
+        '.';
+    return File(
+      '$home${Platform.pathSeparator}.tamtoot${Platform.pathSeparator}opencode.json',
+    );
+  }
+
+  static OpencodeConfig? _parse(Map<dynamic, dynamic> data) {
+    final providers = <String, ProviderConfig>{};
+    final rawProviders = data['providers'];
+    if (rawProviders is Map) {
+      for (final entry in rawProviders.entries) {
+        if (entry.value is Map) {
+          providers['${entry.key}'] = ProviderConfig.fromJson(
+            '${entry.key}',
+            Map<String, dynamic>.from(entry.value as Map),
+          );
         }
       }
-      // The local Ollama provider always exists, mirroring opencode's
-      // "Ollama works out of the box" behaviour.
-      providers.putIfAbsent('ollama', () => _defaultProviders()['ollama']!);
-      return OpencodeConfig(
-        selectedModel: data['model'] as String?,
-        providers: providers,
-      );
+    }
+    return OpencodeConfig(
+      selectedModel: data['model'] as String?,
+      providers: providers,
+    );
+  }
+
+  static Future<OpencodeConfig?> _loadFile(File file) async {
+    if (!file.existsSync()) return null;
+    try {
+      final data = jsonDecode(await file.readAsString());
+      if (data is! Map) return null;
+      return _parse(data);
     } catch (_) {
-      return OpencodeConfig();
+      return null;
     }
   }
 
-  Future<void> save(String root) async {
-    final file = _file(root);
+  /// Load the global config, then overlay the project config on top:
+  /// project providers replace global ones per key, a project `model` wins.
+  /// Ported from opencode's global + project config layering.
+  static Future<OpencodeConfig> load(String root) async {
+    final global = await _loadFile(_globalFile());
+    final project = await _loadFile(_file(root));
+    final providers = <String, ProviderConfig>{
+      ...?global?.providers,
+      ...?project?.providers,
+    };
+    // The local Ollama provider always exists, mirroring opencode's
+    // "Ollama works out of the box" behaviour.
+    providers.putIfAbsent('ollama', () => _defaultProviders()['ollama']!);
+    return OpencodeConfig(
+      selectedModel: project?.selectedModel ?? global?.selectedModel,
+      providers: providers,
+    );
+  }
+
+  Future<void> save(String root) => _write(_file(root));
+
+  Future<void> saveGlobal() => _write(_globalFile());
+
+  Future<void> _write(File file) async {
     await file.parent.create(recursive: true);
     await file.writeAsString(
       const JsonEncoder.withIndent('  ').convert({

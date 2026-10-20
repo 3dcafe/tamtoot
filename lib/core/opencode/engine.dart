@@ -36,10 +36,15 @@ class OpencodeEngine {
       _config ??= await OpencodeConfig.load(projectRoot);
 
   /// Persist a new configuration and drop the runner so the next prompt
-  /// picks it up (the settings editor saves through here).
-  Future<void> saveConfig(OpencodeConfig config) async {
-    await config.save(projectRoot);
-    _config = config;
+  /// picks it up (the settings editor saves through here). Global saves
+  /// apply to every project; a project file overrides the global one.
+  Future<void> saveConfig(OpencodeConfig config, {bool global = false}) async {
+    if (global) {
+      await config.saveGlobal();
+    } else {
+      await config.save(projectRoot);
+    }
+    _config = null; // reload so the global/project overlay is re-merged
     _runner = null;
   }
 

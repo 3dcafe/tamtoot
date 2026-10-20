@@ -51,6 +51,7 @@ class _AgentPanelState extends State<AgentPanel> {
 
   var _starting = false;
   String? _error;
+  String? _modelLabel;
   List<Map<String, dynamic>> _sessions = const [];
   String? _sessionId;
   List<_ChatEntry> _entries = const [];
@@ -106,6 +107,14 @@ class _AgentPanelState extends State<AgentPanel> {
       await _loadSessions();
       _sessionId ??= await _api!.createSession(title: 'Tamtoot session');
       await _refresh();
+      // Resolved once per engine start; discovery hits the provider's HTTP
+      // API, so it is not part of the 1.5 s poll.
+      final providers = await _api!.providers();
+      final defaults = providers['default'];
+      if (mounted && defaults is Map && defaults.isNotEmpty) {
+        final provider = '${defaults.keys.first}';
+        setState(() => _modelLabel = '$provider/${defaults.values.first}');
+      }
       _poller?.cancel();
       _poller = Timer.periodic(
         const Duration(milliseconds: 1500),
@@ -253,8 +262,9 @@ class _AgentPanelState extends State<AgentPanel> {
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
-                  'Agent (opencode)',
+                  _modelLabel == null ? 'Agent' : 'Agent — $_modelLabel',
                   style: theme.textTheme.titleSmall,
+                  overflow: TextOverflow.ellipsis,
                 ),
               ),
               if (_sessions.length > 1)
@@ -284,7 +294,10 @@ class _AgentPanelState extends State<AgentPanel> {
               IconButton(
                 tooltip: 'Restart engine',
                 onPressed: () {
-                  setState(() => _sessionId = null);
+                  setState(() {
+                    _sessionId = null;
+                    _modelLabel = null;
+                  });
                   final path = _projectPath;
                   if (path != null) OpencodeEngine.restart(path);
                   _start();

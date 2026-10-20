@@ -113,12 +113,12 @@ class _ModelProfilesSettingsState extends State<ModelProfilesSettings> {
     );
     final model = _selectedModel;
     config.selectedModel = model == null ? null : 'ollama/$model';
-    await engine.saveConfig(config);
+    await engine.saveConfig(config, global: true);
     if (!mounted) return;
     setState(
       () => _notice = model == null
-          ? 'Saved. No model selected — the agent will ask you to pick one.'
-          : 'Saved. The agent now uses ollama/$model.',
+          ? 'Saved globally. No model selected — pick one above.'
+          : 'Saved globally. The agent now uses ollama/$model in every project.',
     );
   }
 
@@ -209,8 +209,10 @@ class _ModelProfilesSettingsState extends State<ModelProfilesSettings> {
         ),
         const Divider(height: 32),
         Text(
-          'Additional providers (OpenAI-compatible endpoints with API keys) '
-          'are edited in .tamtoot/opencode.json in the project.',
+          'Saved to your global settings (~/.tamtoot/opencode.json) and '
+          'applies to every project. A .tamtoot/opencode.json inside a '
+          'project overrides it; OpenAI-compatible providers with API keys '
+          'are edited there too.',
           style: Theme.of(context).textTheme.bodySmall,
         ),
       ],
