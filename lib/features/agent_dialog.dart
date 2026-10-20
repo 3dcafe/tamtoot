@@ -7,6 +7,8 @@ import 'package:flutter/services.dart';
 
 import '../app/ide_session.dart';
 import '../core/agents/agent_engine.dart';
+import '../core/agents/command_runner.dart';
+import '../core/flutter/flutter_runner.dart';
 import '../core/agents/agent_history.dart';
 import '../core/agents/model_attachment.dart';
 import '../core/agents/model_profile.dart';
@@ -54,7 +56,7 @@ class _AgentPanelState extends State<AgentPanel> {
   final events = <AgentEvent>[];
   final profiles = <String, ModelProfile>{};
   final _rawProfiles = <String, ModelProfile>{};
-  bool enhancedPrivacy = false;
+  bool enhancedPrivacy = false, writeAndRunTests = false;
   final attachments = <ModelAttachment>[];
   String? selected, error;
   bool loading = true, running = false, yolo = true, yoloConfirmed = false;
@@ -83,6 +85,8 @@ class _AgentPanelState extends State<AgentPanel> {
   void initState() {
     super.initState();
     enhancedPrivacy = widget.session.settings.get('agentPrivacy') as bool;
+    writeAndRunTests =
+        widget.session.settings.get('agentWriteAndRunTests') as bool;
     _catalogRevision = widget.session.agentCatalogRevision;
     _sessionSub = widget.session.changes.listen((_) {
       if (!mounted || running) return;
@@ -202,7 +206,7 @@ class _AgentPanelState extends State<AgentPanel> {
   Future<bool> _approve(String action, Map<String, dynamic> arguments) async {
     if (!mounted) return false;
     final path = arguments['path'];
-    final detail = action == 'run_command'
+    final detail = action == 'run_command' || action == 'run_tests'
         ? '${arguments['executable']} ${(arguments['args'] as List?)?.join(' ') ?? ''}\n\nThe command runs directly in the project folder.'
         : action == 'mcp_call'
         ? '${arguments['server']}/${arguments['tool']}\n\nArguments: ${jsonEncode(arguments['arguments'])}'
@@ -457,6 +461,11 @@ class _AgentPanelState extends State<AgentPanel> {
       root: root!,
       workspaceRoots: List.unmodifiable(widget.session.workspaceRoots),
       apiKey: apiKey.text.trim(),
+      commands: AgentCommandRunner(
+        root!,
+        flutterSdkPath: widget.session.settings.get('flutterSdkPath') as String,
+        dotnetPath: widget.session.settings.get('dotnetPath') as String,
+      ),
       attachments: runAttachments,
       onEvent: (event) {
         final path = event.data['changedPath'];
@@ -498,6 +507,8 @@ class _AgentPanelState extends State<AgentPanel> {
       await runner.run(
         prompt,
         AgentRunOptions(
+          writeAndRunTests:
+              supportsFlutterTools && writeAndRunTests && !enhancedPrivacy,
           yolo: yolo,
           enhancedPrivacy: enhancedPrivacy,
           timeout: Duration(seconds: timeoutSeconds),
@@ -774,6 +785,29 @@ class _AgentPanelState extends State<AgentPanel> {
               ),
               childrenPadding: const EdgeInsets.fromLTRB(10, 0, 10, 8),
               children: [
+                if (supportsFlutterTools)
+                  CheckboxListTile(
+                    key: const ValueKey('agent-write-run-tests'),
+                    dense: true,
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('Write and run tests'),
+                    subtitle: Text(
+                      enhancedPrivacy
+                          ? 'Disabled in enhanced privacy mode.'
+                          : 'Ask the agent to add tests and verify changes with available SDKs. Each command needs approval.',
+                    ),
+                    value: writeAndRunTests && !enhancedPrivacy,
+                    onChanged: running || enhancedPrivacy
+                        ? null
+                        : (value) {
+                            setState(() => writeAndRunTests = value!);
+                            widget.session.settings.set(
+                              'agentWriteAndRunTests',
+                              value!,
+                            );
+                            widget.session.changed();
+                          },
+                  ),
                 Wrap(
                   spacing: 8,
                   runSpacing: 6,
@@ -812,6 +846,7 @@ class _AgentPanelState extends State<AgentPanel> {
                     SizedBox(
                       width: 180,
                       child: DropdownButtonFormField<String>(
+                        isExpanded: true,
                         initialValue: localResponseFormat,
                         decoration: const InputDecoration(
                           labelText: 'Local response format',
@@ -841,6 +876,7 @@ class _AgentPanelState extends State<AgentPanel> {
                     SizedBox(
                       width: 180,
                       child: DropdownButtonFormField<String>(
+                        isExpanded: true,
                         initialValue: localThinking,
                         decoration: const InputDecoration(
                           labelText: 'Local thinking',

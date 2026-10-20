@@ -10,8 +10,31 @@ class AgentGeneration {
     'mcp_call',
     'say',
     'finish',
+    'run_tests',
   ];
   static const _fields = {
+    'executable': {
+      'type': 'string',
+      'enum': [
+        'flutter',
+        'dart',
+        'dotnet',
+        'cargo',
+        'go',
+        'mvn',
+        'npm',
+        'pnpm',
+        'yarn',
+        'python',
+        'python3',
+        'pytest',
+        'ctest',
+      ],
+    },
+    'args': {
+      'type': 'array',
+      'items': {'type': 'string'},
+    },
     'path': {'type': 'string'},
     'paths': {
       'type': 'array',
@@ -31,6 +54,7 @@ class AgentGeneration {
     'lineCount': {'type': 'integer', 'minimum': 1},
   };
   static const _required = {
+    'run_tests': ['executable', 'args'],
     'list_files': <String>[],
     'search_files': ['query'],
     'read_file': ['path'],
@@ -49,16 +73,30 @@ class AgentGeneration {
   };
 
   /// Each alternative requires the fields needed to execute that action.
-  static final Map<String, dynamic> schema = {
+  static final Map<String, dynamic> schema = schemaFor();
+  static Map<String, dynamic> schemaFor({
+    bool allowTests = false,
+    Set<String>? allowedActions,
+    String? newPathPattern,
+  }) => {
     'type': 'object',
     'oneOf': [
-      for (final name in actionNames)
+      for (final name in actionNames.where(
+        (name) =>
+            (allowTests || name != 'run_tests') &&
+            (allowedActions == null || allowedActions.contains(name)),
+      ))
         {
           'type': 'object',
           'properties': {
             'action': {'type': 'string', 'const': name},
             for (final field in [..._required[name]!, ...?_optional[name]])
-              field: _fields[field],
+              field:
+                  name == 'write_file' &&
+                      field == 'path' &&
+                      newPathPattern != null
+                  ? {'type': 'string', 'pattern': newPathPattern}
+                  : _fields[field],
           },
           'required': ['action', ..._required[name]!],
           'additionalProperties': false,
@@ -73,6 +111,7 @@ class AgentGeneration {
       throw const FormatException('Unknown agent action.');
     }
     final fields = switch (name) {
+      'run_tests' => ['executable'],
       'write_file' => ['path', 'content'],
       'replace_in_file' => ['path', 'oldText', 'newText'],
       'read_file' => ['path'],
@@ -86,6 +125,11 @@ class AgentGeneration {
       if (action[field] is! String) {
         throw FormatException('$name requires a string $field.');
       }
+    }
+    if (name == 'run_tests' &&
+        (action['args'] is! List ||
+            (action['args'] as List).any((v) => v is! String))) {
+      throw const FormatException('run_tests requires a string args list.');
     }
     if (name == 'read_files' &&
         (action['paths'] is! List ||

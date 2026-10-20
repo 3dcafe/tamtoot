@@ -7,6 +7,29 @@ import 'git_objects.dart';
 import 'git_pack.dart';
 import 'git_service.dart';
 
+/// Destructive directory operations must never target roots or IDE metadata.
+String directoryDeletionPath(String path) {
+  final normalized = path.replaceFirst(RegExp(r'/+$'), '');
+  if (normalized.isEmpty ||
+      normalized.contains('\\') ||
+      normalized.contains(':') ||
+      normalized
+          .split('/')
+          .any(
+            (p) =>
+                p.isEmpty ||
+                p == '.' ||
+                p == '..' ||
+                p.toLowerCase() == '.git' ||
+                p.toLowerCase() == '.tamtoot',
+          )) {
+    throw const FormatException(
+      'Choose a project subfolder outside .git and .tamtoot.',
+    );
+  }
+  return normalized;
+}
+
 /// Byte-oriented repository filesystem (relative paths use `/`).
 abstract class GitRepositoryStore {
   Future<bool> exists(String path);
@@ -23,6 +46,13 @@ abstract class GitRepositoryStore {
   Future<void> writeText(String path, String text) =>
       writeBytes(path, utf8.encode(text));
   Future<void> delete(String path);
+  Future<void> deleteDirectory(String path) async {
+    directoryDeletionPath(path);
+    throw UnsupportedError(
+      'Directory deletion is unavailable for this storage.',
+    );
+  }
+
   Future<void> createDirectory(String path);
 
   /// Stores with symlinks must reject paths that would escape through a link.

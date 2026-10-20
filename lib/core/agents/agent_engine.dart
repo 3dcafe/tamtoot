@@ -8,6 +8,7 @@ import 'agent_context_compactor.dart';
 import 'model_attachment.dart';
 import 'model_client.dart';
 import 'agent_generation.dart';
+import 'test_command.dart';
 import 'model_profile.dart';
 import 'hook_runner.dart';
 import 'command_runner.dart';
@@ -17,6 +18,7 @@ import 'agent_privacy.dart';
 
 class AgentRunOptions {
   const AgentRunOptions({
+    this.writeAndRunTests = false,
     this.localMaxTokens = 4096,
     this.localTemperature = 0.15,
     this.localResponseFormat = 'auto',
@@ -34,7 +36,7 @@ class AgentRunOptions {
   final int localMaxTokens;
   final double localTemperature;
   final String localResponseFormat, localThinking;
-  final bool yolo, enhancedPrivacy;
+  final bool yolo, enhancedPrivacy, writeAndRunTests;
   final Duration timeout;
   final int maxConsecutiveMistakes, maxIterations;
   final int maxSearchesBeforeFirstEdit;
@@ -106,6 +108,16 @@ class AgentTaskEngine {
   bool _stopped = false;
   AgentRunOptions _generation = const AgentRunOptions();
   String _responseMode = 'json_object';
+  Set<String>? _schemaActions;
+  String? _newPathPattern;
+  Map<String, dynamic> get _actionSchema => AgentGeneration.schemaFor(
+    allowTests: _testingEnabled,
+    allowedActions: _schemaActions,
+    newPathPattern: _newPathPattern,
+  );
+
+  bool get _testingEnabled =>
+      _generation.writeAndRunTests && commands.available && _privacy == null;
   AgentPrivacy? _privacy;
   int get _excerptLimit => _privacy == null ? maxExcerptCharacters : 2000;
   ModelClient? _active;
@@ -181,6 +193,15 @@ Actions:
 - finish: {"action":"finish","summary":"..."}
 Relative paths only. Never touch .git or .tamtoot.
 Reuse retained excerpts — do not re-read unchanged files.
+''';
+
+  static const testingPrompt = r'''
+The user enabled Write and run tests on desktop. Add meaningful tests for the changed behavior and relevant edge cases; do not just mirror implementation.
+Available action: {"action":"run_tests","executable":"flutter","args":["test"]}.
+Other supported commands: dart test/analyze, flutter analyze, dotnet test/build, python3 -m pytest/unittest, pytest, npm/pnpm/yarn test, cargo test, go test, mvn test, ctest.
+Choose the existing project test framework. Every command requires explicit approval, even in YOLO mode. No shell, pipes, redirects, installers or arbitrary scripts are available.
+Use the project root as working directory. Run focused tests first; fix failures and run again after edits. A missing SDK is reported by the host; do not retry an unavailable runner forever.
+Do not claim tests passed without an actual zero-exit command result. If denied or unavailable, report that limitation and finish honestly. Failed tests must be reported as failed, not successful verification.
 ''';
 
   static const localProtocol = r'''
@@ -435,6 +456,9 @@ Never claim compilation/tests ran; file reads only check contents.
     var filesReadBeforeEdit = 0;
     var hasEdited = false;
     var finalReadUsed = false;
+    var testsAttempted = false;
+    var testVerification = '';
+    int? testExitCode;
     if (_privacy == null) {
       await _seedBuildErrorContext(
         task: task,
@@ -447,7 +471,30 @@ Never claim compilation/tests ran; file reads only check contents.
     }
     final systemPrompt = [
       _privacy == null ? profile.systemPrompt : defaultSystemPrompt,
-      profile.isLocal ? localProtocol : protocol,
+      _testingEnabled
+          ? (profile.isLocal ? localProtocol : protocol)
+                .replaceAll(
+                  'No shell/build/test tool is available.',
+                  'Only approved run_tests is available.',
+                )
+                .replaceAll(
+                  'No shell/build/test tool is available',
+                  'Only approved run_tests is available',
+                )
+                .replaceAll(
+                  'mobile IDE: no terminal, builds, tests, or shell',
+                  'desktop IDE with approved test execution',
+                )
+                .replaceAll(
+                  'Never run or ask for runtime checks; verify by reading files and say so in the finish summary.',
+                  'Run checks only through the approved run_tests action; report its actual result.',
+                )
+                .replaceAll(
+                  'Never claim compilation/tests ran; file reads only check contents.',
+                  'Only actual run_tests results can prove compilation or test outcomes.',
+                )
+          : (profile.isLocal ? localProtocol : protocol),
+      if (_testingEnabled) testingPrompt,
       if (_privacy != null)
         'Enhanced privacy overrides context defaults: no project index, instructions or retained memory was supplied. Discover only the files needed for this task. Read one file at a time, at most 40 lines. Hosts are represented by private-*.invalid aliases; preserve aliases exactly in edits. Their real values are restored locally. Do not guess real hosts. MCP and hooks are disabled.',
       if (_privacy == null && mcp != null && mcp!.tools.isNotEmpty)
@@ -458,13 +505,34 @@ Never claim compilation/tests ran; file reads only check contents.
         throw const ModelApiException('Agent stopped.');
       }
       onEvent(AgentEvent('iteration', 'Iteration $iteration'));
-      if (csharpScaffold) {
+      _schemaActions = null;
+      _newPathPattern = null;
+      if (emptyProject && profile.isLocal) {
+        _schemaActions = AgentGeneration.actionNames
+            .where((a) => a != 'list_files' && a != 'search_files')
+            .toSet();
+      }
+      if (csharpScaffold && profile.isLocal) {
         final hasProject = indexedPaths.any((p) => p.endsWith('.csproj'));
         final hasProgram = indexedPaths.any((p) => p.endsWith('.cs'));
+        if (!hasProject || !hasProgram) {
+          _schemaActions = {'write_file'};
+          _newPathPattern = !hasProject && !hasProgram
+              ? r'^.+\.(csproj|cs)$'
+              : !hasProject
+              ? r'^.+\.csproj$'
+              : r'^.+\.cs$';
+        } else if (runEditedPaths.any((path) => !runReadPaths.contains(path))) {
+          _schemaActions = {'read_files', 'read_file'};
+        } else if (_testingEnabled && !testsAttempted) {
+          _schemaActions = {'run_tests', 'write_file', 'replace_in_file'};
+        } else {
+          _schemaActions = {'finish', 'replace_in_file'};
+        }
         _replaceNote(
           transcript,
           'Scaffold status:',
-          'Scaffold status: ${hasProject ? 'csproj exists; do not rewrite it.' : 'Create the .csproj.'} ${hasProgram ? 'C# source exists.' : 'Create Program.cs.'} ${hasProject && hasProgram ? 'Read both files and finish. No build tool is available.' : 'Create the missing file next.'}',
+          'Scaffold status: ${hasProject ? 'csproj exists; do not rewrite it.' : 'Create the .csproj.'} ${hasProgram ? 'C# source exists.' : 'Create Program.cs.'} ${hasProject && hasProgram ? 'Read both files, then follow the requested verification workflow.' : 'Create the missing file next.'}',
         );
       }
 
@@ -514,7 +582,7 @@ Never claim compilation/tests ran; file reads only check contents.
           jsonMode: jsonMode,
           systemPrompt: repairHint == null
               ? systemPrompt
-              : 'Return exactly one valid JSON action in message.content. No explanation.\n${profile.isLocal ? localProtocol : protocol}',
+              : 'Return exactly one valid JSON action in message.content. No explanation.\n${profile.isLocal ? localProtocol : protocol}\n${_testingEnabled ? testingPrompt : ''}',
           userPrompt: repairHint == null
               ? _buildPrompt(
                   transcript,
@@ -642,6 +710,22 @@ Never claim compilation/tests ran; file reads only check contents.
           transcript: transcript,
         );
         AgentGeneration.validate(action);
+        if (profile.isLocal &&
+            _schemaActions != null &&
+            !_schemaActions!.contains(action['action'])) {
+          throw ModelApiException(
+            'Model returned an invalid agent action for the current phase. Allowed next actions: ${_schemaActions!.join(', ')}.',
+          );
+        }
+        if (profile.isLocal &&
+            action['action'] == 'write_file' &&
+            _newPathPattern != null &&
+            !RegExp(_newPathPattern!).hasMatch(action['path'] as String)) {
+          throw const ModelApiException(
+            'Model returned an invalid agent action: create the missing project file instead of overwriting an existing one.',
+          );
+        }
+
         if (emptyProject &&
             !hasEdited &&
             {'list_files', 'search_files'}.contains(action['action'])) {
@@ -1064,6 +1148,7 @@ Never claim compilation/tests ran; file reads only check contents.
               'Tool replace_in_file result: edited $path successfully. Read the changed area before finishing.',
             );
             hasEdited = true;
+            testsAttempted = false;
             listedDirectories.clear();
           case 'write_file':
             consecutiveSays = 0;
@@ -1096,15 +1181,60 @@ Never claim compilation/tests ran; file reads only check contents.
               indexedPaths.add(path);
               indexedPaths.sort();
             }
-            if (_privacy == null)
+            if (_privacy == null) {
               observations['Project index'] =
                   'Known project files after edits: ${indexedPaths.take(80).join(', ')}';
+            }
             runFingerprints[path] = ProjectMemory.fingerprintText(content);
             transcript.add(
               'Tool write_file result: wrote $path successfully. Inspect it before finishing.',
             );
             hasEdited = true;
+            testsAttempted = false;
             listedDirectories.clear();
+          case 'run_tests':
+            if (!_testingEnabled) {
+              throw const ModelApiException(
+                'Test execution is disabled. Enable Write and run tests in a desktop local workspace.',
+              );
+            }
+            final executable = _string(action, 'executable');
+            final arguments = (action['args'] as List).cast<String>();
+            validateAgentTestCommand(executable, arguments);
+            if (!await approve('run_tests', action)) {
+              testsAttempted = true;
+              testExitCode = null;
+              testVerification =
+                  'Tests were not run: the user denied command execution.';
+              transcript.add(testVerification);
+              onEvent(AgentEvent('denied', testVerification));
+              break;
+            }
+            final result = await commands.runTests(executable, arguments);
+            testsAttempted = true;
+            testExitCode = result.exitCode;
+            testVerification = result.exitCode == 127
+                ? 'Tests were not run: $executable is unavailable.'
+                : 'Verification: $executable ${arguments.join(' ')} exited with code ${result.exitCode}.';
+            onEvent(
+              AgentEvent(
+                'tool',
+                testVerification,
+                data: {
+                  'exitCode': result.exitCode,
+                  'output': _bounded(result.output, 12000),
+                },
+              ),
+            );
+            _rememberObservation(
+              observations,
+              'Test result',
+              '$testVerification\n${_bounded(result.output, 12000)}',
+            );
+            transcript.add(
+              '$testVerification Fix failures if possible; otherwise report the limitation honestly.',
+            );
+            break;
           case 'run_command':
             transcript.add(
               'run_command is unavailable: Tamtoot is a mobile IDE without a terminal, interpreter, debugger, build runner, or test runner. Inspect changed files and finish without executing commands.',
@@ -1147,6 +1277,11 @@ Never claim compilation/tests ran; file reads only check contents.
               'MCP $server/$tool result:\n${_bounded(jsonEncode(result), 12000)}',
             );
           case 'finish':
+            if (_testingEnabled && hasEdited && !testsAttempted) {
+              throw const ModelApiException(
+                'Testing was requested: write meaningful tests and request run_tests before finish. If its SDK is missing, report the actual unavailable-runner result.',
+              );
+            }
             if (csharpScaffold && profile.isLocal) {
               final files = await store.listFiles('');
               if (!files.any((p) => p.endsWith('.csproj')) ||
@@ -1161,7 +1296,8 @@ Never claim compilation/tests ran; file reads only check contents.
                 );
               }
             }
-            final summary = _string(action, 'summary');
+            final summary =
+                '${_string(action, 'summary')}${testVerification.isEmpty ? '' : '\n\n$testVerification'}';
             _flushMemoryOnFailure = null;
             await _persistProjectMemory(
               memoryStore: memoryStore,
@@ -1175,7 +1311,10 @@ Never claim compilation/tests ran; file reads only check contents.
             );
             onEvent(AgentEvent('done', summary));
             return AgentRunResult(
-              success: true,
+              success:
+                  testExitCode == null ||
+                  testExitCode == 0 ||
+                  testExitCode == 127,
               message: summary,
               iterations: iteration,
             );
@@ -1332,6 +1471,7 @@ Never claim compilation/tests ran; file reads only check contents.
         : const ['search_files', 'read_file', 'finish'];
     final user = StringBuffer()
       ..writeln('Previous response failed because content was empty.')
+      ..writeln(_testingEnabled ? testingPrompt : '')
       ..writeln()
       ..writeln('Task: ${_bounded(task.trim(), 200)}')
       ..writeln(
@@ -1782,7 +1922,7 @@ Never claim compilation/tests ran; file reads only check contents.
       params.remove('format');
       if (jsonMode && format == 'ollama') {
         params['format'] = _responseMode == 'json_schema'
-            ? AgentGeneration.schema
+            ? _actionSchema
             : 'json';
       }
       if (jsonMode && format == 'chat-completions') {
@@ -1791,7 +1931,7 @@ Never claim compilation/tests ran; file reads only check contents.
                 'type': 'json_schema',
                 'json_schema': {
                   'name': 'agent_action',
-                  'schema': AgentGeneration.schema,
+                  'schema': _actionSchema,
                 },
               }
             : {'type': 'json_object'};

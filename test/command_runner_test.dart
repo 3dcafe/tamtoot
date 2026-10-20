@@ -5,6 +5,26 @@ import 'package:tamtoot/core/agents/command_runner_io.dart';
 
 void main() {
   test(
+    'test workflow reports a missing configured SDK without claiming success',
+    () async {
+      final root = await Directory.systemTemp.createTemp(
+        'tamtoot-test-runner-',
+      );
+      addTearDown(() => root.delete(recursive: true));
+      final runner = AgentCommandRunner(
+        root.uri,
+        dotnetPath: '${root.path}/missing-sdk',
+      );
+      final result = await runner.runTests('dotnet', ['test']);
+      expect(result.exitCode, 127);
+      expect(result.output, contains('No tests ran'));
+      await expectLater(
+        runner.runTests('sh', ['-c', 'echo forbidden']),
+        throwsFormatException,
+      );
+    },
+  );
+  test(
     'command runner avoids shell interpolation and blocks destructive tools',
     () async {
       if (Platform.isWindows) return;

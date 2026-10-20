@@ -70,6 +70,12 @@ final class MultiRootGitRepositoryStore extends GitRepositoryStore {
   }
 
   @override
+  Future<void> deleteDirectory(String path) {
+    final target = _resolve(path);
+    return target.store.deleteDirectory(target.path);
+  }
+
+  @override
   Future<void> createDirectory(String path) {
     final target = _resolve(path);
     return target.store.createDirectory(target.path);

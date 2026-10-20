@@ -147,6 +147,19 @@ final class WebDirectoryStore extends GitRepositoryStore {
   }
 
   @override
+  Future<void> deleteDirectory(String path) async {
+    path = directoryDeletionPath(path);
+    await _dir(path);
+    final (dir, name) = _split(path);
+    final parent = await _dir(dir);
+    final remove = parent.getProperty('removeEntry'.toJS)! as JSFunction;
+    final options = JSObject()..['recursive'] = true.toJS;
+    await _awaitJs<JSAny>(
+      remove.callAsFunction(parent, name.toJS, options) as JSPromise,
+    );
+  }
+
+  @override
   Future<void> createDirectory(String path) async {
     await _dir(path, create: true);
   }

@@ -78,6 +78,19 @@ final class FileGitRepositoryStore extends GitRepositoryStore {
   }
 
   @override
+  Future<void> deleteDirectory(String path) async {
+    path = directoryDeletionPath(path);
+    await validateRegularFilePath(path);
+    final folder = _dir(path);
+    if (await FileSystemEntity.type(folder.path, followLinks: false) !=
+        FileSystemEntityType.directory) {
+      throw const FormatException('Selected path is not a regular directory.');
+    }
+    // Dart's recursive directory deletion removes links, not their targets.
+    await folder.delete(recursive: true);
+  }
+
+  @override
   Future<void> createDirectory(String path) async {
     await _dir(path).create(recursive: true);
   }

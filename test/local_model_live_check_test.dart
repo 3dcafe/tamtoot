@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:tamtoot/core/agents/agent_engine.dart';
 import 'package:tamtoot/core/agents/model_profile.dart';
@@ -14,9 +15,13 @@ void main() {
           id: 'local',
           name: 'Local',
           provider: 'ollama',
-          model: 'hf.co/LiquidAI/LFM2.5-8B-A1B-GGUF:Q4_K_M',
+          model:
+              Platform.environment['TAMTOOT_LIVE_OLLAMA_MODEL'] ??
+              'local-model',
           apiFormat: 'ollama',
-          endpoint: 'http://192.168.0.85:11434/api/chat',
+          endpoint:
+              Platform.environment['TAMTOOT_LIVE_OLLAMA_URL'] ??
+              'http://localhost:11434/api/chat',
         ),
         store: store,
         git: AgentGit(),
@@ -25,6 +30,7 @@ void main() {
         hooks: NoHooks(),
         approve: (_, _) async => true,
         onEvent: (event) {
+          // ignore: avoid_print
           print('${event.type}: ${event.text}');
         },
       );
@@ -44,6 +50,7 @@ void main() {
         true,
       );
     },
+    skip: Platform.environment['TAMTOOT_LIVE_OLLAMA_URL'] == null,
     timeout: const Timeout(Duration(minutes: 6)),
   );
 }

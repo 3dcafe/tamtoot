@@ -59,6 +59,19 @@ AgentTaskEngine engine(
 );
 void main() {
   test(
+    'phase schema requires complete writes and excludes unavailable tools',
+    () {
+      final schema = AgentGeneration.schemaFor(
+        allowedActions: {'write_file'},
+        newPathPattern: r'^.+\.cs$',
+      );
+      final variants = schema['oneOf'] as List;
+      expect(variants.length, 1);
+      expect(variants.single['required'], ['action', 'path', 'content']);
+      expect(variants.single['properties']['path']['pattern'], r'^.+\.cs$');
+    },
+  );
+  test(
     'empty local project creates and verifies both C# 8 project files after malformed JSON',
     () async {
       final store = RepositoryMemory(), bodies = <Map<String, dynamic>>[];
@@ -190,7 +203,14 @@ void main() {
     () async {
       final run = engine(RepositoryMemory(), (request) async {
         final body = jsonDecode(request.body) as Map<String, dynamic>;
-        expect(body['format'], AgentGeneration.schema);
+        expect(
+          body['format'],
+          AgentGeneration.schemaFor(
+            allowedActions: AgentGeneration.actionNames
+                .where((a) => a != 'list_files' && a != 'search_files')
+                .toSet(),
+          ),
+        );
         expect(body['think'], false);
         expect(body['stream'], false);
         expect(body['options']['num_predict'], 6144);

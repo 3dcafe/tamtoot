@@ -27,7 +27,26 @@ Future<void> showExplorerContextMenu(
   final relative = Uri.decodeComponent(uri.path.substring(root.path.length));
   final git = session.git;
   final editable =
-      git is HttpGitService && !session.gitBusy && relative.isNotEmpty;
+      git is HttpGitService &&
+      !session.gitBusy &&
+      relative.isNotEmpty &&
+      !relative
+          .split('/')
+          .any(
+            (part) =>
+                part.toLowerCase() == '.git' ||
+                part.toLowerCase() == '.tamtoot',
+          ) &&
+      !(directory &&
+          session.workspaceRoots.any(
+            (mounted) =>
+                mounted.scheme == uri.scheme &&
+                mounted.authority == uri.authority &&
+                (mounted.path == uri.path ||
+                    mounted.path.startsWith(
+                      '${uri.path.replaceFirst(RegExp(r'/+$'), '')}/',
+                    )),
+          ));
   PopupMenuItem<String> item(
     String value,
     String label, {
@@ -62,10 +81,15 @@ Future<void> showExplorerContextMenu(
       if (!directory) ...[
         const PopupMenuDivider(height: 8),
         item('rename', 'Rename…', enabled: editable),
-        item('delete', 'Delete…', enabled: editable),
         if (session.gitPath(uri) != null && session.workspaceHasGit)
           item('git', 'Git…'),
       ],
+      const PopupMenuDivider(height: 8),
+      item(
+        'delete',
+        directory ? 'Delete folder…' : 'Delete…',
+        enabled: editable,
+      ),
     ],
   );
   if (!context.mounted || action == null) return;
@@ -108,16 +132,24 @@ Future<void> showExplorerContextMenu(
       final store = git.openStore(root);
       await store.validateRegularFilePath(relative);
       if (!context.mounted) return;
-      final doc = session.documents.documents
-          .where((doc) => doc.uri == uri)
-          .firstOrNull;
+      final prefix = '${uri.path.replaceFirst(RegExp(r'/+$'), '')}/';
+      final affected = session.documents.documents.where((doc) {
+        final target = doc.uri;
+        return target != null &&
+            target.scheme == uri.scheme &&
+            target.authority == uri.authority &&
+            (target == uri || directory && target.path.startsWith(prefix));
+      }).toList();
+      final doc = affected.where((doc) => doc.uri == uri).firstOrNull;
       if (action == 'delete') {
         final confirmed = await showDialog<bool>(
           context: context,
           builder: (context) => AlertDialog(
-            title: const Text('Delete file?'),
+            title: Text(
+              directory ? 'Delete folder and its contents?' : 'Delete file?',
+            ),
             content: Text(
-              'Delete $filename?${doc?.dirty == true ? '\nUnsaved changes will also be lost.' : ''}',
+              'Delete $filename${directory ? ' and all files and subfolders inside it' : ''}? This cannot be undone.${affected.any((doc) => doc.dirty) ? '\nUnsaved changes in open files will also be lost.' : ''}',
             ),
             actions: [
               TextButton(
@@ -132,8 +164,14 @@ Future<void> showExplorerContextMenu(
           ),
         );
         if (confirmed != true) return;
-        await store.delete(relative);
-        if (doc != null) await session.documents.close(doc);
+        if (directory) {
+          await store.deleteDirectory(relative);
+        } else {
+          await store.delete(relative);
+        }
+        for (final doc in affected) {
+          await session.documents.close(doc);
+        }
       } else {
         final controller = TextEditingController(text: filename);
         String? validation;

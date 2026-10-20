@@ -11,6 +11,7 @@ class SettingsService {
     'insertSpaces': true,
     'readOnly': false,
     'agentPrivacy': false,
+    'agentWriteAndRunTests': false,
     'flutterSdkPath': '',
     'dotnetPath': '',
     'flutterDeviceId': '',
@@ -21,6 +22,7 @@ class SettingsService {
   Object get(String key) =>
       key == 'theme' ||
           key == 'agentPrivacy' ||
+          key == 'agentWriteAndRunTests' ||
           key.startsWith('flutter') ||
           key.startsWith('dotnet')
       ? user[key] ?? defaults[key]!
@@ -42,7 +44,10 @@ class SettingsService {
       'flutterDeviceName' => value is String,
       'fontSize' => value is num && value >= 8 && value <= 40,
       'tabSize' => value is int && value >= 1 && value <= 8,
-      'insertSpaces' || 'readOnly' || 'agentPrivacy' => value is bool,
+      'insertSpaces' ||
+      'readOnly' ||
+      'agentPrivacy' ||
+      'agentWriteAndRunTests' => value is bool,
       _ => value is String && value.isNotEmpty,
     };
     if (!valid) throw SchemaException('Invalid setting $key: $value');
